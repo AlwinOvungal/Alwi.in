@@ -1,36 +1,80 @@
 document.addEventListener('DOMContentLoaded', () => {
-    // Dynamic Navbar Styling on Scroll
-    const navbar = document.getElementById('navbar');
+    // Custom Cursor Logic
+    const cursorDot = document.getElementById('cursor-dot');
+    const cursorOutline = document.getElementById('cursor-outline');
     
-    window.addEventListener('scroll', () => {
-        if (window.scrollY > 50) {
-            navbar.classList.add('scrolled');
-        } else {
-            navbar.classList.remove('scrolled');
-        }
+    // Check if device supports hover (not a touch device)
+    const isTouchDevice = (('ontouchstart' in window) || (navigator.maxTouchPoints > 0));
+    
+    if (!isTouchDevice) {
+        window.addEventListener('mousemove', (e) => {
+            const posX = e.clientX;
+            const posY = e.clientY;
+            
+            // Move dot instantly
+            cursorDot.style.left = `${posX}px`;
+            cursorDot.style.top = `${posY}px`;
+            
+            // Move outline with slight delay for smooth effect
+            cursorOutline.animate({
+                left: `${posX}px`,
+                top: `${posY}px`
+            }, { duration: 150, fill: "forwards" });
+        });
+
+        // Add hover effects based on data attributes
+        const interactables = document.querySelectorAll('[data-cursor]');
+        
+        interactables.forEach(el => {
+            el.addEventListener('mouseenter', () => {
+                const type = el.getAttribute('data-cursor');
+                document.body.classList.add(`cursor-${type}`);
+            });
+            
+            el.addEventListener('mouseleave', () => {
+                const type = el.getAttribute('data-cursor');
+                document.body.classList.remove(`cursor-${type}`);
+            });
+        });
+    } else {
+        // Hide cursors on touch devices
+        cursorDot.style.display = 'none';
+        cursorOutline.style.display = 'none';
+    }
+
+    // Horizontal Scroll Drag Logic
+    const scrollWrapper = document.getElementById('scroll-wrapper');
+    let isDown = false;
+    let startX;
+    let scrollLeft;
+
+    scrollWrapper.addEventListener('mousedown', (e) => {
+        isDown = true;
+        startX = e.pageX - scrollWrapper.offsetLeft;
+        scrollLeft = scrollWrapper.scrollLeft;
     });
 
-    // Scroll Reveal Animation with Intersection Observer
-    const revealElements = document.querySelectorAll('.reveal');
-    
-    const revealCallback = (entries, observer) => {
-        entries.forEach(entry => {
-            if (entry.isIntersecting) {
-                entry.target.classList.add('active');
-                // Optional: Stop observing once revealed
-                // observer.unobserve(entry.target);
-            }
-        });
-    };
+    scrollWrapper.addEventListener('mouseleave', () => {
+        isDown = false;
+    });
 
-    const revealOptions = {
-        threshold: 0.15, // Trigger when 15% of element is visible
-        rootMargin: "0px 0px -50px 0px"
-    };
+    scrollWrapper.addEventListener('mouseup', () => {
+        isDown = false;
+    });
 
-    const revealObserver = new IntersectionObserver(revealCallback, revealOptions);
-    
-    revealElements.forEach(element => {
-        revealObserver.observe(element);
+    scrollWrapper.addEventListener('mousemove', (e) => {
+        if (!isDown) return;
+        e.preventDefault();
+        const x = e.pageX - scrollWrapper.offsetLeft;
+        const walk = (x - startX) * 2; // Scroll-fast multiplier
+        scrollWrapper.scrollLeft = scrollLeft - walk;
+    });
+
+    // Optional: map vertical mouse wheel to horizontal scroll inside the wrapper
+    scrollWrapper.addEventListener('wheel', (e) => {
+        if (e.deltaY !== 0) {
+            e.preventDefault();
+            scrollWrapper.scrollLeft += e.deltaY;
+        }
     });
 });
