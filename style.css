@@ -178,50 +178,73 @@ a {
     position: fixed;
     top: 0;
     width: 100%;
-    padding: 2rem;
+    padding: 1rem 2rem;
     z-index: 100;
-    background-color: rgba(235, 231, 224, 0.85);
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
+    background-color: rgba(235, 231, 224, 0.7);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border-bottom: 1px solid var(--border-color);
 }
 
 .nav-container {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    border-bottom: 1px solid var(--border-color);
-    padding-bottom: 1.5rem;
+    max-width: 100%;
+}
+
+.nav-left, .nav-right {
+    display: flex;
+    align-items: center;
+}
+
+.nav-left {
+    gap: 3rem;
+}
+
+.nav-right {
+    gap: 2rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    letter-spacing: 0.05em;
 }
 
 .logo {
-    font-weight: 800;
-    font-size: 1.5rem;
+    font-weight: 900;
+    font-size: 1.8rem;
     letter-spacing: -0.05em;
+    line-height: 1;
+}
+
+.lang-switch {
+    font-weight: 600;
+}
+
+.lang-switch .separator {
+    opacity: 0.3;
+    margin: 0 0.2rem;
 }
 
 .status-indicator {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-size: 0.85rem;
-    font-weight: 500;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    text-transform: none;
 }
 
 .pulse {
-    width: 8px;
-    height: 8px;
-    background-color: var(--accent-color);
+    width: 6px;
+    height: 6px;
+    background-color: #00FF00;
     border-radius: 50%;
-    box-shadow: 0 0 0 0 rgba(212, 255, 45, 0.7);
+    box-shadow: 0 0 0 0 rgba(0, 255, 0, 0.7);
     animation: pulse 2s infinite;
 }
 
 @keyframes pulse {
-    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(212, 255, 45, 0.7); }
-    70% { transform: scale(1); box-shadow: 0 0 0 10px rgba(212, 255, 45, 0); }
-    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(212, 255, 45, 0); }
+    0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 255, 0, 0.7); }
+    70% { transform: scale(1); box-shadow: 0 0 0 8px rgba(0, 255, 0, 0); }
+    100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(0, 255, 0, 0); }
 }
 
 .nav-links {
@@ -231,9 +254,10 @@ a {
 }
 
 .nav-links a {
-    font-weight: 500;
+    font-weight: 600;
     text-transform: uppercase;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
+    letter-spacing: 0.05em;
 }
 
 /* Hero */
