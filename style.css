@@ -180,6 +180,9 @@ a {
     width: 100%;
     padding: 2rem;
     z-index: 100;
+    background-color: rgba(235, 231, 224, 0.85);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
 }
 
 .nav-container {

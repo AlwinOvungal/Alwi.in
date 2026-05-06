@@ -70,11 +70,4 @@ document.addEventListener('DOMContentLoaded', () => {
         scrollWrapper.scrollLeft = scrollLeft - walk;
     });
 
-    // Optional: map vertical mouse wheel to horizontal scroll inside the wrapper
-    scrollWrapper.addEventListener('wheel', (e) => {
-        if (e.deltaY !== 0) {
-            e.preventDefault();
-            scrollWrapper.scrollLeft += e.deltaY;
-        }
-    });
 });
