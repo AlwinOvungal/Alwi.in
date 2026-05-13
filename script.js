@@ -1,4 +1,47 @@
 document.addEventListener('DOMContentLoaded', () => {
+    // Dynamic Project Loading (Pseudo-CMS)
+    const projectsContainer = document.getElementById('projects-container');
+    const projectCountElement = document.querySelector('.section-header .count');
+
+    function renderProjects() {
+        if (!projectsContainer || !projectsData) return;
+        
+        // Update project count
+        if (projectCountElement) {
+            projectCountElement.textContent = projectsData.length.toString().padStart(2, '0');
+        }
+
+        projectsContainer.innerHTML = projectsData.map(project => `
+            <div class="project-card" data-cursor="view">
+                <div class="project-image">
+                    <img src="${project.image}" alt="${project.alt}" loading="lazy" width="1024" height="1024">
+                </div>
+                <div class="project-meta">
+                    <h3>${project.title}</h3>
+                    <div class="tags">
+                        ${project.tags.map(tag => `<span>${tag}</span>`).join('')}
+                    </div>
+                </div>
+            </div>
+        `).join('');
+
+        // Re-attach cursor hover events to new elements
+        const newInteractables = projectsContainer.querySelectorAll('[data-cursor]');
+        newInteractables.forEach(el => {
+            el.addEventListener('mouseenter', () => {
+                const type = el.getAttribute('data-cursor');
+                document.body.classList.add(`cursor-${type}`);
+            });
+            
+            el.addEventListener('mouseleave', () => {
+                const type = el.getAttribute('data-cursor');
+                document.body.classList.remove(`cursor-${type}`);
+            });
+        });
+    }
+
+    renderProjects();
+
     // Custom Cursor Logic
     const cursorDot = document.getElementById('cursor-dot');
     const cursorOutline = document.getElementById('cursor-outline');
