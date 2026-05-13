@@ -266,23 +266,51 @@ a {
 
 /* Hero */
 .hero {
-    height: 100vh;
+    min-height: 100vh;
     display: flex;
     align-items: center;
-    padding: 0 4rem;
+    padding: 8rem 4rem 4rem;
+}
+
+.hero-container {
+    display: grid;
+    grid-template-columns: 1.2fr 0.8fr;
+    align-items: center;
+    gap: 4rem;
+    width: 100%;
+    max-width: 1400px;
+    margin: 0 auto;
 }
 
 .hero-content {
-    max-width: 1200px;
-    margin-top: 5rem;
+    /* Removed max-width here as container handles it */
 }
 
 .hero-subtitle {
     font-size: clamp(1.2rem, 2vw, 1.8rem);
-    max-width: 800px;
+    max-width: 600px;
     margin: 2rem 0 3rem;
     font-weight: 400;
     color: rgba(26, 26, 26, 0.8);
+}
+
+.hero-image {
+    display: flex;
+    justify-content: flex-end;
+}
+
+.hero-image img {
+    width: 100%;
+    max-width: 500px;
+    height: auto;
+    border-radius: 2px; /* Brutalist aesthetic often uses sharp or very subtle corners */
+    box-shadow: 20px 20px 0px var(--text-color); /* Brutalist shadow */
+    transition: transform 0.5s ease;
+}
+
+.hero-image img:hover {
+    transform: translate(-5px, -5px);
+    box-shadow: 25px 25px 0px var(--text-color);
 }
 
 /* Work Section (Horizontal Scroll) */
@@ -515,8 +543,15 @@ a {
         min-width: 500px;
         width: 70vw;
     }
-    .about-grid {
+    .about-grid, .hero-container {
         grid-template-columns: 1fr;
+    }
+    .hero-container {
+        gap: 3rem;
+    }
+    .hero-image {
+        justify-content: center;
+        order: -1; /* Put image on top on mobile */
     }
 }
 
@@ -530,6 +565,7 @@ a {
     .hero, .work, .about, .footer {
         padding-left: 2rem;
         padding-right: 2rem;
+        padding-top: 6rem;
     }
     .projects-container {
         padding: 0 2rem;
