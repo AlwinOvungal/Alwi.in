@@ -1,0 +1,59 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Project Details | Alwi Portfolio</title>
+    <link rel="stylesheet" href="styles/style.css">
+</head>
+<body>
+
+    <header class="border-b">
+        <a href="index.html" class="logo">← BACK</a>
+        <button id="theme-toggle" class="theme-toggle">Stealth</button>
+    </header>
+
+    <main class="container">
+        <section class="detail-hero">
+            <div class="detail-header">
+                <span id="project-category" class="tag" style="margin-bottom: 1rem; display: inline-block;">Category</span>
+                <h1 id="project-title" class="fade-in">Project Title</h1>
+                <p id="project-year" style="font-family: var(--font-heading); font-weight: 700;">2024</p>
+            </div>
+
+            <div class="detail-content">
+                <div class="detail-main">
+                    <p id="project-full-desc" class="fade-in" style="font-size: 1.5rem; margin-bottom: 4rem;">Detailed description goes here...</p>
+                    <div id="project-images">
+                        <!-- Images rendered by script.js -->
+                    </div>
+                </div>
+
+                <aside class="detail-sidebar fade-in">
+                    <div class="sticky-sidebar" style="position: sticky; top: 120px;">
+                        <img src="assets/me.png" alt="Alwi" class="user-photo">
+                        <h4 style="margin-bottom: 1rem;">About the Creator</h4>
+                        <p style="font-size: 0.9rem; margin-bottom: 2rem;">Alwi is a designer-developer who believes in the power of raw, unpolished aesthetics combined with pixel-perfect execution.</p>
+                        
+                        <div class="border-t" style="padding-top: 2rem;">
+                            <h4 style="margin-bottom: 0.5rem;">Services</h4>
+                            <ul style="list-style: none; font-size: 0.8rem; text-transform: uppercase;">
+                                <li>UI/UX Design</li>
+                                <li>Frontend Development</li>
+                                <li>Brand Identity</li>
+                            </ul>
+                        </div>
+                    </div>
+                </aside>
+            </div>
+        </section>
+    </main>
+
+    <footer class="container" style="padding: 4rem 0; text-align: center;">
+        <a href="index.html" style="font-size: 3rem; font-family: var(--font-heading); font-weight: 700; text-transform: uppercase; border-bottom: 4px solid var(--fg);">NEXT PROJECT →</a>
+    </footer>
+
+    <script src="scripts/projects.js"></script>
+    <script src="scripts/script.js"></script>
+</body>
+</html>
