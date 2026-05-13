@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://www.alwi.in/sitemap.xml
+Sitemap: https://alwi.in/sitemap.xml
