@@ -210,10 +210,14 @@ a {
 }
 
 .logo {
-    font-weight: 900;
-    font-size: 1.8rem;
-    letter-spacing: -0.05em;
-    line-height: 1;
+    display: flex;
+    align-items: center;
+}
+
+.logo img {
+    height: 40px;
+    width: auto;
+    display: block;
 }
 
 .lang-switch {
