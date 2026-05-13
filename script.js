@@ -71,47 +71,54 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     // --- Animation Logic (Motion Library) ---
-    const { animate, stagger, inView } = motion;
+    try {
+        const { animate, stagger, inView } = motion;
 
-    // 1. Hero Entrance Animation
-    animate(".huge-title", 
-        { opacity: [0, 1], y: [100, 0] }, 
-        { duration: 1.2, easing: [0.22, 1, 0.36, 1] }
-    );
-
-    animate(".hero-subtitle", 
-        { opacity: [0, 1], y: [30, 0] }, 
-        { delay: 0.4, duration: 0.8 }
-    );
-
-    animate(".hero .btn", 
-        { opacity: [0, 1], scale: [0.9, 1] }, 
-        { delay: 0.6, duration: 0.5 }
-    );
-
-    animate(".hero-image img", 
-        { opacity: [0, 1], scale: [1.1, 1], x: [50, 0] }, 
-        { delay: 0.2, duration: 1.5, easing: [0.22, 1, 0.36, 1] }
-    );
-
-    // 2. Scroll Reveal Animations
-    // Reveal section headers
-    inView(".section-header", ({ target }) => {
-        animate(target, { opacity: [0, 1], y: [50, 0] }, { duration: 0.8 });
-    });
-
-    // Staggered reveal for project cards
-    inView(".projects-container", ({ target }) => {
-        animate(".project-card", 
+        // 1. Hero Entrance Animation
+        animate(".huge-title", 
             { opacity: [0, 1], y: [100, 0] }, 
-            { delay: stagger(0.1), duration: 0.8, easing: [0.22, 1, 0.36, 1] }
+            { duration: 1.2, easing: [0.22, 1, 0.36, 1] }
         );
-    });
 
-    // About section reveal
-    inView(".about-grid", ({ target }) => {
-        animate(".about-image-container", { opacity: [0, 1], x: [-50, 0] }, { duration: 1 });
-        animate(".about-content", { opacity: [0, 1], x: [50, 0] }, { duration: 1, delay: 0.2 });
-    });
+        animate(".hero-subtitle", 
+            { opacity: [0, 1], y: [30, 0] }, 
+            { delay: 0.4, duration: 0.8 }
+        );
+
+        animate(".hero .btn", 
+            { opacity: [0, 1], scale: [0.9, 1] }, 
+            { delay: 0.6, duration: 0.5 }
+        );
+
+        animate(".hero-image img", 
+            { opacity: [0, 1], scale: [1.1, 1], x: [50, 0] }, 
+            { delay: 0.2, duration: 1.5, easing: [0.22, 1, 0.36, 1] }
+        );
+
+        // 2. Scroll Reveal Animations
+        // Reveal section headers
+        inView(".section-header", ({ target }) => {
+            animate(target, { opacity: [0, 1], y: [50, 0] }, { duration: 0.8 });
+        });
+
+        // Staggered reveal for project cards
+        inView(".projects-container", ({ target }) => {
+            animate(".project-card", 
+                { opacity: [0, 1], y: [100, 0] }, 
+                { delay: stagger(0.1), duration: 0.8, easing: [0.22, 1, 0.36, 1] }
+            );
+        });
+
+        // About section reveal
+        inView(".about-grid", ({ target }) => {
+            animate(".about-image-container", { opacity: [0, 1], x: [-50, 0] }, { duration: 1 });
+            animate(".about-content", { opacity: [0, 1], x: [50, 0] }, { duration: 1, delay: 0.2 });
+        });
+    } catch (error) {
+        console.error("Motion animations failed to load:", error);
+        // Fallback: Make everything visible if animations fail
+        const hiddenElements = document.querySelectorAll('.huge-title, .hero-subtitle, .hero-image img, .project-card, .section-header');
+        hiddenElements.forEach(el => el.style.opacity = "1");
+    }
 
 });
