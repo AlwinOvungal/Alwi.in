@@ -180,6 +180,7 @@ a {
     width: 100%;
     padding: 1rem 2rem;
     z-index: 100;
+    background-color: var(--bg-color); /* Fallback for browsers that don't support backdrop-filter */
     background-color: rgba(235, 231, 224, 0.7);
     backdrop-filter: blur(20px);
     -webkit-backdrop-filter: blur(20px);
