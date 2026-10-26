@@ -1,0 +1,322 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Style Guide — Alwi.in</title>
+    <meta name="robots" content="noindex">
+    <meta name="color-scheme" content="light">
+    <link rel="icon" type="image/png" href="assets/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="style.css">
+    <style>
+        .guide { max-width: 1080px; margin: 0 auto; padding: clamp(40px, 7vw, 88px) var(--gutter) 120px; }
+        .guide > header h1 { font-size: clamp(48px, 8vw, 104px); margin: 16px 0 20px; }
+        .guide > header p { color: var(--ink-2); max-width: 60ch; font-size: 18px; }
+        .guide section { padding-top: clamp(48px, 7vw, 88px); }
+        .guide section > h2 { font-size: clamp(32px, 4.4vw, 52px); margin: 10px 0 20px; }
+        .guide section > p, .guide li { color: var(--ink-2); max-width: 68ch; }
+        .guide strong { color: var(--ink); font-weight: 600; }
+        .guide code { font: 400 13px var(--mono); background: var(--paper-2); padding: 2px 6px; border-radius: 4px; color: var(--ink); }
+        .guide pre { font: 400 13px/1.6 var(--mono); background: var(--paper-2); padding: 18px 20px; border-radius: 10px; overflow-x: auto; }
+
+        .swatches { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; margin-top: 24px; }
+        .swatch { border: 1px solid var(--rule); border-radius: 10px; overflow: hidden; }
+        .swatch i { display: block; height: 84px; }
+        .swatch span { display: block; padding: 10px 12px; font: 400 12px/1.5 var(--mono); color: var(--ink-2); }
+
+        .type-row { display: grid; grid-template-columns: 160px 1fr; gap: 20px; padding: 18px 0; border-bottom: 1px solid var(--rule); align-items: baseline; }
+        .type-row:first-of-type { border-top: 1px solid var(--rule); margin-top: 24px; }
+
+        .rules { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 14px; margin-top: 24px; padding: 0; list-style: none; }
+        .rules li { border: 1px solid var(--rule); border-radius: 12px; padding: 18px; max-width: none; }
+        .rules li b { display: block; color: var(--ink); font-weight: 600; margin-bottom: 6px; }
+
+        .ramp { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; margin-top: 24px; }
+        .ramp .ht { aspect-ratio: 1; border: 1px solid var(--rule); border-radius: 8px; overflow: hidden; }
+        .ramp-labels { display: grid; grid-template-columns: repeat(6, 1fr); gap: 10px; font: 400 11px var(--mono); color: var(--ink-2); margin-top: 8px; }
+
+        .dodont { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-top: 24px; }
+        .dodont div { border: 1px solid var(--rule); border-radius: 12px; padding: 18px 20px; }
+        .dodont h3 { font: 600 13px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; margin-bottom: 8px; }
+        .dodont ul { margin: 0; padding-left: 18px; }
+
+        .lab { display: grid; grid-template-columns: 1fr 300px; gap: 24px; margin-top: 24px; align-items: start; }
+        .lab-stage { border: 1px solid var(--rule); border-radius: 12px; padding: 16px; background: var(--paper); }
+        .lab-stage .ht { aspect-ratio: 4 / 3; width: 100%; }
+        .controls { display: grid; gap: 14px; }
+        .controls label { display: grid; gap: 6px; font: 400 12px var(--mono); color: var(--ink-2); }
+        .controls label span { display: flex; justify-content: space-between; }
+        .controls input[type=range] { width: 100%; accent-color: var(--ink); }
+        .controls select, .controls input[type=file] { font: 400 13px var(--sans); }
+        .controls .btn { justify-content: center; border: 0; cursor: pointer; }
+
+        .phases { counter-reset: phase; display: grid; gap: 14px; margin-top: 24px; padding: 0; list-style: none; }
+        .phases > li { border: 1px solid var(--rule); border-radius: 12px; padding: 20px 22px; max-width: none; }
+        .phases > li h3 { font-size: 28px; margin-bottom: 8px; color: var(--ink); }
+        .phases .state { font: 500 11px var(--mono); letter-spacing: 0.1em; text-transform: uppercase; padding: 4px 8px; border-radius: 999px; border: 1px solid var(--rule); margin-left: 8px; vertical-align: middle; }
+        .phases .done { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+        .phases ul { margin: 8px 0 0; padding-left: 18px; }
+
+        @media (max-width: 760px) {
+            .lab, .dodont { grid-template-columns: 1fr; }
+            .type-row { grid-template-columns: 1fr; gap: 6px; }
+            .ramp, .ramp-labels { grid-template-columns: repeat(3, 1fr); }
+        }
+    </style>
+</head>
+<body>
+    <header class="nav">
+        <a href="./" class="nav-mark"><span class="dot-mark" aria-hidden="true"></span>Alwin Ovungal</a>
+        <nav aria-label="Guide">
+            <a href="#system">System</a>
+            <a href="#images">Images</a>
+            <a href="#lab">Lab</a>
+            <a href="#plan">Plan</a>
+        </nav>
+    </header>
+
+    <main class="guide">
+        <header>
+            <p class="label">Alwi.in — Style guide &amp; plan</p>
+            <h1>Printed<br><em>with dots.</em></h1>
+            <p>Every picture on the site — portraits, project screenshots, illustrations — goes through one halftone filter, so different sources read as one printed set of plates. Paper, one ink and a hex dot grid. Nothing else.</p>
+        </header>
+
+        <section id="system">
+            <p class="label">01 — Palette</p>
+            <h2>Paper and one ink</h2>
+            <p>No accent colour. Contrast comes from dot density, never from hue. Lines and borders use the rule tone; grey text uses ink-2.</p>
+            <div class="swatches">
+                <div class="swatch"><i style="background:#f6f5f1"></i><span>--paper<br>#F6F5F1</span></div>
+                <div class="swatch"><i style="background:#efede7"></i><span>--paper-2<br>#EFEDE7</span></div>
+                <div class="swatch"><i style="background:#d9d6cd"></i><span>--rule<br>#D9D6CD</span></div>
+                <div class="swatch"><i style="background:#6d6c67"></i><span>--ink-2<br>#6D6C67</span></div>
+                <div class="swatch"><i style="background:#2f2f2d"></i><span>--ink<br>#2F2F2D</span></div>
+            </div>
+        </section>
+
+        <section>
+            <p class="label">02 — Type</p>
+            <h2>Engraved headlines, quiet text</h2>
+            <div class="type-row"><span class="label">Display · Instrument Serif</span><span style="font: 400 52px/1 var(--serif)">Designing <em>calm</em> products</span></div>
+            <div class="type-row"><span class="label">Body · Inter 400</span><span>Research-led product design across UX/UI, strategy and design systems.</span></div>
+            <div class="type-row"><span class="label">Label · JetBrains Mono</span><span class="label" style="color:var(--ink)">Pl. 02 — Fintech — 2026</span></div>
+            <p style="margin-top:20px">Use italic serif for one emphasised word per headline. Mono labels caption every image as a numbered plate (<code>Pl. 01</code>), like a printed book.</p>
+        </section>
+
+        <section>
+            <p class="label">03 — The dot</p>
+            <h2>One grid, everywhere</h2>
+            <ul class="rules">
+                <li><b>Hex grid</b>Rows offset by half a dot, the way print screens are laid out. Never a square grid.</li>
+                <li><b>Pitch 7px · 5px</b>7px between dots on desktop, 5px on phones. Use 5px for faces and fine detail.</li>
+                <li><b>Size = darkness</b>Dark areas get big dots that touch; mid tones shrink.</li>
+                <li><b>Light tones scatter</b>The lightest tones become sparse dots of one fixed size, never tiny specks. This gives the engraved look.</li>
+                <li><b>Edges dissolve</b>Fade the top or bottom edge into the paper instead of using a hard rectangle.</li>
+                <li><b>Motion is slow</b>Plates fill in from the bottom when scrolled into view. Only the hero reacts to the pointer. Both are off when the visitor has reduced motion turned on.</li>
+            </ul>
+            <div class="ramp">
+                <div class="ht" data-tone="0.92" data-reveal="false" data-alt=""></div>
+                <div class="ht" data-tone="0.8" data-reveal="false" data-alt=""></div>
+                <div class="ht" data-tone="0.65" data-reveal="false" data-alt=""></div>
+                <div class="ht" data-tone="0.5" data-reveal="false" data-alt=""></div>
+                <div class="ht" data-tone="0.3" data-reveal="false" data-alt=""></div>
+                <div class="ht" data-tone="0.1" data-reveal="false" data-alt=""></div>
+            </div>
+            <div class="ramp-labels"><span>8% ink</span><span>20%</span><span>35%</span><span>50%</span><span>70%</span><span>90%</span></div>
+        </section>
+
+        <section id="images">
+            <p class="label">04 — Image recipe</p>
+            <h2>What makes a good plate</h2>
+            <p>The filter does the styling, so the source image only needs strong shapes and good light. Upload the plain image; never pre-halftone it.</p>
+            <div class="dodont">
+                <div>
+                    <h3>Do</h3>
+                    <ul>
+                        <li>Plain, light or white backgrounds (they turn into bare paper)</li>
+                        <li>Strong light and shadow, a clear silhouette</li>
+                        <li>Device mockups and UI shown big, with whole screens rather than tiny details</li>
+                        <li>Black-and-white photos, or colour with good contrast</li>
+                        <li>1600px or wider for project images</li>
+                    </ul>
+                </div>
+                <div>
+                    <h3>Don't</h3>
+                    <ul>
+                        <li>Small text inside images (it turns into noise), so put copy in HTML</li>
+                        <li>Busy, cluttered backgrounds</li>
+                        <li>Flat, low-contrast or foggy shots</li>
+                        <li>Colour carrying the meaning, since everything becomes one ink</li>
+                        <li>Images that already have a dot or grain effect</li>
+                    </ul>
+                </div>
+            </div>
+        </section>
+
+        <section id="lab">
+            <p class="label">05 — Lab</p>
+            <h2>Try your own image</h2>
+            <p>Drop in any image to preview it as a plate, tune the settings, then copy the attributes into <code>index.html</code> or <code>data/projects.js</code>. Your image stays in your browser.</p>
+            <div class="lab">
+                <div class="lab-stage" id="lab-stage"></div>
+                <div class="controls">
+                    <label>Image<input type="file" id="lab-file" accept="image/*"></label>
+                    <label>Or a sample
+                        <select id="lab-sample">
+                            <option value="src:assets/portrait.png">Portrait</option>
+                            <option value="src:assets/hero-illustration.jpg">Illustration</option>
+                            <option value="scene:orb">Scene — orb</option>
+                            <option value="scene:bars">Scene — bars</option>
+                            <option value="scene:glow">Scene — glow</option>
+                            <option value="scene:ridges">Scene — ridges</option>
+                        </select>
+                    </label>
+                    <label><span>Dot pitch <output id="o-cell"></output></span><input type="range" data-key="cell" min="3" max="14" step="1" value="6"></label>
+                    <label><span>Contrast <output id="o-contrast"></output></span><input type="range" data-key="contrast" min="0.6" max="2" step="0.05" value="1.15"></label>
+                    <label><span>Brightness <output id="o-bright"></output></span><input type="range" data-key="bright" min="-0.4" max="0.4" step="0.02" value="0"></label>
+                    <label><span>Paper point <output id="o-white"></output></span><input type="range" data-key="white" min="0.6" max="1" step="0.01" value="0.9"></label>
+                    <label><span>Sharpen <output id="o-sharpen"></output></span><input type="range" data-key="sharpen" min="0" max="2" step="0.1" value="0.6"></label>
+                    <label>Fade edge
+                        <select data-key="fade"><option>none</option><option>top</option><option>bottom</option></select>
+                    </label>
+                    <pre id="lab-attrs"></pre>
+                    <button class="btn" id="lab-download" type="button">Download PNG</button>
+                </div>
+            </div>
+        </section>
+
+        <section id="plan">
+            <p class="label">06 — Plan</p>
+            <h2>How we roll it out</h2>
+            <ol class="phases">
+                <li>
+                    <h3>Foundation <span class="state done">Done</span></h3>
+                    <ul>
+                        <li>New one-page layout: hero, selected work, about, contact</li>
+                        <li><code>halftone.js</code>, a renderer that turns any image or drawn scene into the dot style</li>
+                        <li>This style guide and lab</li>
+                    </ul>
+                </li>
+                <li>
+                    <h3>Real work <span class="state">Next</span></h3>
+                    <ul>
+                        <li>Replace the three placeholder projects with real ones: title, summary, tags and one strong image each, following the recipe above</li>
+                        <li>Fill in the real LinkedIn, Dribbble and Twitter links</li>
+                        <li>Choose the hero image: keep the portrait or shoot a high-contrast one</li>
+                    </ul>
+                </li>
+                <li>
+                    <h3>Case studies <span class="state">Later</span></h3>
+                    <ul>
+                        <li>One page per project (<code>/work/finova</code>…): problem, process, outcome, with 4–6 plates each</li>
+                        <li>Pre-render plates to static PNG/WebP for speed and social previews</li>
+                    </ul>
+                </li>
+                <li>
+                    <h3>Go live <span class="state">On approval</span></h3>
+                    <ul>
+                        <li>Merge this branch into <code>main</code>, and Cloudflare publishes it to alwi.in</li>
+                        <li>Check mobile, page speed and social preview cards after launch</li>
+                    </ul>
+                </li>
+            </ol>
+        </section>
+
+        <section>
+            <p class="label">07 — Adding a project</p>
+            <h2>One entry, one image</h2>
+            <p>Put the image in <code>assets/work/</code> and add an entry to <code>data/projects.js</code>. The halftone is applied automatically.</p>
+<pre>{
+    id: "finova-banking",
+    title: "Finova Banking",
+    summary: "A calmer mobile bank — clarity, trust and fewer taps.",
+    tags: ["Fintech", "Mobile", "2026"],
+    image: "assets/work/finova.jpg",
+    alt: "Finova app screens on a phone",
+    link: "#"
+}</pre>
+        </section>
+    </main>
+
+    <script src="halftone.js"></script>
+    <script>
+        // Flat tone swatches for the density ramp, one scene per tone
+        document.querySelectorAll('.ramp .ht').forEach((el) => {
+            const t = Number(el.dataset.tone);
+            const name = 'tone' + el.dataset.tone;
+            Halftone.scenes[name] = (ctx, w, h) => {
+                const v = Math.round(t * 255);
+                ctx.fillStyle = `rgb(${v},${v},${v})`;
+                ctx.fillRect(0, 0, w, h);
+            };
+            el.dataset.scene = name;
+            el.dataset.white = '1';
+            el.dataset.black = '0';
+            el.dataset.contrast = '1';
+            el.dataset.sharpen = '0';
+        });
+
+        const stage = document.getElementById('lab-stage');
+        const attrs = document.getElementById('lab-attrs');
+        const settings = { cell: '6', contrast: '1.15', bright: '0', white: '0.9', sharpen: '0.6', fade: 'none' };
+        let source = 'src:assets/portrait.png';
+        let plate = null;
+
+        function mount() {
+            stage.innerHTML = '';
+            plate = document.createElement('figure');
+            plate.className = 'ht';
+            const [kind, value] = [source.slice(0, source.indexOf(':')), source.slice(source.indexOf(':') + 1)];
+            plate.dataset[kind === 'src' ? 'src' : 'scene'] = value;
+            plate.dataset.alt = 'Halftone preview';
+            plate.dataset.reveal = 'false';
+            apply();
+            stage.appendChild(plate);
+            Halftone.init(stage);
+        }
+
+        function apply() {
+            for (const [k, v] of Object.entries(settings)) {
+                plate.dataset[k] = v;
+                const out = document.getElementById('o-' + k);
+                if (out) out.textContent = v;
+            }
+            const src = source.startsWith('src:') && !source.includes('blob:') ? `data-src="${source.slice(4)}"` : source.startsWith('scene:') ? `data-scene="${source.slice(6)}"` : 'data-src="assets/your-image.jpg"';
+            attrs.textContent = `<figure class="ht" ${src}\n  data-cell="${settings.cell}" data-contrast="${settings.contrast}"\n  data-bright="${settings.bright}" data-white="${settings.white}"\n  data-sharpen="${settings.sharpen}" data-fade="${settings.fade}"\n  data-alt="Describe the image"></figure>`;
+            if (plate._ht) plate._ht.refresh();
+        }
+
+        document.querySelectorAll('.controls [data-key]').forEach((input) => {
+            input.addEventListener('input', () => {
+                settings[input.dataset.key] = input.value;
+                apply();
+            });
+        });
+        document.getElementById('lab-sample').addEventListener('change', (e) => {
+            source = e.target.value;
+            mount();
+        });
+        document.getElementById('lab-file').addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            source = 'src:' + URL.createObjectURL(file);
+            mount();
+        });
+        document.getElementById('lab-download').addEventListener('click', () => {
+            const canvas = stage.querySelector('canvas');
+            if (!canvas) return;
+            const a = document.createElement('a');
+            a.download = 'plate.png';
+            a.href = canvas.toDataURL('image/png');
+            a.click();
+        });
+
+        mount();
+        Halftone.init();
+    </script>
+</body>
+</html>
