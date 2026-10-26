@@ -3,27 +3,18 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Alwin Ovungal | Product Designer</title>
-    <meta name="description" content="Alwin Ovungal is a Product Designer shaping digital experiences through minimalist brutalism and functional aesthetics. Specialized in UX/UI, Product Strategy, and Design Systems.">
-    <meta name="keywords" content="Product Designer, UX Designer, UI Designer, Minimalist Design, Brutalist Design, Alwin Ovungal, Design Systems, Product Strategy">
-    <meta name="theme-color" content="#0a0a0a">
-    
+    <title>Alwin Ovungal — Product Designer</title>
+    <meta name="description" content="Alwin Ovungal is a product designer working across UX/UI, product strategy and design systems — calm, intentional interfaces built on research and rapid prototyping.">
+    <meta name="theme-color" content="#f6f5f1">
+    <meta name="color-scheme" content="light">
 
-    <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
     <meta property="og:url" content="https://alwi.in">
-    <meta property="og:title" content="Alwin Ovungal | Product Designer">
-    <meta property="og:description" content="Product Designer shaping digital experiences through minimalist brutalism and functional aesthetics.">
-    <meta property="og:image" content="assets/hero-illustration.jpg">
+    <meta property="og:title" content="Alwin Ovungal — Product Designer">
+    <meta property="og:description" content="Product designer working across UX/UI, product strategy and design systems.">
+    <meta property="og:image" content="https://alwi.in/assets/portrait.png">
+    <meta name="twitter:card" content="summary_large_image">
 
-    <!-- Twitter -->
-    <meta property="twitter:card" content="summary_large_image">
-    <meta property="twitter:url" content="https://alwi.in">
-    <meta property="twitter:title" content="Alwin Ovungal | Product Designer">
-    <meta property="twitter:description" content="Product Designer shaping digital experiences through minimalist brutalism and functional aesthetics.">
-    <meta property="twitter:image" content="assets/hero-illustration.jpg">
-
-    <!-- JSON-LD Structured Data -->
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
@@ -36,7 +27,6 @@
         "https://linkedin.com/in/alwinovungal",
         "https://dribbble.com/alwinovungal"
       ],
-      "description": "Product Designer shaping digital experiences through minimalist brutalism and functional aesthetics.",
       "knowsAbout": ["UX/UI Design", "Product Strategy", "Design Systems", "Interaction Design", "User Research"]
     }
     </script>
@@ -44,122 +34,82 @@
     <link rel="icon" type="image/png" href="assets/favicon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800;900&display=swap" rel="stylesheet">
-
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
-    <div class="noise-overlay"></div>
-    <div class="vignette-overlay"></div>
-    
-    <div class="cursor-dot" id="cursor-dot"></div>
-    <div class="cursor-outline" id="cursor-outline"></div>
+    <header class="nav">
+        <a href="#top" class="nav-mark" aria-label="Alwin Ovungal — home">
+            <span class="dot-mark" aria-hidden="true"></span>Alwin Ovungal
+        </a>
+        <nav aria-label="Main">
+            <a href="#work">Work</a>
+            <a href="#about">About</a>
+            <a href="#contact">Contact</a>
+        </nav>
+        <span class="status"><span class="pulse" aria-hidden="true"></span>Available for projects</span>
+    </header>
 
-    <nav class="navbar" aria-label="Main Navigation">
-        <div class="nav-container">
-            <div class="nav-left">
-                <div class="logo">
-                    <a href="#home" aria-label="Alwin Ovungal - Home">
-                        <img src="assets/favicon.png" alt="Alwin Ovungal Logo" data-cursor="hover" width="40" height="40">
-                    </a>
-                </div>
-                <ul class="nav-links">
-                    <li><a href="#about" data-cursor="hover" aria-label="Go to About section">About</a></li>
-                    <li><a href="#work" data-cursor="hover" aria-label="View my Selected Work">Work</a></li>
-                    <li><a href="#contact" data-cursor="hover" aria-label="Go to Contact section">Contact</a></li>
-                </ul>
-            </div>
-            <div class="nav-right">
-                <a href="mailto:otalwi2@gmail.com" class="mail-icon" data-cursor="hover" aria-label="Send me an email">
-                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
-                </a>
-                <div class="lang-switch" aria-label="Language Selector">
-                    <span class="active">EN</span> <span class="separator">|</span> <span class="inactive" style="opacity: 0.5;">PT</span>
-                </div>
-                <div class="status-indicator">
-                    <span class="pulse"></span>
-                    Available for projects
+    <main id="top">
+        <section class="hero">
+            <div class="hero-text">
+                <p class="label">Product Designer — Portfolio 2026</p>
+                <h1>Designing calm,<br><em>intentional</em> products.</h1>
+                <p class="lede">I'm Alwin — a product designer bridging physical structure and digital interface. I work across UX/UI, product strategy and design systems, from first research to shipped pixels.</p>
+                <div class="hero-actions">
+                    <a href="#work" class="btn">Selected work <span aria-hidden="true">↓</span></a>
+                    <a href="mailto:otalwi2@gmail.com" class="link">otalwi2@gmail.com</a>
                 </div>
             </div>
-        </div>
-    </nav>
-
-    <main>
-        <section class="hero" id="home">
-            <div class="hero-container">
-                <div class="hero-content">
-                    <h1 class="huge-title">Alwin<br>Ovungal</h1>
-                    <p class="hero-subtitle">Product Designer shaping digital experiences through minimalist brutalism and functional aesthetics.</p>
-                    <a href="#work" class="btn btn-primary" data-cursor="hover">Explore Work <span class="arrow">↓</span></a>
-                </div>
-                <div class="hero-image">
-                    <img src="assets/hero-illustration.jpg" alt="Alwin Ovungal - Hero Illustration" data-cursor="view" width="766" height="1024">
-                </div>
-            </div>
+            <figure class="ht hero-art" data-src="assets/portrait.png" data-alt="Halftone portrait of Alwin Ovungal wearing headphones" data-cell="5" data-focus="0.62 0.3" data-fade="bottom" data-white="1" data-contrast="1" data-bright="-0.3" data-interactive>
+                <figcaption class="plate">Pl. 01 — Self-portrait</figcaption>
+            </figure>
         </section>
 
         <section class="work" id="work">
-            <div class="section-header">
-                <h2>Selected Work</h2>
-                <span class="count">03</span>
-            </div>
-            
-            <div class="horizontal-scroll-wrapper" id="scroll-wrapper">
-                <div class="projects-container" id="projects-container">
-                    
-                    <!-- Projects will be dynamically loaded from projects.js -->
-                    
-                </div>
-            </div>
-            <div class="scroll-instruction">Drag to explore <span class="arrow">→</span></div>
+            <header class="section-head">
+                <h2>Selected work</h2>
+                <span class="label" id="work-count">—</span>
+            </header>
+            <ol class="projects" id="projects"></ol>
         </section>
 
         <section class="about" id="about">
-            <div class="about-grid">
-                <div class="about-image-container">
-                    <img src="assets/portrait.png" alt="Alwin Ovungal Portrait" class="portrait" loading="lazy" width="512" height="512">
-                </div>
-                <div class="about-content">
-                    <h2>About Me</h2>
-                    <p class="large-text">I believe in design that is raw, intentional, and brutally effective.</p>
-                    <p>With a background in architecture and digital product design, I bridge the gap between physical structure and digital interface. My process is rooted in deep research and rapid prototyping, resulting in products that are both beautiful and robust.</p>
-                    
-                    <div class="capabilities">
-                        <h3>Capabilities</h3>
-                        <ul>
-                            <li>Product Strategy</li>
-                            <li>UX/UI Design</li>
-                            <li>Design Systems</li>
-                            <li>Interaction Design</li>
-                            <li>Prototyping</li>
-                            <li>User Research</li>
-                        </ul>
-                    </div>
-                </div>
+            <figure class="ht about-art" data-src="assets/hero-illustration.jpg" data-alt="Halftone illustration of a figure holding a glowing orb" data-cell="5" data-focus="0.5 0.3" data-white="0.86" data-inset="0.02" data-fade="bottom">
+                <figcaption class="plate">Pl. 05 — Making things</figcaption>
+            </figure>
+            <div class="about-text">
+                <p class="label">About</p>
+                <h2>Raw, intentional,<br><em>and effective.</em></h2>
+                <p>With a background in architecture and digital product design, I bridge the gap between physical structure and digital interface. My process is rooted in deep research and rapid prototyping — resulting in products that are both beautiful and robust.</p>
+                <dl class="facts">
+                    <div><dt>Focus</dt><dd>Product strategy, UX/UI, design systems</dd></div>
+                    <div><dt>Craft</dt><dd>Interaction design, prototyping, user research</dd></div>
+                    <div><dt>Roots</dt><dd>Architecture → digital product</dd></div>
+                </dl>
             </div>
         </section>
     </main>
 
-    <footer class="footer" id="contact">
-        <div class="footer-content">
-            <h2 class="huge-title footer-title">Let's talk</h2>
-            <a href="mailto:otalwi2@gmail.com" class="btn btn-primary massive-btn" data-cursor="hover">otalwi2@gmail.com</a>
-        </div>
-        <div class="footer-bottom">
-            <div class="socials">
-                <a href="#" data-cursor="hover" aria-label="Follow me on Twitter">Twitter</a>
-                <a href="#" data-cursor="hover" aria-label="Connect on LinkedIn">LinkedIn</a>
-                <a href="#" data-cursor="hover" aria-label="See my work on Dribbble">Dribbble</a>
-            </div>
-            <div class="copyright">
-                © 2026 Alwin Ovungal
+    <footer class="contact" id="contact">
+        <div class="ht contact-art" data-scene="ridges" data-fade="top" data-alt=""></div>
+        <div class="contact-inner">
+            <p class="label">Contact</p>
+            <h2>Let's make<br><em>something good.</em></h2>
+            <a href="mailto:otalwi2@gmail.com" class="btn btn-lg">otalwi2@gmail.com <span aria-hidden="true">→</span></a>
+            <div class="foot">
+                <nav class="socials" aria-label="Social">
+                    <a href="https://linkedin.com/in/alwinovungal">LinkedIn</a>
+                    <a href="https://dribbble.com/alwinovungal">Dribbble</a>
+                    <a href="https://twitter.com/alwinovungal">Twitter</a>
+                </nav>
+                <span>© 2026 Alwin Ovungal</span>
             </div>
         </div>
     </footer>
 
-    <!-- Motion Library -->
-    <script src="https://cdn.jsdelivr.net/npm/motion@11.11.17/dist/motion.js"></script>
     <script src="data/projects.js"></script>
-    <script src="script.js" defer></script>
+    <script src="halftone.js"></script>
+    <script src="script.js"></script>
 </body>
 </html>
