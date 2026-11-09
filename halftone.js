@@ -49,6 +49,19 @@
 
     // Procedural grayscale scenes, drawn on white. Dark = more ink.
     const scenes = {
+        // A soft pool of ink, darkest toward the lower right — a printed shadow
+        // to sit behind colour screenshots
+        shade(ctx, w, h) {
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, w, h);
+            const g = ctx.createRadialGradient(w * 0.78, h * 0.82, 0, w * 0.78, h * 0.82, Math.max(w, h) * 0.85);
+            g.addColorStop(0, '#6a6a6a');
+            g.addColorStop(0.55, '#c4c4c4');
+            g.addColorStop(1, '#fff');
+            ctx.fillStyle = g;
+            ctx.fillRect(0, 0, w, h);
+        },
+
         // Layered ridgelines, far ones lighter — atmospheric depth
         ridges(ctx, w, h) {
             ctx.fillStyle = '#fff';
@@ -193,8 +206,13 @@
             this.el = el;
             this.opts = this.readOptions();
             this.canvas = document.createElement('canvas');
-            this.canvas.setAttribute('role', 'img');
-            this.canvas.setAttribute('aria-label', el.dataset.alt || '');
+            // Plates without alt text are decoration, hidden from screen readers
+            if (el.dataset.alt) {
+                this.canvas.setAttribute('role', 'img');
+                this.canvas.setAttribute('aria-label', el.dataset.alt);
+            } else {
+                this.canvas.setAttribute('aria-hidden', 'true');
+            }
             this.ctx = this.canvas.getContext('2d');
             el.appendChild(this.canvas);
             this.dots = null;

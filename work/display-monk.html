@@ -50,7 +50,9 @@
             </div>
         </header>
 
-        <figure class="ht case-plate tall" data-src="../assets/work/display-monk/menu.jpg" data-cell="3" data-fit="contain" data-alt="The Display Monk menu, with brightness sliders for a built-in and an external display, the list of displays and their arrangement" data-interactive>
+        <figure class="shot case-shot">
+            <div class="ht" data-scene="shade" data-alt=""></div>
+            <img src="../assets/work/display-monk/desk.webp" width="1024" height="1026" alt="The Display Monk menu open from the menu bar, with brightness sliders for a built-in and an external display, the list of displays and their arrangement">
             <figcaption class="plate">Pl. 01 — The menu</figcaption>
         </figure>
 
@@ -68,34 +70,25 @@
         <section class="case-section">
             <p class="label">02 — Design</p>
             <h2>Everything your displays need, <em>and nothing they don't.</em></h2>
-            <div class="feature-grid">
-                <article class="feature wide">
-                    <figure class="ht" data-src="../assets/work/display-monk/sync.jpg" data-cell="3" data-fit="contain" data-inset="0.03" data-white="0.94" data-alt="Two brightness sliders linked together at the same level"></figure>
-                    <h3>Sync brightness</h3>
-                    <p>Move one slider, or press the brightness keys, and every screen follows. Turning sync on keeps the display under the pointer as it is and matches the others to it. Changes made outside the app are never followed silently: the menu says <em>Not matched</em> and offers a Match button.</p>
-                </article>
-                <article class="feature tall-art">
-                    <figure class="ht" data-src="../assets/work/display-monk/brightness.jpg" data-cell="3" data-white="0.95" data-alt="A brightness bar fading from bright yellow to black, with the backlight minimum marked three quarters of the way down"></figure>
-                    <h3>Brightness down to black</h3>
-                    <p>The top three quarters of the slider drive the real backlight. The last quarter dims the image in software once the backlight is at its minimum, all the way to black.</p>
-                </article>
-                <article class="feature">
-                    <figure class="ht" data-src="../assets/work/display-monk/hidpi.jpg" data-cell="3" data-white="0.94" data-alt="The letters Aa shown blurry at default resolution and sharp in HiDPI"></figure>
-                    <h3>Sharp text on any monitor</h3>
-                    <p>HiDPI turns on by itself for external displays, instantly and with no restart, through a mirrored virtual screen. It can optionally be made permanent in macOS's own display configuration.</p>
-                </article>
-                <article class="feature">
-                    <figure class="ht" data-src="../assets/work/display-monk/arrange.jpg" data-cell="3" data-white="0.94" data-alt="An external display placed above a MacBook in a small arrangement preview"></figure>
-                    <h3>Arrange in a click</h3>
-                    <p>A live, to-scale preview. Select a display, place it left, right, above or below, line it up, and set the main display, without opening System Settings.</p>
-                </article>
-                <article class="feature full">
-                    <figure class="ht" data-src="../assets/work/display-monk/keys.jpg" data-cell="3" data-fit="contain" data-alt="Brightness keys above a terminal running displaymonk commands"></figure>
-                    <div>
-                        <h3>Keys &amp; command line</h3>
-                        <p>Brightness keys control the display under the pointer and volume keys follow the selected sound output, with an on-screen display. Everything else can be scripted with the <code>displaymonk</code> CLI.</p>
-                    </div>
-                </article>
+            <div class="shot bento-shot">
+                <div class="ht" data-scene="shade" data-alt=""></div>
+                <div class="bento">
+                    <img class="wide" src="../assets/work/display-monk/sync.webp" width="1452" height="442" loading="lazy" alt="Sync brightness: two linked brightness sliders, move one slider and every screen follows">
+                    <img class="tall" src="../assets/work/display-monk/brightness.webp" width="710" height="1042" loading="lazy" alt="Brightness for every screen: a bar from backlight down through software dimming to black">
+                    <img src="../assets/work/display-monk/hidpi.webp" width="710" height="570" loading="lazy" alt="Sharp text on any monitor: the letters Aa blurry at default and sharp in HiDPI">
+                    <img src="../assets/work/display-monk/arrange.webp" width="712" height="570" loading="lazy" alt="Arrange in a click: an external display placed above a MacBook">
+                    <img src="../assets/work/display-monk/monitor.webp" width="710" height="570" loading="lazy" alt="Contrast, volume and input sliders for a monitor over DDC">
+                    <img class="wide" src="../assets/work/display-monk/keys.webp" width="1452" height="570" loading="lazy" alt="Keys and command line: brightness keys and a terminal running displaymonk commands">
+                </div>
+            </div>
+            <div class="case-cols">
+                <h3 class="details-head">The details</h3>
+                <ul class="principles">
+                    <li><b>Sync never fights you.</b> Turning sync on keeps the display under the pointer as it is and matches the others to it. Changes made outside the app are never followed silently: the menu says <em>Not matched</em> and offers a Match button.</li>
+                    <li><b>Down to black.</b> The top three quarters of the slider drive the real backlight; the last quarter dims the image in software, all the way to black.</li>
+                    <li><b>HiDPI, two ways.</b> Instantly through a mirrored virtual screen, or made permanent in macOS's own display configuration, with no restart either way.</li>
+                    <li><b>Keys follow you.</b> Brightness keys control the display under the pointer; volume keys follow the selected sound output, with an on-screen display.</li>
+                </ul>
             </div>
         </section>
 
@@ -115,7 +108,10 @@
         <section class="case-section">
             <p class="label">04 — Under the hood</p>
             <div class="case-cols">
-                <figure class="ht mascot-plate" data-src="../assets/work/display-monk/mascot.png" data-fit="contain" data-cell="5" data-alt="The Display Monk mascot, a smiling monitor sitting cross-legged in orange robes"></figure>
+                <figure class="shot mascot-shot">
+                    <div class="ht" data-scene="shade" data-alt=""></div>
+                    <img src="../assets/work/display-monk/mascot.png" width="213" height="290" loading="lazy" alt="The Display Monk mascot, a smiling monitor sitting cross-legged in orange robes">
+                </figure>
                 <dl class="facts">
                     <div><dt>DDC/CI</dt><dd>Hardware brightness, contrast, volume and input over I²C, on Apple silicon and Intel</dd></div>
                     <div><dt>Brightness</dt><dd>Native for Apple displays, DDC for monitors, gamma-table dimming for the rest</dd></div>

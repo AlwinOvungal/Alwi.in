@@ -1,17 +1,15 @@
-// Each project gets one halftone plate. Use `image` for a real screenshot or photo
-// (it is converted to dots automatically), or `scene` for a drawn illustration.
-// Optional: `focus` "x y" crop focus (0..1), `fit` "contain" to show the whole image,
-// `cell` a finer dot pitch for UI screenshots.
+// Use `image` (with its pixel `width` and `height`) for a real screenshot: it is shown
+// in full colour over a halftone dot shadow. Use `scene` for a drawn halftone plate.
 const projectsData = [
     {
         id: "display-monk",
         title: "Display Monk",
         summary: "A free, open-source macOS menu bar app for every display setting macOS hides: synced brightness down to black, sharp HiDPI on any monitor, arrangement and monitor controls, in one quiet menu.",
         tags: ["macOS app", "Open source", "2026"],
-        image: "assets/work/display-monk/menu.jpg",
-        fit: "contain",
-        cell: 3,
-        alt: "The Display Monk menu, with brightness sliders for a built-in and an external display",
+        image: "assets/work/display-monk/desk.webp",
+        width: 1024,
+        height: 1026,
+        alt: "The Display Monk menu open on a Mac desktop, with brightness sliders for a built-in and an external display",
         link: "work/display-monk"
     },
     {
