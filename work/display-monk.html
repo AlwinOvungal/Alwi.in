@@ -1,0 +1,169 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Display Monk — Alwin Ovungal</title>
+    <meta name="description" content="Case study: Display Monk, a free, open-source macOS menu bar app for brightness, HiDPI, arrangement and monitor controls, designed and built by Alwin Ovungal.">
+    <meta name="theme-color" content="#f6f5f1">
+    <meta name="color-scheme" content="light">
+
+    <meta property="og:type" content="article">
+    <meta property="og:url" content="https://alwi.in/work/display-monk">
+    <meta property="og:title" content="Display Monk — calm control for your displays">
+    <meta property="og:description" content="A free, open-source macOS menu bar app for every display setting macOS hides.">
+    <meta property="og:image" content="https://alwi.in/assets/work/display-monk/og.jpg">
+    <meta name="twitter:card" content="summary_large_image">
+
+    <link rel="icon" type="image/png" href="../assets/favicon.png">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Serif:ital@0;1&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../style.css">
+</head>
+<body>
+    <header class="nav">
+        <a href="../" class="nav-mark" aria-label="Alwin Ovungal — home">
+            <span class="dot-mark" aria-hidden="true"></span>Alwin Ovungal
+        </a>
+        <nav aria-label="Main">
+            <a href="../#work">Work</a>
+            <a href="../#about">About</a>
+            <a href="../#contact">Contact</a>
+        </nav>
+    </header>
+
+    <main class="case">
+        <header class="case-head">
+            <p class="label"><a href="../#work">Work</a> / 01 — Case study</p>
+            <h1>Display <em>Monk</em></h1>
+            <p class="lede">Calm control for your displays. A free, open-source macOS menu bar app and command-line tool for every display setting macOS hides or leaves out: brightness and sync across screens, sharp HiDPI on any monitor, arrangement and monitor controls, in one quiet menu.</p>
+            <dl class="case-meta">
+                <div><dt>Role</dt><dd>Product design &amp; development</dd></div>
+                <div><dt>Year</dt><dd>2026</dd></div>
+                <div><dt>Platform</dt><dd>macOS 13+, Apple silicon &amp; Intel</dd></div>
+                <div><dt>Built with</dt><dd>Swift, SwiftUI, IOKit</dd></div>
+            </dl>
+            <div class="hero-actions">
+                <a href="https://alwinovungal.github.io/Display-Monk/" class="btn">Visit the website <span aria-hidden="true">↗</span></a>
+                <a href="https://github.com/AlwinOvungal/Display-Monk" class="link">Source on GitHub</a>
+            </div>
+        </header>
+
+        <figure class="ht case-plate tall" data-src="../assets/work/display-monk/menu.jpg" data-cell="3" data-fit="contain" data-alt="The Display Monk menu, with brightness sliders for a built-in and an external display, the list of displays and their arrangement" data-interactive>
+            <figcaption class="plate">Pl. 01 — The menu</figcaption>
+        </figure>
+
+        <section class="case-section">
+            <p class="label">01 — The problem</p>
+            <div class="case-cols">
+                <h2>macOS hides most display settings, <em>or leaves them out.</em></h2>
+                <div class="case-text">
+                    <p>Plug an external monitor into a Mac and most of its controls disappear. Brightness, contrast, volume and input live behind the monitor's own buttons. Apple silicon Macs don't offer sharp HiDPI (Retina) sizes for most monitors under 4K, so text looks soft. Arranging screens means a trip into System Settings.</p>
+                    <p>The goal was one small, quiet menu that brings all of it back, works on every Mac from macOS 13, and stays out of the way the rest of the time.</p>
+                </div>
+            </div>
+        </section>
+
+        <section class="case-section">
+            <p class="label">02 — Design</p>
+            <h2>Everything your displays need, <em>and nothing they don't.</em></h2>
+            <div class="feature-grid">
+                <article class="feature wide">
+                    <figure class="ht" data-src="../assets/work/display-monk/sync.jpg" data-cell="3" data-fit="contain" data-inset="0.03" data-white="0.94" data-alt="Two brightness sliders linked together at the same level"></figure>
+                    <h3>Sync brightness</h3>
+                    <p>Move one slider, or press the brightness keys, and every screen follows. Turning sync on keeps the display under the pointer as it is and matches the others to it. Changes made outside the app are never followed silently: the menu says <em>Not matched</em> and offers a Match button.</p>
+                </article>
+                <article class="feature tall-art">
+                    <figure class="ht" data-src="../assets/work/display-monk/brightness.jpg" data-cell="3" data-white="0.95" data-alt="A brightness bar fading from bright yellow to black, with the backlight minimum marked three quarters of the way down"></figure>
+                    <h3>Brightness down to black</h3>
+                    <p>The top three quarters of the slider drive the real backlight. The last quarter dims the image in software once the backlight is at its minimum, all the way to black.</p>
+                </article>
+                <article class="feature">
+                    <figure class="ht" data-src="../assets/work/display-monk/hidpi.jpg" data-cell="3" data-white="0.94" data-alt="The letters Aa shown blurry at default resolution and sharp in HiDPI"></figure>
+                    <h3>Sharp text on any monitor</h3>
+                    <p>HiDPI turns on by itself for external displays, instantly and with no restart, through a mirrored virtual screen. It can optionally be made permanent in macOS's own display configuration.</p>
+                </article>
+                <article class="feature">
+                    <figure class="ht" data-src="../assets/work/display-monk/arrange.jpg" data-cell="3" data-white="0.94" data-alt="An external display placed above a MacBook in a small arrangement preview"></figure>
+                    <h3>Arrange in a click</h3>
+                    <p>A live, to-scale preview. Select a display, place it left, right, above or below, line it up, and set the main display, without opening System Settings.</p>
+                </article>
+                <article class="feature full">
+                    <figure class="ht" data-src="../assets/work/display-monk/keys.jpg" data-cell="3" data-fit="contain" data-alt="Brightness keys above a terminal running displaymonk commands"></figure>
+                    <div>
+                        <h3>Keys &amp; command line</h3>
+                        <p>Brightness keys control the display under the pointer and volume keys follow the selected sound output, with an on-screen display. Everything else can be scripted with the <code>displaymonk</code> CLI.</p>
+                    </div>
+                </article>
+            </div>
+        </section>
+
+        <section class="case-section">
+            <p class="label">03 — Principles</p>
+            <div class="case-cols">
+                <h2>Gentle on <em>monitors</em> and battery.</h2>
+                <ul class="principles">
+                    <li><b>No polling.</b> Idle means idle: about 0% CPU with the menu closed. Values are re-read only at launch, when displays change and when the menu opens.</li>
+                    <li><b>Careful DDC.</b> Repeated identical writes are skipped and writes are spaced at least 100 ms apart. Nothing is sent while displays sleep or for two seconds after they wake.</li>
+                    <li><b>Reversible changes.</b> A refresh rate change, a non-native size or a rotation must be confirmed within 15 seconds or it reverts.</li>
+                    <li><b>Quietly honest.</b> No account, no analytics. The update check is one anonymous request a day.</li>
+                </ul>
+            </div>
+        </section>
+
+        <section class="case-section">
+            <p class="label">04 — Under the hood</p>
+            <div class="case-cols">
+                <figure class="ht mascot-plate" data-src="../assets/work/display-monk/mascot.png" data-fit="contain" data-cell="5" data-alt="The Display Monk mascot, a smiling monitor sitting cross-legged in orange robes"></figure>
+                <dl class="facts">
+                    <div><dt>DDC/CI</dt><dd>Hardware brightness, contrast, volume and input over I²C, on Apple silicon and Intel</dd></div>
+                    <div><dt>Brightness</dt><dd>Native for Apple displays, DDC for monitors, gamma-table dimming for the rest</dd></div>
+                    <div><dt>HiDPI</dt><dd>A HiDPI virtual display mirrored to the monitor, or a display override that needs no app</dd></div>
+                    <div><dt>Keys</dt><dd>A system event tap for brightness and volume keys</dd></div>
+                    <div><dt>Structure</dt><dd>A pure-Swift core with unit tests, a macOS display layer, the SwiftUI menu bar app and the CLI</dd></div>
+                </dl>
+            </div>
+        </section>
+
+        <section class="case-section">
+            <p class="label">05 — Shipping</p>
+            <div class="case-cols">
+                <h2>One line to <em>install.</em></h2>
+                <div class="case-text">
+                    <p>Display Monk installs with a single Terminal command, or from a DMG. Releases are built by a GitHub Actions workflow. An in-app updater checks once a day, verifies the download's checksum and signature, replaces itself and relaunches.</p>
+<pre><code>curl -fsSL https://alwinovungal.github.io/Display-Monk/install.sh | bash</code></pre>
+                    <div class="hero-actions">
+                        <a href="https://github.com/AlwinOvungal/Display-Monk/releases/latest" class="btn">Download the latest release <span aria-hidden="true">↓</span></a>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <nav class="case-next" aria-label="Next project">
+            <p class="label">Next project</p>
+            <a href="../styleguide"><span>Printed with Dots</span> <span aria-hidden="true">→</span></a>
+        </nav>
+    </main>
+
+    <footer class="contact" id="contact">
+        <div class="contact-inner">
+            <p class="label">Contact</p>
+            <h2>Let's make<br><em>something good.</em></h2>
+            <a href="mailto:otalwi2@gmail.com" class="btn btn-lg">otalwi2@gmail.com <span aria-hidden="true">→</span></a>
+            <div class="foot">
+                <nav class="socials" aria-label="Social">
+                    <a href="https://github.com/AlwinOvungal">GitHub</a>
+                    <a href="https://linkedin.com/in/alwinovungal">LinkedIn</a>
+                    <a href="https://dribbble.com/alwinovungal">Dribbble</a>
+                    <a href="https://twitter.com/alwinovungal">Twitter</a>
+                </nav>
+                <span>© 2026 Alwin Ovungal</span>
+            </div>
+        </div>
+    </footer>
+
+    <script src="../halftone.js"></script>
+    <script>Halftone.init();</script>
+</body>
+</html>

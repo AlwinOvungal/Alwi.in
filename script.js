@@ -6,11 +6,14 @@ document.addEventListener('DOMContentLoaded', () => {
         count.textContent = `${String(projectsData.length).padStart(2, '0')} projects`;
         list.innerHTML = projectsData.map((p, i) => {
             const source = p.image ? `data-src="${p.image}"` : `data-scene="${p.scene}"`;
+            const focus = (p.focus ? ` data-focus="${p.focus}"` : '')
+                + (p.cell ? ` data-cell="${p.cell}"` : '')
+                + (p.fit ? ` data-fit="${p.fit}"` : '');
             const plate = String(i + 2).padStart(2, '0');
             return `
             <li class="project">
                 <a href="${p.link}" class="project-link">
-                    <figure class="ht project-art" ${source} data-alt="${p.alt}">
+                    <figure class="ht project-art" ${source}${focus} data-alt="${p.alt}">
                         <figcaption class="plate">Pl. ${plate}</figcaption>
                     </figure>
                     <div class="project-meta">
