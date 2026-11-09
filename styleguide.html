@@ -82,7 +82,7 @@
         <header>
             <p class="label">Alwi.in — Style guide &amp; plan</p>
             <h1>Printed<br><em>with dots.</em></h1>
-            <p>Every picture on the site — portraits, project screenshots, illustrations — goes through one halftone filter, so different sources read as one printed set of plates. Paper, one ink and a hex dot grid. Nothing else.</p>
+            <p>Portraits, illustrations and decorative art go through one halftone filter, so different sources read as one printed set of plates. Project screenshots stay in full colour so the work is readable, sitting on a halftone dot shadow that ties them to the same print. Paper, one ink and a hex dot grid.</p>
         </header>
 
         <section id="system">
@@ -116,6 +116,7 @@
                 <li><b>Size = darkness</b>Dark areas get big dots that touch; mid tones shrink.</li>
                 <li><b>Light tones scatter</b>The lightest tones become sparse dots of one fixed size, never tiny specks. This gives the engraved look.</li>
                 <li><b>Edges dissolve</b>Fade the top or bottom edge into the paper instead of using a hard rectangle.</li>
+                <li><b>Work stays in colour</b>Project screenshots are shown as they are, in colour, with a soft pool of dots behind them, offset down and right like a printed shadow.</li>
                 <li><b>Motion is slow</b>Plates fill in from the bottom when scrolled into view. Only the hero reacts to the pointer. Both are off when the visitor has reduced motion turned on.</li>
             </ul>
             <div class="ramp">
@@ -132,7 +133,7 @@
         <section id="images">
             <p class="label">04 — Image recipe</p>
             <h2>What makes a good plate</h2>
-            <p>The filter does the styling, so the source image only needs strong shapes and good light. Upload the plain image; never pre-halftone it.</p>
+            <p>For dotted plates (portraits, illustrations), the filter does the styling, so the source image only needs strong shapes and good light. Upload the plain image; never pre-halftone it. Project screenshots skip the filter and are shown in colour.</p>
             <div class="dodont">
                 <div>
                     <h3>Do</h3>
@@ -229,13 +230,15 @@
         <section>
             <p class="label">07 — Adding a project</p>
             <h2>One entry, one image</h2>
-            <p>Put the image in <code>assets/work/</code> and add an entry to <code>data/projects.js</code>. The halftone is applied automatically.</p>
+            <p>Put the screenshot in <code>assets/work/</code> (WebP or PNG, with transparent rounded corners if it has them) and add an entry to <code>data/projects.js</code> with its pixel size. It is shown in colour and the dot shadow is added automatically.</p>
 <pre>{
     id: "finova-banking",
     title: "Finova Banking",
     summary: "A calmer mobile bank — clarity, trust and fewer taps.",
     tags: ["Fintech", "Mobile", "2026"],
-    image: "assets/work/finova.jpg",
+    image: "assets/work/finova.webp",
+    width: 1600,
+    height: 1200,
     alt: "Finova app screens on a phone",
     link: "#"
 }</pre>
