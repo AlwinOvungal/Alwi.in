@@ -1,0 +1,95 @@
+import zipfile
+from xml.etree import ElementTree as ET
+
+import pytest
+import trimesh
+
+from formstudio.core import export, printify
+from formstudio.core.style import get_style
+
+NS = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+
+
+@pytest.fixture(scope="module")
+def style():
+    return get_style("clay-minimal")
+
+
+@pytest.fixture(scope="module")
+def printed(style, mug_glb, tmp_path_factory):
+    out = tmp_path_factory.mktemp("print")
+    params = style.print_params()
+    params["magnet"]["enabled"] = True
+    report = printify.run(mug_glb, out, params)
+    return out, report, params
+
+
+def test_parts_are_watertight_and_sized(printed):
+    out, report, params = printed
+    body = trimesh.load(out / "body.stl")
+    base = trimesh.load(out / "base.stl")
+    assert body.is_watertight and base.is_watertight
+    assert report["watertight"]
+    total = max(body.bounds[1][2], base.bounds[1][2]) - min(body.bounds[0][2], base.bounds[0][2])
+    assert total == pytest.approx(params["geometry"]["height_mm"], abs=0.1)
+
+
+def test_flat_on_the_bed(printed):
+    out, _, params = printed
+    base = trimesh.load(out / "base.stl")
+    body = trimesh.load(out / "body.stl")
+    assert base.bounds[0][2] == pytest.approx(0, abs=1e-3)
+    # body sits in its pocket, slightly below the top of the base
+    t = params["base"]["thickness_mm"]
+    assert body.bounds[0][2] == pytest.approx(t - printify.SINK_MM, abs=0.05)
+    # the base is wider than the body
+    assert base.extents[0] > body.extents[0]
+
+
+def test_parts_do_not_overlap(printed):
+    out, _, _ = printed
+    body = printify.to_manifold(trimesh.load(out / "body.stl"))
+    base = printify.to_manifold(trimesh.load(out / "base.stl"))
+    assert (body ^ base).volume() < 1.0  # mm³
+
+
+def test_magnet_pocket_cut(style, mug_glb, tmp_path):
+    p = style.print_params()
+    without = printify.run(mug_glb, tmp_path / "a", p)
+    p["magnet"]["enabled"] = True
+    with_m = printify.run(mug_glb, tmp_path / "b", p)
+    assert with_m["base_volume_cm3"] < without["base_volume_cm3"]
+
+
+def test_no_base_option(style, mug_glb, tmp_path):
+    p = style.print_params()
+    p["base"]["enabled"] = False
+    rep = printify.run(mug_glb, tmp_path, p)
+    body = trimesh.load(tmp_path / "body.stl")
+    assert not (tmp_path / "base.stl").exists()
+    assert body.bounds[0][2] == pytest.approx(0, abs=1e-3)
+    assert body.extents[2] == pytest.approx(p["geometry"]["height_mm"], abs=0.1)
+    assert rep["base_volume_cm3"] == 0
+
+
+def test_3mf_has_two_parts_on_two_filaments(printed, style):
+    out, _, _ = printed
+    written = export.export(out, "Coffee mug", style.palette, ["3mf"])
+    assert "model.3mf" in written
+    with zipfile.ZipFile(out / "model.3mf") as z:
+        names = set(z.namelist())
+        assert {"[Content_Types].xml", "_rels/.rels", "3D/3dmodel.model", "Metadata/model_settings.config"} <= names
+        model = ET.fromstring(z.read("3D/3dmodel.model"))
+        cfg = ET.fromstring(z.read("Metadata/model_settings.config"))
+    meshes = model.findall(".//m:object/m:mesh", NS)
+    assert len(meshes) == 2
+    comps = model.findall(".//m:components/m:component", NS)
+    assert [c.get("objectid") for c in comps] == ["1", "2"]
+    colours = [b.get("displaycolor") for b in model.findall(".//m:basematerials/m:base", NS)]
+    assert colours == [style.palette["body"]["hex"].upper() + "FF", style.palette["base"]["hex"].upper() + "FF"]
+    parts = cfg.findall("./object/part")
+    extruders = [p.find("./metadata[@key='extruder']").get("value") for p in parts]
+    assert extruders == ["1", "2"]
+    # the 3MF reloads as geometry
+    loaded = trimesh.load(out / "model.3mf", force="mesh")
+    assert len(loaded.faces) > 1000

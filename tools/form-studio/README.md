@@ -1,0 +1,127 @@
+# Form Studio
+
+Turn a photo of any object into a miniature in your house style, then into a
+two-colour 3D print file. It's a Mac app that runs on your own computer.
+
+```
+photo ──► cut-out ──► restyled options ──► you pick one ──► 3D shape ──► print-ready parts ──► 3MF / STL / STEP
+```
+
+The house style lives in [`styles/clay-minimal/`](styles/clay-minimal/):
+matte, chunky, softened forms in muted olive on a bone-white base, based on
+[`reference.png`](styles/clay-minimal/reference.png).
+
+## Install (once)
+
+You need macOS 12+ and [Homebrew](https://brew.sh). Everything else is free, and the script installs it.
+
+```bash
+git clone https://github.com/AlwinOvungal/Alwi.in.git
+```
+
+```bash
+cd Alwi.in/tools/form-studio && ./scripts/setup-mac.sh
+```
+
+The script sets up Python 3.11, Node, the local AI engines and the interface, and
+then builds **Form Studio.app** in `~/Applications`. Open it from Launchpad or
+Spotlight and drag it to your Dock.
+
+| Option | What it does |
+|---|---|
+| `--cloud-only` | Skips the large local AI packages. Use this if you'll only run cloud or offline engines. |
+| `--with-hunyuan` | Adds Hunyuan3D-2 mini, which gives better local 3D shapes. |
+| `--with-step` | Adds STEP export. |
+
+The first local run downloads the AI models (about 10 GB, once) into `~/.cache/huggingface`.
+Your objects are saved in `~/FormStudio/jobs/`. Each one is a plain folder you can open in Finder.
+
+**To update later:** run `git pull`, then `./scripts/setup-mac.sh` again.
+
+## Using it
+
+1. **Photo.** Drop in a photo and say what it is (e.g. "coffee mug"). The background is removed automatically.
+2. **Style.** Generate options in the house style, then click the one you like and **Use option N**.
+   The same photo with the same seeds always gives the same options. **New options** tries new seeds.
+   **Skip: use photo as is** sends the cut-out straight to 3D, which is good for logos and 2D art.
+3. **Shape.** Build the 3D shape from the chosen image.
+4. **Print.** Look at it in 3D and tune the height, softness, thinnest part, base and magnet pocket.
+   Each change rebuilds in a few seconds, with no AI involved. Then click **Export print files**.
+
+`model.3mf` opens in Bambu Studio and OrcaSlicer as **one object with two parts**: the body on
+filament 1 and the base on filament 2. Load the matching colours in your AMS and slice.
+`body.stl` and `base.stl` are there too if you'd rather print the parts separately and glue them.
+
+## Engines
+
+Pick engines in **Settings**. You can change them per object.
+
+| Step | Engine | Cost | Notes |
+|---|---|---|---|
+| Restyle | SDXL + style reference (local) | free | Steered by `reference.png` and the photo's depth. About 1–2 min per image on Apple Silicon. 16 GB+ of memory recommended; turn on *Fast mode* on 8 GB Macs. |
+| Restyle | FLUX Kontext (fal.ai) | about $0.025 per image | Fast. Needs a fal.ai key. |
+| Restyle | Palette preview (offline) | free | Instant recolour. No AI. |
+| 3D | TripoSR (local) | free | MIT licence. Under a minute. |
+| 3D | Hunyuan3D-2 mini (local) | free | Better shapes and slower. Install with `--with-hunyuan`. |
+| 3D | Hunyuan3D-2 mini (fal.ai) | about $0.10 per shape | About 30 s. Needs a fal.ai key. |
+| 3D | Lathe / Extrude (offline) | free | Instant. Builds the shape from the silhouette: Lathe suits cups and vases, Extrude suits flat art. |
+
+To use the cloud engines, create a key at [fal.ai](https://fal.ai) and paste it in **Settings → fal.ai cloud key**.
+It's stored in your macOS Keychain, never in a file.
+
+## How the style stays consistent
+
+Two locks keep every object looking like part of the same family:
+
+1. **Image lock.** The prompt, reference image, palette, seeds and model settings all come from
+   `style.yaml`. Each object's `manifest.json` records the style's content hash, the seeds and the
+   engines used, so you can reproduce any result.
+2. **Geometry lock.** Whatever shape the AI returns, the same deterministic steps finish it
+   ([`printify.py`](backend/formstudio/core/printify.py)):
+   - voxelize and fill it, which makes it solid and closes any holes
+   - remove parts thinner than the minimum feature size
+   - blur and re-surface the volume for soft clay edges (always watertight)
+   - smooth it
+   - scale it to the set height
+   - cut a flat bottom
+   - add the round base, with a pocket so the body keys in
+   - optionally cut a magnet pocket
+
+### Making another style
+
+Copy `styles/clay-minimal` to `~/FormStudio/styles/<your-style>`, change the `id`, prompt,
+palette and geometry, and add your own `reference.png`. Bump `version` whenever you change the style.
+
+## Running it without the app window
+
+```bash
+.venv/bin/formstudio-cli serve
+```
+
+This opens the app in your browser at http://127.0.0.1:8765.
+
+```bash
+.venv/bin/formstudio-cli run ~/Desktop/mug.jpg --subject "coffee mug" --pick 1
+```
+
+This runs the whole pipeline in one go and is handy for batches.
+
+## Development
+
+```bash
+.venv/bin/pip install -e "backend[dev]" && (cd backend && ../.venv/bin/pytest -q)
+```
+
+Runs the backend tests (offline engines only, no GPU needed).
+
+```bash
+(cd web && npm run dev)
+```
+
+This starts the UI with hot reload at http://localhost:5173. It needs `formstudio-cli serve` running on port 8765.
+
+- `backend/formstudio/core/`: style, job folders, background removal, printify, export
+- `backend/formstudio/engines/`: local (SDXL, TripoSR, Hunyuan3D), cloud (fal.ai) and offline engines
+- `backend/formstudio/api/`: FastAPI server, task worker with live progress over Server-Sent Events, settings and Keychain
+- `backend/formstudio/desktop.py`: native window (pywebview) around the local server
+- `web/`: React + three.js interface, built into `backend/formstudio/web_dist/`

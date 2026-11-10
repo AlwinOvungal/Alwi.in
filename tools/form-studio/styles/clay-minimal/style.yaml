@@ -1,0 +1,59 @@
+# Clay Minimal — the house style.
+# Everything that decides how an object looks lives here, so the same photo
+# with the same spec always gives the same result. Bump `version` when you
+# change anything; it is recorded in every job's manifest.
+id: clay-minimal
+name: Clay Minimal
+version: 1
+description: Matte clay miniatures with chunky, softened forms in muted olive on a bone-white base.
+reference: reference.png
+
+# {subject} is replaced with what you type in the app (e.g. "coffee mug").
+prompt: >-
+  a {subject} as a small handmade matte clay figurine, chunky simplified shapes,
+  soft rounded edges, smooth uniform matte surface, single muted olive green colour,
+  no text, no fine detail, toy-like proportions, studio product photo, centered,
+  whole object in frame, plain white background, soft diffuse light
+negative_prompt: >-
+  photorealistic texture, glossy, shiny, reflections, text, logo, pattern, decals,
+  thin wires, multiple objects, cluttered background, cropped, cast shadow on background
+# Cloud editing models take an instruction rather than a description.
+edit_prompt: >-
+  Turn this {subject} into a small handmade matte clay figurine: chunky simplified
+  shapes, soft rounded edges, a smooth uniform matte surface in a single muted olive
+  green, no text or fine detail. Keep the same pose and silhouette, centred on a plain
+  white background with soft diffuse light.
+
+seeds: [11, 23, 37, 51]
+
+stylize:
+  size: 1024
+  steps: 30
+  guidance: 6.0
+  ip_adapter_scale: 0.6   # how strongly reference.png steers the look
+  controlnet_scale: 0.55  # how strongly the photo's shape is kept
+
+palette:
+  body: {name: Olive, hex: "#5E6B2E"}
+  base: {name: Bone White, hex: "#F2F0EA"}
+
+geometry:
+  height_mm: 50          # total printed height, base included
+  voxel_mm: 0.5          # remesh resolution
+  soften_mm: 0.9         # blur radius that gives the soft clay look
+  min_feature_mm: 1.6    # parts thinner than this are removed
+  smooth_iters: 8
+  target_faces: 60000
+  flat_cut: 0.03         # fraction of the body height trimmed for a flat bottom
+
+base:
+  enabled: true
+  margin_mm: 3
+  thickness_mm: 3
+  fillet_mm: 1.2
+
+magnet:
+  enabled: false
+  diameter_mm: 6
+  depth_mm: 2
+  clearance_mm: 0.15

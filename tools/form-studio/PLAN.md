@@ -1,76 +1,98 @@
-# Form Studio — photo → house style → printable 3D (local CLI)
+# Form Studio — a Mac app: photo → house style → printable 3D
 
 ## Context
-You want a tool that turns everyday objects (e.g. a photo of a coffee mug) into one consistent, repeatable aesthetic, and then into a file you can send to a 3D printer. The long-term goal is 2D PNG/vector → 3D print. This first stage is **real photo → styled image (you confirm it) → 3D mesh → print-ready export**.
+You want to turn everyday objects (e.g. a photo of a coffee mug) into one consistent, repeatable aesthetic, the matte olive-and-white clay style in `styles/clay-minimal/reference.png`, and then into a file for your multi-colour FDM printer. The earlier plan was a terminal CLI. You now want a **local app with a visual UI**:
+- it opens from the **Dock** as a Mac app with its own window
+- the AI steps can run **free on your Mac (local open-source models)** or through **paid cloud APIs**, switchable in Settings
 
-The reference style (your screenshot) is: matte, clay-like, chunky simplified forms, soft rounded edges, a muted olive green with white, no fine detail, toy-like scale. Your choices: **local CLI first**, **local open-source models on GPU**, **style only (no pot; the object stands on its own flat base)**, **FDM multi-colour (AMS/MMU) → 3MF**.
+The long-term goal (2D PNG/vector → 3D) stays on the roadmap.
 
-The alwi.in repo is a static portfolio site with no backend, so the tool goes in a self-contained folder, `tools/form-studio/`, that the site doesn't touch. It can move into its own repo later without changes.
+Decisions so far: Apple Silicon Mac; India (Hunyuan3D licence OK); style only, no pot (the object stands on its own flat base); exports are STL plus a multi-colour **3MF** (Bambu Studio / OrcaSlicer).
 
-**Runtime target: your Apple Silicon Mac, free, no subscriptions.** All models are open source and run locally on PyTorch's MPS backend (Apple's GPU). You're in India, so Hunyuan3D's licence allows you to use it. 16 GB+ of unified memory is recommended; on 8 GB, use SDXL-Turbo.
-
-**What happens in this cloud session now:** this plan is saved to the repo as `tools/form-studio/PLAN.md`, with your screenshot as `tools/form-studio/styles/clay-minimal/reference.png`, committed and pushed to `claude/inspiring-volta-4ljhbb`. Building the tool continues in **Claude Code on your Mac**: pull the branch, run `claude` in the repo, and say "implement tools/form-studio/PLAN.md".
-
-## Key idea: consistency comes from two locks
-1. **Image lock:** a versioned *style spec* (prompt template, negative prompt, reference image(s), palette, seed, model IDs). The same spec plus the same photo gives the same candidates.
-2. **Geometry lock:** after AI reconstruction, deterministic post-processing *forces* the style whatever the AI produced: smoothing and remeshing for the soft clay look, removal of small details, colours snapped to the palette, a standard base, and a standard scale. This is what keeps a series looking like one family.
-
-## Pipeline (each stage writes into a job folder so you can stop, inspect and resume)
+## Architecture
 ```
-jobs/<name>/
-  00_input.jpg
-  01_cutout.png          background removed, centred, square
-  02_candidates/*.png    N styled options (fixed seeds)
-  03_confirmed.png       the one you picked
-  04_raw.glb             AI mesh
-  05_print/
-     body.stl  base.stl  model.3mf  (model.step optional)
-  manifest.json          style hash, seeds, model versions, params → full reproducibility
+Form Studio.app (Dock)
+  └─ pywebview native window ──► http://127.0.0.1:8765
+        Python backend (FastAPI + uvicorn), runs on your Mac
+          ├─ REST API + live progress (Server-Sent Events)
+          ├─ serves the built web UI (React)
+          ├─ pipeline core: ingest → stylize → reconstruct → printify → export
+          └─ engines (switchable per step)
+               local: SDXL+IP-Adapter+ControlNet (MPS) · TripoSR / Hunyuan3D-2mini
+               cloud: fal.ai (one API key covers both steps)
 ```
+- **One process, one job at a time on the GPU.** A single worker queue loads models lazily and keeps them in memory, so later runs are fast.
+- **Everything stays on your Mac.** Jobs live in `~/FormStudio/jobs/<id>/`, the same folder layout as before: `00_input`, `01_cutout`, `02_candidates/`, `03_confirmed`, `04_raw.glb`, `05_print/`, and `manifest.json` for reproducibility.
+- **API keys** are stored in the macOS Keychain (`keyring`), never in files or git.
 
-1. **Ingest:** remove the background with BiRefNet (via `rembg`), crop to the object, pad to a square on white.
-2. **Stylize:** SDXL + IP-Adapter (style from your reference screenshot) + ControlNet-depth (keeps the mug's real silhouette) → N candidates on a plain white background. Runs on `mps` in fp16 with attention slicing; `--fast` switches to SDXL-Turbo for low-memory Macs. Device auto-detect order: `mps` → `cuda` → `cpu`.
-3. **Confirm:** `formstudio confirm jobs/mug 3` copies candidate 3 to `03_confirmed.png`. This is your approval step.
-4. **Reconstruct:** confirmed image → mesh. **Default on Mac: TripoSR** (MIT licence, runs on MPS/CPU, under a minute). Optional backend: **Hunyuan3D-2mini** (shape only), for better forms, tried on MPS with a CPU fallback. Both sit behind a `Reconstructor` interface. Colour is not taken from the AI texture; it comes from the palette in step 5.
-5. **Printify** (CPU; trimesh + manifold3d + pymeshlab):
-   - convert the axes from y-up to z-up, keep the largest component, repair until watertight (manifold)
-   - clay look: voxel remesh at the spec's `min_feature_mm`, Taubin smoothing, decimation to the target face count
-   - scale to the spec's `height_mm` (default 50), cut a flat bottom at a set fraction of the height
-   - **base:** a parametric rounded plinth (radius from the footprint plus a margin), unioned under the body as a separate part
-   - check printability: wall thickness ≥ 1.2 mm (voxel erosion test), overhang report, fail or warn with clear messages
-   - optional `--magnet 6x2` pocket cut into the base underside (like the reference pieces)
-6. **Export:**
-   - `body.stl` and `base.stl` (millimetres)
-   - `model.3mf`: one object with two parts, with filament slots assigned through `Metadata/model_settings.config` (Bambu Studio / OrcaSlicer) and colour names in the base materials, so it opens ready to slice in two colours
-   - `--step`: a faceted STEP via OCP (an optional extra). Note: a STEP made from an organic mesh is triangles, not true CAD surfaces. STL/3MF are the main formats.
+## Consistency (unchanged core idea)
+1. **Image lock:** a versioned style spec (prompt, negative prompt, reference image, palette, seeds, model IDs).
+2. **Geometry lock:** deterministic post-processing forces the style whatever the AI produced: voxel remesh, smoothing, removal of small details, a standard scale and base, and the palette colours.
 
-## Files to create (`tools/form-studio/`)
-- `pyproject.toml`: package `formstudio`, CLI entry `formstudio`. Core deps: `typer numpy pillow pyyaml trimesh manifold3d pymeshlab scipy rembg`. Extras: `[ai]` = `torch diffusers transformers accelerate` + TripoSR (from git), `[hunyuan]` = `hy3dgen` (from git), `[step]` = `cadquery-ocp`. Python 3.11.
-- `README.md`: Mac setup (`brew install python@3.11`, venv, `pip install -e ".[ai]"`), first-run model downloads (about 10 GB, cached in `~/.cache/huggingface`), the walkthrough, how to write a new style.
-- `styles/clay-minimal/style.yaml` + `reference.png` (your screenshot): prompt/negative prompt, seeds, IP-Adapter scale, ControlNet scale, palette `{body: "#5E6B2E" olive, base: "#F2F0EA" white}`, `height_mm`, `min_feature_mm`, `smooth_iters`, `target_faces`, base params.
-- `formstudio/style.py`: `StyleSpec` dataclass, loader, and a content hash written to the manifest.
-- `formstudio/job.py`: job folder layout, `manifest.json` read/write, stage skip/resume.
-- `formstudio/ingest.py`, `stylize.py`, `reconstruct.py` (`Reconstructor` protocol + `Hunyuan3DMini`, `TripoSR`, and a `Stub` backend that returns a primitive mesh for testing without a GPU), `printify.py`, `export.py` (STL, hand-written 3MF zip with the slicer config, optional STEP).
-- `formstudio/cli.py`: commands `new <photo> --style clay-minimal`, `stylize`, `confirm`, `build`, `export`, `run` (all stages; stops at confirm unless `--pick N` is given).
-- `tests/`: pytest for printify and export using synthetic meshes.
-- `.gitignore` additions: `tools/form-studio/jobs/`, model caches.
+## The app (screens)
+1. **Library:** a grid of past objects (thumbnail + 3D), with "New object".
+2. **New → Photo:** drag and drop a photo; the background-removed cutout is shown so you can check it.
+3. **Style:** generates 4 candidates in the clay-minimal style with a live progress bar. Regenerate or change the seed, then **click one to confirm** (the approval step).
+4. **3D:** a three.js viewer (orbit, the olive body on the white base, a printer-bed grid in mm). Sliders for height, base margin and thickness, smoothing, and the magnet pocket on/off and size. These re-run only printify (seconds, no AI). A printability panel shows the watertight check, the thinnest wall, and overhang warnings.
+5. **Export:** download `body.stl`, `base.stl` and `model.3mf` (two parts on two filament slots), plus optional STEP. Buttons for **Open in Bambu Studio / OrcaSlicer** (`open -a`) and **Show in Finder**.
+6. **Settings:** engine per step (Local / Cloud), the fal.ai API key (saved to Keychain, with a "Test" button), device (auto: mps/cpu), output folder, and SDXL-Turbo "fast mode" for 8 GB Macs.
 
-## Example usage
-```
-formstudio new ~/photos/mug.jpg --style clay-minimal --name mug
-formstudio stylize mug -n 4
-formstudio confirm mug 2
-formstudio build mug          # reconstruct + printify
-formstudio export mug         # → jobs/mug/05_print/model.3mf
-```
+Visual design: calm and minimal, matching your portfolio (Inter / Instrument Serif, an off-white `#f6f5f1` paper background, olive accent from the palette).
 
-## Roadmap (after this stage, not in scope now)
-- **2D PNG/SVG → 3D:** vectorise with vtracer/potrace → extrude, emboss or make a relief on the same style base. It reuses `printify`/`export` unchanged.
-- Accent colours (per-triangle `paint_color` in 3MF) for objects that need more than 2 colours.
-- More style presets; a small web UI; a case-study page on alwi.in.
+## Backend API (FastAPI)
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/styles` | list style presets |
+| GET/POST | `/api/jobs` | list jobs; create a job (multipart photo upload + style) → runs ingest |
+| GET/DELETE | `/api/jobs/{id}` | job state + manifest; delete |
+| POST | `/api/jobs/{id}/stylize` | `{n, seed?, engine}` → queued task |
+| POST | `/api/jobs/{id}/confirm` | `{candidate}` |
+| POST | `/api/jobs/{id}/reconstruct` | `{engine}` → queued task (AI mesh) |
+| POST | `/api/jobs/{id}/printify` | `{height_mm, base, smooth, magnet}` → fast, sync |
+| POST | `/api/jobs/{id}/export` | `{formats}` |
+| GET | `/api/jobs/{id}/files/{path}` | images, preview GLB, STL/3MF downloads |
+| GET | `/api/jobs/{id}/events` | SSE: stage, progress %, logs, errors |
+| GET/PUT | `/api/settings` · POST `/api/settings/test-key` | engines, device, key status |
+| POST | `/api/jobs/{id}/open` | `{app: "bambu" \| "orca" \| "finder"}` |
+
+## Engines (pluggable)
+- `Stylizer` protocol: `LocalSDXL` (SDXL + IP-Adapter style ref + ControlNet-depth, fp16 on MPS; `--fast` = SDXL-Turbo), `FalStylizer` (e.g. FLUX Kontext on fal, with the reference image + prompt), `Stub` (for tests).
+- `Reconstructor` protocol: `TripoSR` (local default on Mac), `Hunyuan3DMini` (local option), `FalReconstructor` (Hunyuan3D / TRELLIS on fal), `Stub`.
+- Cloud engines need only a fal.ai key (pay per use, roughly $0.05–0.50 per object). Local engines cost $0.
+
+## Files (`tools/form-studio/`)
+- `PLAN.md`: updated to this plan.
+- `backend/pyproject.toml`: package `formstudio`. Core: `fastapi uvicorn[standard] python-multipart sse-starlette pydantic pyyaml numpy pillow scipy trimesh manifold3d pymeshlab rembg keyring httpx fal-client pywebview`. Extras: `[local-ai]` torch/diffusers/transformers/accelerate + TripoSR, `[hunyuan]`, `[step]` cadquery-ocp.
+- `backend/formstudio/`
+  - `core/`: `style.py` (StyleSpec + hash), `job.py` (folders, manifest), `ingest.py`, `printify.py`, `export.py` (STL, hand-written 3MF with `Metadata/model_settings.config` extruder assignment, optional STEP)
+  - `engines/`: `base.py` (protocols + registry), `local_sdxl.py`, `local_triposr.py`, `local_hunyuan.py`, `fal.py`, `stub.py`
+  - `api/`: `app.py` (FastAPI app, static UI mount), `routes_jobs.py`, `routes_settings.py`, `worker.py` (single-GPU task queue + SSE event bus), `settings.py` (JSON config + Keychain)
+  - `desktop.py`: starts uvicorn on a free port in a thread and opens the pywebview window; quitting stops the server
+  - `cli.py`: a thin optional CLI over the same core (handy for batch runs)
+- `backend/tests/`: printify/export unit tests (synthetic meshes) and API tests (FastAPI TestClient with Stub engines).
+- `web/`: Vite + React + TypeScript, `three` + `@react-three/fiber` / `drei` for the viewer. Pages as above. `npm run build` outputs to `backend/formstudio/web_dist/`.
+- `styles/clay-minimal/style.yaml` + `reference.png` (already in the repo).
+- `scripts/setup-mac.sh`: one-time setup. It checks for/installs `python@3.11` and `node` via Homebrew, creates a venv, `pip install -e backend[local-ai]`, builds the web UI, then builds the app.
+- `scripts/build-app.sh`: builds `~/Applications/Form Studio.app` (Info.plist, `.icns` icon, a launcher that runs the venv's `python -m formstudio.desktop`). It's a light wrapper, so no 5 GB torch bundle and updates are just `git pull` + rebuild of the UI.
+- `README.md`: install (`./scripts/setup-mac.sh`), then open Form Studio from the Dock / Launchpad; how to add a fal key; how to add a new style.
+- `.gitignore`: `jobs/`, `web/node_modules/`, `backend/formstudio/web_dist/`, the venv.
+
+## What you need (Mac)
+- **Free:** Homebrew, Python 3.11, Node (the setup script installs them), about 10 GB of disk for local models (downloaded on first local run), and OrcaSlicer or Bambu Studio.
+- **Optional and paid:** a fal.ai account + API key, only if you switch a step to Cloud.
+- 16 GB+ of memory is recommended for local style generation; on 8 GB, use fast mode or Cloud.
+
+## Who builds it
+I build and test everything in this cloud session (the UI, the API, the pipeline, the stub engines and the fal engine code), then push to `claude/inspiring-volta-4ljhbb`. Running the local models needs your Mac, so your first run of `setup-mac.sh` is the real-hardware test.
+
+## Roadmap (not in scope now)
+2D PNG/SVG → 3D (vectorise → extrude/emboss/relief, reusing printify/export); accent colours via per-triangle `paint_color` in 3MF; a style editor in the app for new presets; a case-study page on alwi.in.
 
 ## Verification
-- **Now (this session):** confirm that `tools/form-studio/PLAN.md` and `reference.png` are pushed to the branch.
-- **When implementing on your Mac:** `pytest` for printify and export. Assert the mesh is watertight, the base sits flat at z=0, the height matches the spec, wall thickness passes, and the 3MF unzips with 2 parts and 2 filament assignments. Then run `formstudio run sample.jpg --pick 1` end to end with `--backend stub` (stylize passes the image through; reconstruct returns a stub mesh), so the whole CLI flow and the exports are exercised.
-- **Then with real models:** install `.[ai]`, run the mug example, check that the candidates match the reference style, open `model.3mf` in Bambu Studio or OrcaSlicer (it should show two parts on two filaments, with no repair warnings), and print a test piece.
-- Commit to `claude/inspiring-volta-4ljhbb` and push.
+- **Here (no GPU):**
+  - `pytest`: the printified mesh is watertight, the base sits flat at z=0, the height matches, the wall check passes, and the 3MF unzips with 2 parts and 2 extruder assignments. API flow with Stub engines: create → stylize → confirm → reconstruct → printify → export, with SSE events arriving.
+  - Playwright on the built UI against the backend with Stub engines (Chromium is pre-installed): upload a photo, pick a candidate, the viewer renders, sliders rebuild, and downloads work. Screenshots for review.
+- **On your Mac:**
+  - Run `./scripts/setup-mac.sh` and open **Form Studio** from the Dock.
+  - Run the mug photo through with Local engines; repeat with Cloud once a fal key is added.
+  - Open `model.3mf` in Bambu Studio / OrcaSlicer: two parts on two filaments, no repair warnings. Then print.
