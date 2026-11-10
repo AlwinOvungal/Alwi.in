@@ -1,0 +1,48 @@
+# Style spec v1 "clay-minimal". Changing ANY value changes the style hash,
+# which is recorded in every job's manifest.json.
+name: clay-minimal
+version: 1
+
+prompt: >-
+  a single chunky simplified everyday object, matte clay material, soft rounded
+  edges, toy-like proportions, no fine detail, muted olive green and off-white,
+  studio lighting, plain white background, product photo
+negative_prompt: >-
+  text, logo, glossy, metallic, reflections, thin parts, fine texture, busy
+  background, shadows on the floor, multiple objects, photorealistic
+
+reference_image: reference.png   # relative to this style folder
+
+seed_base: 1000        # candidate i uses seed seed_base + i
+candidates: 4
+steps: 30
+guidance_scale: 6.0
+ip_adapter_scale: 0.6
+controlnet_scale: 0.7
+image_size: 1024
+
+palette:
+  body: "#5E6B2E"      # olive
+  base: "#F2F0EA"      # off-white
+
+# Print geometry (millimetres)
+height_mm: 50          # overall height, base included
+base_height_mm: 6      # plinth thickness
+base_margin_mm: 4      # plinth extends this far beyond the body footprint
+base_fillet_mm: 1.5    # rounded plinth edge
+cut_fraction: 0.12     # fraction of the sculpt's height removed from the bottom (flat bottom)
+min_feature_mm: 1.2    # voxel remesh resolution (~ smallest detail kept)
+smooth_iters: 10       # Taubin smoothing passes
+target_faces: 60000
+min_wall_mm: 1.2       # printability floor
+magnet: null           # e.g. "6x2" for a magnet pocket in the base underside
+
+models:
+  stylize: "stabilityai/stable-diffusion-xl-base-1.0"
+  stylize_fast: "stabilityai/sdxl-turbo"
+  controlnet_depth: "diffusers/controlnet-depth-sdxl-1.0"
+  ip_adapter_repo: "h94/IP-Adapter"
+  ip_adapter_weight: "sdxl_models/ip-adapter_sdxl.bin"
+  depth_estimator: "depth-anything/Depth-Anything-V2-Small-hf"
+  reconstruct_default: "triposr"
+  reconstruct_hunyuan: "tencent/Hunyuan3D-2mini"
