@@ -6,7 +6,6 @@
 from __future__ import annotations
 
 import argparse
-import sys
 from pathlib import Path
 
 from . import pipeline
@@ -36,11 +35,9 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(argv)
 
     if a.cmd == "serve":
-        sys.argv.append("--browser")
         from .desktop import main as desktop_main
 
-        desktop_main()
-        return 0
+        return desktop_main(["--browser"])
     if a.cmd == "list":
         for j in Job.all():
             print(f"{j.id:32} {j.manifest['stage']:13} {j.folder}")

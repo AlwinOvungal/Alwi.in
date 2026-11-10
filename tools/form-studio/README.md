@@ -114,6 +114,31 @@ Two locks keep every object looking like part of the same family:
 Copy `styles/clay-minimal` to `~/FormStudio/styles/<your-style>`, change the `id`, prompt,
 palette and geometry, and add your own `reference.png`. Bump `version` whenever you change the style.
 
+## Troubleshooting
+
+**The app won't open, or closes by itself.** Form Studio writes everything to a log. Show the last lines:
+
+```bash
+tail -50 ~/FormStudio/formstudio.log
+```
+
+If the server fails to start, the app shows an error with these lines and an **Open Log** button.
+Send the log to whoever helps you.
+
+**Rebuild just the app** (after `git pull`, or after moving the folder):
+
+```bash
+cd ~/Alwi.in/tools/form-studio && ./scripts/build-app.sh
+```
+
+The build needs Apple's free Command Line Tools. If `swiftc` is missing, install them with `xcode-select --install`.
+
+**Use it in your browser instead of the app window:**
+
+```bash
+cd ~/Alwi.in/tools/form-studio && .venv/bin/formstudio-cli serve
+```
+
 ## Running it without the app window
 
 ```bash
@@ -145,5 +170,6 @@ This starts the UI with hot reload at http://localhost:5173. It needs `formstudi
 - `backend/formstudio/core/`: style, job folders, background removal, printify, export
 - `backend/formstudio/engines/`: local (SDXL, TripoSR, Hunyuan3D), cloud (fal.ai) and offline engines
 - `backend/formstudio/api/`: FastAPI server, task worker with live progress over Server-Sent Events, settings and Keychain
-- `backend/formstudio/desktop.py`: native window (pywebview) around the local server
+- `mac/main.swift`: the native Mac app (window, menus, downloads), which runs the Python server in the background
+- `backend/formstudio/desktop.py`: server entry point (`--serve` for the app, `--browser` for a browser)
 - `web/`: React + three.js interface, built into `backend/formstudio/web_dist/`

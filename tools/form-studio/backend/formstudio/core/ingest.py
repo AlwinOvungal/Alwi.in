@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from functools import lru_cache
 from pathlib import Path
 
@@ -16,11 +17,14 @@ PADDING = 0.12  # fraction of the square left empty around the object
 
 @lru_cache(maxsize=1)
 def _rembg_session():
+    if os.environ.get("FORMSTUDIO_MATTING") == "threshold":  # tests: skip the 1 GB model
+        return None
     try:
         from rembg import new_session  # type: ignore
     except ImportError:
         return None
-    for model in ("birefnet-general", "isnet-general-use", "u2net"):
+    # isnet: ~170 MB and light on memory; birefnet is sharper but ~1 GB
+    for model in (os.environ.get("FORMSTUDIO_MATTING_MODEL", "isnet-general-use"), "u2net"):
         try:
             return new_session(model)
         except Exception as e:  # model download or onnx issue → try the next

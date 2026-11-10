@@ -33,9 +33,16 @@ fi
 brew list python@3.11 >/dev/null 2>&1 || brew install python@3.11
 command -v node >/dev/null 2>&1 || brew install node
 command -v git >/dev/null 2>&1 || brew install git
+if ! xcode-select -p >/dev/null 2>&1 || ! command -v swiftc >/dev/null 2>&1; then
+  echo "Apple's Command Line Tools are needed to build the app window (free)."
+  echo "Run:  xcode-select --install   then run this script again."
+  exit 1
+fi
 PY="$(brew --prefix python@3.11)/bin/python3.11"
 
 say "Python environment ($VENV)"
+# an environment made by an older Python (or moved folder) is rebuilt
+if [ -x "$VENV/bin/python" ] && ! "$VENV/bin/python" -c "import sys" >/dev/null 2>&1; then rm -rf "$VENV"; fi
 [ -d "$VENV" ] || "$PY" -m venv "$VENV"
 "$VENV/bin/pip" install --quiet --upgrade pip wheel
 EXTRAS="matting,heic"
