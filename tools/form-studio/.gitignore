@@ -1,0 +1,6 @@
+.venv/
+jobs/
+__pycache__/
+*.egg-info/
+.pytest_cache/
+# model caches are kept in ~/.cache/huggingface, nothing to ignore here
