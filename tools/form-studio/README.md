@@ -14,13 +14,35 @@ matte, chunky, softened forms in muted olive on a bone-white base, based on
 ## Install (once)
 
 You need macOS 12+ and [Homebrew](https://brew.sh). Everything else is free, and the script installs it.
+Run each command on its own, in Terminal.
+
+**1. Get the code.** Which command you use depends on whether you already have an `Alwi.in` folder in your home folder.
+
+If you don't:
 
 ```bash
-git clone https://github.com/AlwinOvungal/Alwi.in.git
+cd ~ && git clone https://github.com/AlwinOvungal/Alwi.in.git
 ```
 
+If you do (`git clone` says *destination path 'Alwi.in' already exists*), update it instead:
+
 ```bash
-cd Alwi.in/tools/form-studio && ./scripts/setup-mac.sh
+cd ~/Alwi.in && git fetch origin
+```
+
+**2. Switch to the Form Studio branch:**
+
+```bash
+cd ~/Alwi.in && git checkout claude/inspiring-volta-4ljhbb && git pull
+```
+
+If `git checkout` says your local changes would be overwritten, stop there. Run `git status` to see
+which files changed, and don't discard anything you want to keep.
+
+**3. Run the setup:**
+
+```bash
+cd ~/Alwi.in/tools/form-studio && ./scripts/setup-mac.sh
 ```
 
 The script sets up Python 3.11, Node, the local AI engines and the interface, and
