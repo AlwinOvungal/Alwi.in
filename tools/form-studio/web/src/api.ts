@@ -195,8 +195,32 @@ async function req<T>(method: string, url: string, body?: unknown): Promise<T> {
   return r.json() as Promise<T>;
 }
 
+export interface StorageItem {
+  id: string;
+  label: string;
+  path: string;
+  note: string;
+  exists: boolean;
+  bytes: number;
+}
+
+export function formatBytes(n: number) {
+  if (n < 1024) return `${n} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let v = n / 1024;
+  let i = 0;
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024;
+    i++;
+  }
+  return `${v < 10 ? v.toFixed(1) : Math.round(v)} ${units[i]}`;
+}
+
 export const api = {
   styles: () => req<Style[]>("GET", "/api/styles"),
+  storage: (refresh = false) =>
+    req<{ home: string; items: StorageItem[]; total_models_bytes: number }>("GET", `/api/storage${refresh ? "?refresh=1" : ""}`),
+  openStorage: (id: string) => req<{ ok: boolean }>("POST", "/api/storage/open", { id }),
   engines: () => req<Engines>("GET", "/api/engines"),
   settings: () => req<Settings>("GET", "/api/settings"),
   saveSettings: (

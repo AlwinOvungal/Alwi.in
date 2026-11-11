@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, Engines, Settings } from "./api";
+import { api, Engines, formatBytes, Settings, StorageItem } from "./api";
 import { EnginePicker, Switch, useToast } from "./ui";
 
 type Save = (patch: Parameters<typeof api.saveSettings>[0], msg?: string) => Promise<void>;
@@ -49,6 +49,62 @@ function KeyCard(props: {
       )}
       {msg && <div className={`note ${msg.ok ? "ok" : "bad"}`}>{msg.message}</div>}
       {children}
+    </div>
+  );
+}
+
+function StorageCard() {
+  const [data, setData] = useState<{ home: string; items: StorageItem[]; total_models_bytes: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const load = async (refresh = false) => {
+    setBusy(true);
+    try {
+      setData(await api.storage(refresh));
+    } catch (e) {
+      toast((e as Error).message, true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  useEffect(() => {
+    load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const home = data?.home ?? "";
+  const tidy = (p: string) => (home && (p === home || p.startsWith(home + "/")) ? "~" + p.slice(home.length) : p);
+
+  return (
+    <div className="card panel stack storage">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <h2>Storage</h2>
+        <button className="btn sm" disabled={busy} onClick={() => load(true)}>{busy ? "Measuring…" : "Refresh"}</button>
+      </div>
+      {data ? (
+        <>
+          <p className="small muted" style={{ margin: 0 }}>
+            AI models use <b>{formatBytes(data.total_models_bytes)}</b>. If you only use cloud engines, you can delete the models
+            folder; models download again when a local engine needs them.
+          </p>
+          <div className="files">
+            {data.items.map((i) => (
+              <div key={i.id} className="storage-row">
+                <div className="stack" style={{ gap: 2, minWidth: 0 }}>
+                  <strong style={{ fontWeight: 500 }}>{i.label}</strong>
+                  <span className="kbd path" title={i.path}>{tidy(i.path)}</span>
+                  <span className="small muted">{i.note}</span>
+                </div>
+                <span className="size">{i.exists ? formatBytes(i.bytes) : "Not created yet"}</span>
+                <button className="btn sm" disabled={!i.exists} onClick={() => api.openStorage(i.id).catch((e) => toast(e.message, true))}>
+                  Show in Finder
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      ) : (
+        <p className="small muted" style={{ margin: 0 }}>Measuring folders…</p>
+      )}
     </div>
   );
 }
@@ -241,6 +297,7 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
           <p className="small muted" style={{ margin: 0 }}>Your objects live in <span className="kbd">~/FormStudio/jobs</span>, your styles in <span className="kbd">~/FormStudio/styles</span>.</p>
         </div>
       </div>
+      <StorageCard />
     </div>
   );
 }

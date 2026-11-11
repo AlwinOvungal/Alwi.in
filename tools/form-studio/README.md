@@ -181,6 +181,16 @@ cd ~/Alwi.in/tools/form-studio && ./scripts/build-app.sh
 
 The build needs Apple's free Command Line Tools. If `swiftc` is missing, install them with `xcode-select --install`.
 
+**Where everything is.** **Settings → Storage** lists every folder Form Studio uses, with its size and a
+**Show in Finder** button:
+- the app: `~/Applications/Form Studio.app`
+- its code: `~/Alwi.in/tools/form-studio`, with the Python environment in `.venv`
+- your objects and styles: `~/FormStudio`
+- the local AI models: `~/.cache/huggingface` and `~/.u2net`
+
+Cloud engines download nothing. If you only use cloud engines, you can delete the models folder; the models
+download again if a local engine needs them.
+
 **Use it in your browser instead of the app window:**
 
 ```bash

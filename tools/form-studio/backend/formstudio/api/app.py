@@ -5,6 +5,8 @@ import asyncio
 import json
 import logging
 import platform
+import time
+import os
 import subprocess
 import tempfile
 import threading
@@ -289,6 +291,76 @@ def test_key(service: str = "fal") -> dict[str, Any]:
     except Exception as e:
         return {"ok": False, "message": f"Couldn't reach fal.ai: {e}"}
     return {"ok": ok, "message": "Key works." if ok else "fal.ai rejected this key."}
+
+
+# ---- storage -----------------------------------------------------------------------
+
+_size_cache: dict[str, Any] = {"at": 0.0, "data": None}
+
+
+def _folder_size(path: Path, skip: frozenset[str] = frozenset()) -> int:
+    """Total size of a folder, without following symlinks; unreadable parts are skipped."""
+    if path.is_file():
+        return path.stat().st_size
+    total, stack = 0, [path]
+    while stack:
+        current = stack.pop()
+        try:
+            with os.scandir(current) as entries:
+                for e in entries:
+                    try:
+                        if e.is_symlink():
+                            continue
+                        if e.is_dir(follow_symlinks=False):
+                            if e.name not in skip:
+                                stack.append(Path(e.path))
+                        else:
+                            total += e.stat(follow_symlinks=False).st_size
+                    except OSError:
+                        continue
+        except OSError:
+            continue
+    return total
+
+
+@app.get("/api/storage")
+def storage(refresh: bool = False) -> dict[str, Any]:
+    now = time.time()
+    if not refresh and _size_cache["data"] and now - _size_cache["at"] < 60:
+        return _size_cache["data"]
+    items = []
+    for loc in paths.storage_locations():
+        p = Path(loc["path"])
+        exists = p.exists()
+        # the code folder holds the Python environment, which has its own row
+        skip = frozenset({".venv", "node_modules"}) if loc["id"] == "code" else frozenset()
+        items.append({**loc, "exists": exists, "bytes": _folder_size(p, skip) if exists else 0})
+    data = {
+        "home": str(Path.home()),
+        "items": items,
+        "total_models_bytes": sum(i["bytes"] for i in items if i["id"] in ("hf", "rembg")),
+    }
+    _size_cache.update(at=now, data=data)
+    return data
+
+
+class StorageOpen(BaseModel):
+    id: str
+
+
+@app.post("/api/storage/open")
+def open_storage(body: StorageOpen) -> dict[str, bool]:
+    loc = next((l for l in paths.storage_locations() if l["id"] == body.id), None)
+    if loc is None:
+        raise HTTPException(400, "Unknown folder")
+    if platform.system() != "Darwin":
+        raise HTTPException(501, "Opening Finder works on macOS only.")
+    target = Path(loc["path"])
+    if not target.exists():
+        raise HTTPException(404, "Not created yet")
+    cmd = ["open", "-R", str(target)] if target.suffix == ".app" or target.is_file() else ["open", str(target)]
+    subprocess.run(cmd, capture_output=True)
+    return {"ok": True}
 
 
 # ---- jobs -------------------------------------------------------------------------------
