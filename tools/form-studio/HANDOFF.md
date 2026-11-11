@@ -198,8 +198,8 @@ cancelling}`.
 - **Cloud:**
   - engines with `batch = True` (ChatGPT images) get all seeds in one request
   - engines with `parallel = N` (fal) run N requests side by side
-  - OpenAI 429s: short rate limits are waited out (Retry-After); "no credit" is reported with OpenAI's own words and
-    never retried
+  - OpenAI 429s: short rate limits are waited out (Retry-After). "Limit 0" (the free tier: no images allowed) and
+    "no credit" are never retried; they explain the fix with links to OpenAI Billing and Limits.
 - **Speed test (`core/bench.py`):** variants `before` (one model at a time, Best, no print cache), `best`, `quick`.
   - Each run: cut-out → first option → the rest → pick → 3D → print parts → 3MF → one slider change.
   - The first run of each variant is cold; median and p90 come from the warm runs.
@@ -373,7 +373,17 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
     - Quick quality is a choice, never silently swapped in.
     - Measure with the speed test before and after, and keep `timings.jsonl` free of private data
       (`SAFE_KEYS` only).
-16. **Git:**
+16. **Style pictures pass on the look, not the objects:**
+    - Local SDXL feeds the IP-Adapter only into SDXL's style block by default (InstantStyle):
+      `ip_adapter_scale_config()` in `engines/local.py` gives `{"up": {"block_0": [0, s, 0]}}`, with
+      `s = min(1, ip_adapter_scale / 0.6)`.
+    - A style's `stylize.reference_mode: full` brings back every layer. That copies objects from the reference
+      (e.g. the olive blobs from the cactus photo).
+17. **Errors people can act on:**
+    - Raise `EngineError(message, detail, links, steps)` (`engines/base.py`). The worker passes on `error_detail`,
+      `error_links` and `error_steps`, and the step shows an `ErrorCard` with Try again / Use another engine.
+    - A 429 that waiting can't fix ("Limit 0", "Request too large", quota codes) is never retried.
+18. **Git:**
     - work on the feature branch
     - don't commit `web_dist`, `.venv` or models
     - keep commits descriptive

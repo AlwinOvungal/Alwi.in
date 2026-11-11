@@ -245,6 +245,18 @@ The new built-ins have no reference pictures; their words alone set the look.
   - ChatGPT images makes all options in one request; fal runs them in parallel
   - a built-in **Speed test**
   - Details in HANDOFF.md, under "Speed machinery".
+- **Error cards:**
+  - A failed step shows a card inside the step: what happened in plain words, numbered steps to fix it, buttons to
+    the right page (e.g. OpenAI Billing / Limits), **Use another engine**, **Try again**, and the service's own
+    message folded away.
+  - Long error toasts are readable cards that stay until closed.
+- **OpenAI "Limit 0":**
+  - It's recognised as the free tier (no images allowed) and explained with the steps to reach Usage tier 1.
+  - It's no longer retried.
+  - GPT Image 2.6 models are in the model list.
+- **Style pictures pass on the look only:**
+  - Local SDXL takes colour, material and surface from the first reference picture without pasting its objects in.
+  - The style editor has "Only the look / Look and layout".
 - **OpenAI errors** now quote OpenAI's own reason (no credit, rate limit or verification), and short rate limits are
   waited out. **Test key** also checks that the key can use the chosen image model.
 

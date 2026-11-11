@@ -126,6 +126,8 @@ class StyleSpec:
                 "voxel_size_mm": self.geometry.get("voxel_size_mm", 2.5),
                 "facets": self.geometry.get("facets", 400),
             },
+            # how the reference pictures steer local SDXL: "style" = only the look, "full" = look and composition
+            "reference_mode": self.stylize.get("reference_mode", "style"),
         }
 
 
@@ -214,6 +216,7 @@ class StyleEdit(BaseModel):
     palette: StylePalette | None = None
     geometry: StyleGeometry | None = None
     based_on: str | None = None  # create only: start from this style's words, finish and formats
+    reference_mode: Literal["style", "full"] | None = None
 
 
 def _slug(name: str) -> str:
@@ -253,6 +256,8 @@ def _apply(raw: dict[str, Any], edit: StyleEdit) -> None:
         raw["palette"] = edit.palette.model_dump()
     if edit.geometry:
         raw.setdefault("geometry", {}).update(edit.geometry.model_dump())
+    if edit.reference_mode:
+        raw.setdefault("stylize", {})["reference_mode"] = edit.reference_mode
 
 
 def _require_editable(style: StyleSpec) -> None:

@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { api, Candidate, Engines, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, Settings, Style, useJob } from "./api";
 import { StylePicker } from "./Library";
-import { EnginePicker, go, Progress, Slider, Switch, useToast } from "./ui";
+import { EnginePicker, ErrorCard, go, Progress, Slider, Switch, useToast } from "./ui";
 
 const Viewer = lazy(() => import("./Viewer"));
 
@@ -77,9 +77,7 @@ export default function JobPage({ id }: { id: string }) {
       lastStage.current = job.stage;
     }
   }, [job]); // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => {
-    if (job?.task?.status === "error" && job.task.error) toast(job.task.error, true);
-  }, [job?.task?.status]); // eslint-disable-line react-hooks/exhaustive-deps
+  // a failed step explains itself inside the step (ErrorCard), not in a passing toast
 
   const style = (job && styles.find((s) => s.id === job.style.id)) ?? styles[0] ?? null;
   if (error) return <div className="page"><p className="note bad">{error}</p><a className="btn" href="#/">Back to library</a></div>;
@@ -161,6 +159,21 @@ export default function JobPage({ id }: { id: string }) {
   );
 }
 
+/** The last failed task of this kind, until it's dismissed or something new starts. */
+function useFailure(job: Job, kind: string) {
+  const [dismissed, setDismissed] = useState<string | null>(null);
+  const t = job.task;
+  const key = t ? `${t.id ?? ""}:${t.kind}:${t.error}:${t.elapsed}` : "";
+  const failed = t && t.status === "error" && t.kind === kind && dismissed !== key ? t : null;
+  return { failed, dismiss: () => setDismissed(key) };
+}
+
+/** Another engine that works now: free local first, then cloud, then offline. */
+function otherEngine(list: Engines["stylize"] | undefined, current: string): string | undefined {
+  const ok = (list ?? []).filter((e) => e.available && e.id !== current);
+  return (ok.find((e) => e.kind === "local") ?? ok.find((e) => e.kind === "cloud") ?? ok[0])?.id;
+}
+
 /** The preferred engine if it's usable, otherwise the first one that is. */
 function pickAvailable(list: Engines["stylize"] | undefined, preferred: string | undefined): string {
   if (!list) return "";
@@ -204,6 +217,12 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
   };
   useEffect(() => setEngine((e) => e || pickAvailable(engines?.stylize, settings?.engines.stylize)), [settings, engines]);
   const working = busy && job.task?.kind === "stylize";
+  const { failed, dismiss } = useFailure(job, "stylize");
+  const generate = async () => {
+    if (subject !== job.subject) await api.rename(job.id, { subject });
+    run(api.stylize(job.id, engine, undefined, undefined, engine === "local-sdxl" ? quality : undefined));
+  };
+  const other = otherEngine(engines?.stylize, engine);
 
   return (
     <>
@@ -255,10 +274,16 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
             <Progress task={job.task} onCancel={() => run(api.cancel(job.id))} />
           ) : (
             <>
-              <button className="btn olive" disabled={busy || !engine} onClick={async () => {
-                if (subject !== job.subject) await api.rename(job.id, { subject });
-                run(api.stylize(job.id, engine, undefined, undefined, engine === "local-sdxl" ? quality : undefined));
-              }}>
+              {failed && (
+                <ErrorCard
+                  title="Couldn't make the options"
+                  task={failed}
+                  onRetry={() => (dismiss(), generate())}
+                  onOther={other ? () => (dismiss(), setEngine(other)) : undefined}
+                  onDismiss={dismiss}
+                />
+              )}
+              <button className="btn olive" disabled={busy || !engine} onClick={generate}>
                 Generate {settings?.candidates ?? 4} option{(settings?.candidates ?? 4) === 1 ? "" : "s"}
               </button>
               <button className="btn" disabled={busy} onClick={() => run(api.confirm(job.id, null))} title="Skip restyling: use the cut-out photo for the 3D step">
@@ -293,7 +318,10 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
   const pending = working && asked ? Math.max(0, asked.n - (cands.length - asked.before)) : 0;
   const chosen = (c: Candidate) => job.confirmed?.file === c.file;
 
+  const { failed, dismiss } = useFailure(job, "stylize");
+  const other = otherEngine(engines?.stylize, engine);
   const generate = () => {
+    dismiss();
     setAsked({ before: cands.length, n: count });
     run(api.stylize(job.id, engine, undefined, count, engine === "local-sdxl" ? quality : undefined));
   };
@@ -351,6 +379,15 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
         </button>
       </div>
 
+      {failed && !working && (
+        <ErrorCard
+          title="Couldn't make the options"
+          task={failed}
+          onRetry={generate}
+          onOther={other ? () => (dismiss(), setEngine(other)) : undefined}
+          onDismiss={dismiss}
+        />
+      )}
       {working && job.task && (
         <div className="card panel stack" style={{ gap: 8 }}>
           <Progress task={job.task} onCancel={() => run(api.cancel(job.id))} cancelLabel="Stop" />
@@ -416,6 +453,8 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
     [settings, engines, job.reconstruct],
   );
   const working = busy && job.task?.kind === "reconstruct";
+  const { failed, dismiss } = useFailure(job, "reconstruct");
+  const other = otherEngine(engines?.reconstruct, engine);
 
   return (
     <div className="split">
@@ -434,6 +473,15 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
             <Progress task={job.task} onCancel={() => run(api.cancel(job.id))} />
           ) : (
             <>
+              {failed && (
+                <ErrorCard
+                  title="Couldn't build the 3D shape"
+                  task={failed}
+                  onRetry={() => (dismiss(), run(api.reconstruct(job.id, engine)))}
+                  onOther={other ? () => (dismiss(), setEngine(other)) : undefined}
+                  onDismiss={dismiss}
+                />
+              )}
               <button className="btn olive" disabled={busy || !engine} onClick={() => run(api.reconstruct(job.id, engine))}>
                 {reached(job, "reconstructed") ? (engine === "claude-sculpt" ? "Ask Claude again" : "Rebuild shape") : "Build 3D shape"}
               </button>

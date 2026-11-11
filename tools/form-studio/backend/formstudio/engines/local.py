@@ -183,6 +183,21 @@ def style_reference(style) -> tuple[Image.Image, float]:
     return Image.new("RGB", (224, 224), (255, 255, 255)), 0.0
 
 
+def ip_adapter_scale_config(scale: float, mode: str = "style"):
+    """How the style picture feeds SDXL.
+
+    "style" (the default) sends it only into the block of SDXL that handles colour, material and
+    surface (InstantStyle), so the look carries over but the objects and layout of the reference
+    photo don't get pasted in. "full" is the old behaviour: every layer, look and composition.
+    A strength of 0 (no reference pictures) switches it off everywhere.
+    """
+    if scale <= 0:
+        return 0.0
+    if mode == "full":
+        return scale
+    return {"up": {"block_0": [0.0, min(1.0, scale / 0.6), 0.0]}}
+
+
 def _on_white(img: Image.Image) -> Image.Image:
     """Clean the generated image: object on pure white, ready for 3D."""
     rgba = remove_background(img)
@@ -345,8 +360,13 @@ class LocalSDXL:
 
             gen = torch.Generator("cpu").manual_seed(int(seed))
             if not fast and hasattr(pipe, "set_ip_adapter_scale"):
-                pipe.set_ip_adapter_scale(ip_scale)  # every run: one style's strength must not carry over
+                # every run: one style's strength and routing must not carry over to the next
+                pipe.set_ip_adapter_scale(ip_adapter_scale_config(ip_scale, str(cfg.get("reference_mode", "style"))))
             prompt = inp.style.prompt_for(inp.subject)
+            if quick:  # no guidance in Quick: spell out the main colour so the words still hold
+                body = (inp.style.palette.get("body") or {}).get("name")
+                if body and body.lower() not in prompt.lower():
+                    prompt += f", {body.lower()} colour"
             with timing.stage("restyle_image", engine=self.id, device=ctx.device, quality=q, size=size,
                               steps=steps, warm=warm):
                 if fast:

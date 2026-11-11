@@ -150,3 +150,13 @@ def test_new_style_from_another_with_pictures_and_colours():
         assert c.post("/api/styles/suggest-colours").status_code == 400
         assert c.post("/api/styles/suggest-colours", params={"style": "clay-minimal"}).json()["body"]["name"] in ("Olive", "Moss", "Brown")
         c.delete(f"/api/styles/{sid}")
+
+
+def test_reference_mode_round_trips():
+    c = TestClient(app)
+    s = c.post("/api/styles", json={"name": "Mode test", "description": "x"}).json()
+    assert s["reference_mode"] == "style"
+    s = c.put(f"/api/styles/{s['id']}", json={"name": "Mode test", "description": "x", "reference_mode": "full"}).json()
+    assert s["reference_mode"] == "full" and s["version"] == 2
+    assert c.put(f"/api/styles/{s['id']}", json={"name": "Mode test", "reference_mode": "everything"}).status_code == 422
+    c.delete(f"/api/styles/{s['id']}")

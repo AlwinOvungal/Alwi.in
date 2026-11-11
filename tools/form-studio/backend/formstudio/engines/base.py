@@ -25,6 +25,17 @@ def quality_of(settings: dict[str, Any]) -> str:
     return "lightest" if settings.get("fast_mode") else "best"
 
 
+class EngineError(RuntimeError):
+    """A failure the person can act on: a plain message, the service's own words, and where to fix it."""
+
+    def __init__(self, message: str, detail: str = "", links: list[tuple[str, str]] | None = None,
+                 steps: list[str] | None = None):
+        super().__init__(message)
+        self.detail = detail
+        self.links = links or []  # (label, url)
+        self.steps = steps or []
+
+
 class Cancelled(Exception):
     """The person pressed Cancel (or picked an option, which stops the rest). Raised from progress callbacks."""
 

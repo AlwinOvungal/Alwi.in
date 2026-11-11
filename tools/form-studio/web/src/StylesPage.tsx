@@ -370,6 +370,7 @@ const toForm = (s: StyleDetail): Form => ({
   edit_prompt: s.edit_prompt,
   negative_prompt: s.negative_prompt,
   sculpt_guide: s.sculpt_guide,
+  reference_mode: s.reference_mode ?? "style",
   palette: { body: { ...s.palette.body }, base: { ...s.palette.base } },
   geometry: {
     height_mm: s.geometry.height_mm ?? 50,
@@ -526,6 +527,21 @@ export function StyleEditor({ id }: { id: string }) {
               onRemove={(i) => refsCall(() => api.removeReference(style.id, i))}
               onFirst={(i) => refsCall(() => api.makeReferenceFirst(style.id, i))}
             />
+            <div className="field">
+              <span>What local SDXL takes from the first picture</span>
+              <div className="seg wide" role="radiogroup" aria-label="What to take from the picture">
+                {([["style", "Only the look"], ["full", "Look and layout"]] as const).map(([id, label]) => (
+                  <button key={id} type="button" role="radio" aria-checked={form.reference_mode === id} className={form.reference_mode === id ? "on" : ""} disabled={ro} onClick={() => set({ reference_mode: id })}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <small className="muted">
+                {form.reference_mode === "style"
+                  ? "Colour, material and surface carry over; the objects in the picture don't get copied. Recommended."
+                  : "Follows the picture more closely, but can paste its objects (like a small pot or cactus) into your result."}
+              </small>
+            </div>
           </section>
 
           <section className="card panel stack">

@@ -5,11 +5,19 @@ export type Stage = "new" | "cutout" | "stylized" | "confirmed" | "reconstructed
 export const STAGES: Stage[] = ["new", "cutout", "stylized", "confirmed", "reconstructed", "printified", "exported"];
 
 export interface Task {
+  /** a new number for every run */
+  id?: number;
   kind: string;
   status: "queued" | "running" | "done" | "error" | "cancelled";
   progress: number;
   message: string;
   error: string | null;
+  /** the service's own words, for the folded "details" */
+  error_detail?: string;
+  /** where to fix it, e.g. OpenAI Billing */
+  error_links?: { label: string; url: string }[];
+  /** what to do, in order */
+  error_steps?: string[];
   /** seconds since it started */
   elapsed: number;
   /** expected total seconds, from past runs on this Mac (null until there's history) */
@@ -146,6 +154,7 @@ export interface StyleDetail extends Style {
   negative_prompt: string;
   sculpt_guide: string;
   geometry: StyleGeometry;
+  reference_mode: "style" | "full";
 }
 
 export interface StyleGeometry {
@@ -167,6 +176,7 @@ export interface StyleEdit {
   palette?: { body: Colour; base: Colour };
   geometry?: StyleGeometry;
   based_on?: string;
+  reference_mode?: "style" | "full";
 }
 
 export interface StyleDraft {

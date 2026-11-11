@@ -15,22 +15,28 @@ export function useRoute(): string[] {
 export const go = (path: string) => (window.location.hash = path);
 
 // ---- toasts ----
-type Toast = { text: string; bad?: boolean } | null;
+// Short notes ("Saved") come and go. Long errors become a readable card that stays until closed.
+type Toast = { text: string; bad?: boolean; id: number } | null;
 const ToastCtx = createContext<(text: string, bad?: boolean) => void>(() => {});
+const LONG = 90;
 export function ToastProvider({ children }: { children: ReactNode }) {
   const [toast, setToast] = useState<Toast>(null);
-  const show = useCallback((text: string, bad = false) => setToast({ text, bad }), []);
+  const show = useCallback((text: string, bad = false) => setToast({ text, bad, id: Date.now() }), []);
+  const sticky = !!toast?.bad && toast.text.length > LONG;
   useEffect(() => {
-    if (!toast) return;
-    const t = setTimeout(() => setToast(null), toast.bad ? 6000 : 2800);
+    if (!toast || sticky) return;
+    const t = setTimeout(() => setToast(null), toast.bad ? 7000 : 2800);
     return () => clearTimeout(t);
-  }, [toast]);
+  }, [toast, sticky]);
   return (
     <ToastCtx.Provider value={show}>
       {children}
       {toast && (
-        <div className={`toast ${toast.bad ? "bad" : ""}`} role="status">
-          {toast.text}
+        <div className={`toast ${toast.bad ? "bad" : ""} ${toast.text.length > LONG ? "long" : ""}`} role={toast.bad ? "alert" : "status"}>
+          <span className="grow">{toast.text}</span>
+          {(sticky || toast.text.length > LONG) && (
+            <button className="toast-close" onClick={() => setToast(null)} aria-label="Close">✕</button>
+          )}
         </div>
       )}
     </ToastCtx.Provider>
@@ -191,4 +197,53 @@ export function timeAgo(iso: string) {
   if (s < 3600) return `${Math.floor(s / 60)} min ago`;
   if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
   return new Date(iso).toLocaleDateString();
+}
+
+/** A failed step: what happened in plain words, what to do, where to fix it, and the service's own message folded away. */
+export function ErrorCard({
+  title,
+  task,
+  onRetry,
+  onOther,
+  onDismiss,
+}: {
+  title: string;
+  task: Task;
+  onRetry?: () => void;
+  onOther?: () => void;
+  onDismiss?: () => void;
+}) {
+  return (
+    <div className="error-card" role="alert">
+      <div className="row" style={{ justifyContent: "space-between", flexWrap: "nowrap", alignItems: "start" }}>
+        <strong>{title}</strong>
+        {onDismiss && (
+          <button className="btn sm ghost" onClick={onDismiss} aria-label="Dismiss">
+            ✕
+          </button>
+        )}
+      </div>
+      <p>{task.error}</p>
+      {task.error_steps && task.error_steps.length > 0 && (
+        <ol>
+          {task.error_steps.map((s) => <li key={s}>{s}</li>)}
+        </ol>
+      )}
+      <div className="row" style={{ gap: 8 }}>
+        {task.error_links?.map((l) => (
+          <a key={l.url} className="btn sm" href={l.url} target="_blank" rel="noreferrer">
+            {l.label} ↗
+          </a>
+        ))}
+        {onOther && <button className="btn sm olive" onClick={onOther}>Use another engine</button>}
+        {onRetry && <button className="btn sm" onClick={onRetry}>Try again</button>}
+      </div>
+      {task.error_detail && (
+        <details>
+          <summary>What the service said</summary>
+          <p className="detail">{task.error_detail}</p>
+        </details>
+      )}
+    </div>
+  );
 }

@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { api, BenchReport, Engine, Engines, formatBytes, formatSeconds, ModelPack, ModelQueue, QUALITIES, Settings, StorageItem, Task } from "./api";
-import { KindChip, Progress, Switch, useToast } from "./ui";
+import { ErrorCard, KindChip, Progress, Switch, useToast } from "./ui";
 
 type Save = (patch: Parameters<typeof api.saveSettings>[0], msg?: string) => Promise<void>;
 type Service = "anthropic" | "openai" | "meshy" | "fal";
@@ -534,7 +534,7 @@ function SpeedTest() {
           </Row>
         )}
         {st?.task?.status === "error" && (
-          <div className="set-row wide"><div className="note bad">{st.task.error}</div></div>
+          <div className="set-row wide"><ErrorCard title="The speed test stopped" task={st.task} onRetry={start} /></div>
         )}
       </Group>
       {st?.latest && <BenchResult r={st.latest} />}
@@ -739,6 +739,8 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
                 <label className="field">
                   <span>Image model</span>
                   <select className="select" value={s.openai.model} onChange={(e) => save({ openai: { model: e.target.value } })}>
+                    <option value="gpt-image-2.6-sunburst">GPT Image 2.6 Sunburst (newest)</option>
+                    <option value="gpt-image-2.6-flare">GPT Image 2.6 Flare (newest, lighter)</option>
                     <option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst (most precise)</option>
                     <option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option>
                     <option value="gpt-image-2">GPT Image 2</option>

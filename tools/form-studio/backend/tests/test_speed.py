@@ -362,7 +362,44 @@ def test_openai_says_why_when_there_is_no_credit(cut_job):
     with pytest.raises(RuntimeError) as e:
         pipeline.stylize(cut_job, openai_ctx(handler), "openai-image", [1], lambda p, m: None)
     assert len(calls) == 1  # no point retrying without credit
-    assert "no usable credit" in str(e.value) and "You exceeded your current quota" in str(e.value)
+    assert "no usable credit" in str(e.value) and "You exceeded your current quota" in e.value.detail
+
+
+def test_openai_limit_zero_is_explained_and_never_retried(cut_job):
+    calls = []
+    said = ("Request too large for gpt-image-2.5-flare (for limit gpt-image) in organization org-x on tokens per min "
+            "(TPM): Limit 0, Requested 325. You can increase your rate limit by adding a payment method.")
+
+    def handler(request):
+        calls.append(1)
+        return httpx.Response(429, headers={"retry-after": "2"},
+                              json={"error": {"code": "rate_limit_exceeded", "message": said}})
+
+    with pytest.raises(RuntimeError) as e:
+        pipeline.stylize(cut_job, openai_ctx(handler), "openai-image", [1], lambda p, m: None)
+    assert len(calls) == 1  # waiting can't fix a limit of 0
+    assert "allowance of 0" in str(e.value) and e.value.detail == said
+    assert [label for label, _ in e.value.links] == ["Open Billing", "Open Limits"]
+    assert any("buy at least $5" in step for step in e.value.steps)
+
+
+def test_task_errors_carry_details_links_and_steps():
+    from formstudio.engines.base import EngineError
+
+    w = Worker(Bus())
+
+    def boom(progress):
+        raise EngineError("Plain message.", "Service words", [("Open Billing", "https://example.com/billing")], ["Do this."])
+
+    t = w.submit("job-err", "stylize", boom)
+    for _ in range(200):
+        if t.status == "error":
+            break
+        time.sleep(0.01)
+    pub = t.public()
+    assert pub["error"] == "Plain message." and pub["error_detail"] == "Service words"
+    assert pub["error_links"] == [{"label": "Open Billing", "url": "https://example.com/billing"}]
+    assert pub["error_steps"] == ["Do this."]
 
 
 class ParallelStylizer(SlowStylizer):

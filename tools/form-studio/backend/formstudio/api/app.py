@@ -357,7 +357,7 @@ def test_key(service: str = "fal") -> dict[str, Any]:
             return {"ok": False, "message": f"The key works, but it can't use {model}. Pick another image model below, or check the key's project permissions."}
         if r.status_code >= 400:
             return {"ok": False, "message": f"Unexpected answer from OpenAI ({r.status_code})."}
-        return {"ok": True, "message": f"Key works and can use {model}. Credit and per-minute limits are only checked when you generate; if that fails, the message shows OpenAI's reason."}
+        return {"ok": True, "message": f"Key works and can use {model}. OpenAI only reveals your image allowance (your usage tier) when you generate; if that fails, the message says exactly what to fix."}
     if service in ("openai", "meshy"):
         url, auth = {
             "openai": ("https://api.openai.com/v1/models", f"Bearer {key}"),

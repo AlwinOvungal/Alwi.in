@@ -13,9 +13,12 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from ..core import timing
-from ..engines.base import Cancelled
+from ..engines.base import Cancelled, EngineError
 
 log = logging.getLogger(__name__)
+
+
+_task_ids = itertools.count(1)
 
 
 @dataclass
@@ -30,16 +33,24 @@ class Task:
     progress: float = 0.0
     message: str = "Waiting in line"
     error: str | None = None
+    error_detail: str = ""  # the service's own words, shown folded away
+    error_links: list = field(default_factory=list)  # [(label, url)] where to fix it
+    error_steps: list = field(default_factory=list)  # what to do, in order
     queued_at: float = field(default_factory=time.time)
     started_at: float | None = None
     finished_at: float | None = None
     cancel: threading.Event = field(default_factory=threading.Event)
+    id: int = field(default_factory=lambda: next(_task_ids))  # tells one run from the next
 
     def public(self) -> dict[str, Any]:
         end = self.finished_at or time.time()
         return {
+            "id": self.id,
             "kind": self.kind, "status": self.status, "progress": round(self.progress, 3),
             "message": self.message, "error": self.error,
+            "error_detail": self.error_detail,
+            "error_links": [{"label": label, "url": url} for label, url in self.error_links],
+            "error_steps": list(self.error_steps),
             "elapsed": round(end - self.started_at, 1) if self.started_at else 0.0,
             "eta_s": round(self.eta_s, 1) if self.eta_s else None,
             "cancelling": self.cancel.is_set() and self.status in ("queued", "running"),
@@ -169,6 +180,8 @@ class Worker:
                 outcome = "error"
                 log.error("task %s/%s failed:\n%s", t.job_id, t.kind, traceback.format_exc())
                 t.status, t.error, t.message = "error", _friendly(e), "Failed"
+                if isinstance(e, EngineError):
+                    t.error_detail, t.error_links, t.error_steps = e.detail, list(e.links), list(e.steps)
             t.finished_at = time.time()
             self.current = None
             timing.record(f"task.{t.kind}", t.finished_at - (t.started_at or t.finished_at), outcome=outcome, **t.meta)
@@ -199,7 +212,7 @@ def _friendly(e: Exception) -> str:
     msg = str(e) or e.__class__.__name__
     if "out of memory" in msg.lower() or "MPS backend out of memory" in msg:
         return "Ran out of memory. Choose Lightest quality in Settings → Local AI, close other apps, or use a cloud engine."
-    if type(e) in EXPECTED:
+    if type(e) in EXPECTED or isinstance(e, EngineError):
         return msg
     where = _where(e)
     detail = f" (in {where})" if where else ""

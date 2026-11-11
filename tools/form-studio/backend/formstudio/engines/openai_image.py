@@ -7,16 +7,17 @@ the style; Form Studio then puts each result on clean white for the 3D step.
 from __future__ import annotations
 
 import base64
+import re
 import time
 
 import httpx
 
-from .base import EngineContext, Progress, StylizeInput
+from .base import EngineContext, EngineError, Progress, StylizeInput
 from .cloud import _clean_to_white, _data_uri
 
 API = "https://api.openai.com/v1/images/edits"
-MODELS = ["gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "gpt-image-2"]
-DEFAULT_MODEL = MODELS[0]
+MODELS = ["gpt-image-2.6-sunburst", "gpt-image-2.6-flare", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "gpt-image-2"]
+DEFAULT_MODEL = "gpt-image-2.5-sunburst"
 
 LEAD = (
     "Image 1 is the object to convert. "
@@ -72,7 +73,7 @@ class OpenAIImage:
                     progress(None, f"OpenAI asked to slow down; trying again in {left} s")
                     sleep(1)
         if r.status_code >= 400:
-            raise RuntimeError(_friendly(r))
+            raise _failure(r)
         data = r.json().get("data") or []
         if not data:
             raise RuntimeError("OpenAI returned no images. Try again.")
@@ -96,11 +97,20 @@ def _error(r: httpx.Response) -> tuple[str, str]:
 
 
 QUOTA_CODES = {"insufficient_quota", "billing_hard_limit_reached", "billing_not_active"}
+BILLING = ("Open Billing", "https://platform.openai.com/settings/organization/billing")
+LIMITS = ("Open Limits", "https://platform.openai.com/settings/organization/limits")
+VERIFY = ("Open Organization settings", "https://platform.openai.com/settings/organization/general")
+
+
+def _never_works(r: httpx.Response) -> bool:
+    """429s that waiting can't fix: no allowance at all (the free tier), a request bigger than the limit, or no credit."""
+    code, message = _error(r)
+    return code in QUOTA_CODES or bool(re.search(r"\bLimit 0\b", message)) or "request too large" in message.lower()
 
 
 def _retry_after(r: httpx.Response) -> float | None:
-    """Seconds to wait before trying again, for a temporary rate limit (never for missing credit)."""
-    if r.status_code != 429 or _error(r)[0] in QUOTA_CODES:
+    """Seconds to wait before trying again, for a temporary rate limit only."""
+    if r.status_code != 429 or _never_works(r):
         return None
     for h in ("retry-after", "x-ratelimit-reset-requests", "x-ratelimit-reset-images"):
         v = r.headers.get(h)
@@ -113,31 +123,53 @@ def _retry_after(r: httpx.Response) -> float | None:
     return 15.0
 
 
-def _friendly(r: httpx.Response) -> str:
+def _failure(r: httpx.Response) -> EngineError:
     code, message = _error(r)
-    said = f" OpenAI said: “{message}”" if message else ""
+    detail = message
     if r.status_code == 401:
-        return "OpenAI rejected the API key. Check it in Settings." + said
+        return EngineError("OpenAI rejected the API key. Check it in Settings → Cloud accounts → OpenAI.", detail)
+    if r.status_code == 429 and re.search(r"\bLimit 0\b", message):
+        return EngineError(
+            "Your OpenAI account isn't allowed to make images yet: OpenAI gives it an image allowance of 0, "
+            "which is the free tier. This is fixed on OpenAI's side, not in Form Studio. Until then, use the "
+            "free local engine.",
+            detail, [BILLING, LIMITS],
+            steps=[
+                "On platform.openai.com, open Settings → Billing, add a payment method and buy at least $5 of credit. "
+                "Free or promotional credit doesn't count.",
+                "Open Settings → Limits: it should show Usage tier 1. This can take a little while after paying.",
+                "Come back and press Generate again.",
+            ],
+        )
     if r.status_code == 429 and code in QUOTA_CODES:
-        return (
-            "OpenAI says this key's project has no usable credit. If you just added credit, give it 5–10 minutes. "
-            "Otherwise check on platform.openai.com: Settings → Limits (the project's monthly budget isn't $0) and "
-            "that this key belongs to the project you paid for." + said
+        return EngineError(
+            "OpenAI says this key's project has no usable credit.", detail, [BILLING, LIMITS],
+            steps=[
+                "If you just added credit, give it 5–10 minutes.",
+                "Check Settings → Limits: the project's monthly budget mustn't be $0.",
+                "Check that this API key belongs to the project and organization you paid for.",
+            ],
         )
     if r.status_code == 429:
-        return (
-            "OpenAI's rate limit for image generation was hit, even after waiting. New accounts start with a low "
-            "images-per-minute limit: generate 1 option at a time, or wait a few minutes." + said
+        return EngineError(
+            "OpenAI's rate limit for images was hit, even after waiting. New accounts start with a low "
+            "images-per-minute limit: make 1 option at a time, or wait a few minutes.", detail, [LIMITS],
         )
     if r.status_code == 403 and "verif" in message.lower():
-        return (
-            "OpenAI needs your organization verified before it allows its image models: platform.openai.com → "
-            "Settings → Organization → General → Verify Organization. It can take ~15 minutes to start working." + said
+        return EngineError(
+            "OpenAI needs your organization verified before it allows its image models.", detail, [VERIFY],
+            steps=["Settings → Organization → General → Verify Organization.",
+                   "It can take about 15 minutes to start working after verifying."],
         )
     if r.status_code == 400:
-        return f"OpenAI couldn't use this request: {message or 'invalid input'}"
+        return EngineError(f"OpenAI couldn't use this request: {message or 'invalid input'}")
     if r.status_code == 403:
-        return "This OpenAI key can't use that image model." + said
+        return EngineError("This OpenAI key can't use that image model. Pick another one in Settings → Cloud accounts → OpenAI.", detail)
     if r.status_code == 404:
-        return "OpenAI doesn't offer that image model to this key. Pick another model in Settings → Cloud accounts → OpenAI." + said
-    return f"OpenAI error ({r.status_code}). Try again.{said}"
+        return EngineError("OpenAI doesn't offer that image model to this key. Pick another model in Settings → Cloud accounts → OpenAI.", detail)
+    return EngineError(f"OpenAI error ({r.status_code}). Try again.", detail)
+
+
+def _friendly(r: httpx.Response) -> str:
+    e = _failure(r)
+    return str(e) + (f" OpenAI said: “{e.detail}”" if e.detail else "")
