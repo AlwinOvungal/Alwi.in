@@ -2,7 +2,8 @@
 
 Skipped unless FORMSTUDIO_SMOKE=1 and the SDXL models are already downloaded
 (Settings → Local AI models). It caught "'tuple' object has no attribute 'shape'"
-(attention slicing replacing the IP-Adapter's attention layers).
+(attention slicing replacing the IP-Adapter's attention layers) and
+"requires the keyword argument image_embeds" (a style without reference pictures).
 """
 import os
 from pathlib import Path
@@ -12,7 +13,8 @@ import pytest
 pytestmark = pytest.mark.skipif(os.environ.get("FORMSTUDIO_SMOKE") != "1", reason="set FORMSTUDIO_SMOKE=1 to run")
 
 
-def test_sdxl_restyle_runs_end_to_end(tmp_path, monkeypatch):
+@pytest.mark.parametrize("style_id", ["clay-minimal", "pixel-voxel"])  # with and without reference pictures
+def test_sdxl_restyle_runs_end_to_end(tmp_path, monkeypatch, style_id):
     pytest.importorskip("diffusers")
     monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
     from huggingface_hub import constants
@@ -32,7 +34,7 @@ def test_sdxl_restyle_runs_end_to_end(tmp_path, monkeypatch):
     ImageDraw.Draw(img).polygon([(150, 20), (40, 300), (260, 300)], fill=(40, 120, 50))
     img.save(photo)
     ingest.cutout(photo, tmp_path / "01_cutout.png")
-    style = get_style("clay-minimal")
+    style = get_style(style_id)
     style.stylize.update(size=256, steps=2)
     out = tmp_path / "c"
     out.mkdir()

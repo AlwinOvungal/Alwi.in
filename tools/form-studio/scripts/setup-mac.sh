@@ -5,6 +5,7 @@
 #   ./scripts/setup-mac.sh --cloud-only    skip the big local models (use fal.ai + offline engines)
 #   ./scripts/setup-mac.sh --with-hunyuan  also install Hunyuan3D-2 mini (better local 3D)
 #   ./scripts/setup-mac.sh --with-step     also install STEP export
+#   ./scripts/setup-mac.sh --reinstall-ai  reinstall the AI libraries and TripoSR's code from scratch
 #
 # Safe to run again: it updates what's there. Nothing here costs money.
 set -euo pipefail
@@ -13,12 +14,13 @@ ROOT="$(pwd)"
 FS_HOME="${FORMSTUDIO_HOME:-$HOME/FormStudio}"
 VENV="$ROOT/.venv"
 
-LOCAL_AI=1; HUNYUAN=0; STEP=0
+LOCAL_AI=1; HUNYUAN=0; STEP=0; REINSTALL_AI=0
 for arg in "$@"; do
   case "$arg" in
     --cloud-only) LOCAL_AI=0 ;;
     --with-hunyuan) HUNYUAN=1 ;;
     --with-step) STEP=1 ;;
+    --reinstall-ai) REINSTALL_AI=1 ;;
     *) echo "Unknown option: $arg"; exit 1 ;;
   esac
 done
@@ -67,6 +69,16 @@ EXTRAS="matting,heic"
 [ "$STEP" = 1 ] && EXTRAS="$EXTRAS,step"
 "$VENV/bin/pip" install --quiet -e "backend[$EXTRAS]"
 
+if [ "$REINSTALL_AI" = 1 ]; then
+  say "Reinstalling the AI libraries from scratch"
+  osascript -e 'tell application id "in.alwi.formstudio" to quit' >/dev/null 2>&1 || true
+  pkill -f "formstudio.desktop" >/dev/null 2>&1 || true
+  "$VENV/bin/pip" install --force-reinstall --no-cache-dir --no-deps \
+    torch torchvision diffusers transformers accelerate safetensors huggingface-hub rembg onnxruntime
+  "$VENV/bin/pip" install --quiet -e "backend[$EXTRAS]"   # put back anything those need
+  rm -rf "$FS_HOME/vendor/TripoSR"
+fi
+
 say "Removing old installs from the Python environment"
 "$VENV/bin/python" -I "$ROOT/scripts/cleanup_old_install.py" "$ROOT"
 if ! (cd "$ROOT/backend" && "$VENV/bin/python" -P -c "import formstudio, sys; sys.exit(0 if formstudio.__file__ and formstudio.__file__.endswith('backend/formstudio/__init__.py') else 1)") 2>/dev/null; then
@@ -101,6 +113,7 @@ cat <<MSG
 Open Form Studio from Launchpad, Spotlight, or ~/Applications, and drag it to your Dock.
 
 Local engines need AI models (SDXL 12 GB, TripoSR 1.9 GB), downloaded once. In the app, open
-Settings → Local AI models to download them with progress and time left.
+Settings → Local AI models to download them with progress and time left, or press Start over
+to delete every model download and fetch fresh copies.
 Your objects are saved in $FS_HOME/jobs.
 MSG

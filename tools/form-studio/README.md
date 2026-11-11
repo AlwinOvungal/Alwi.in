@@ -58,7 +58,12 @@ Spotlight and drag it to your Dock.
 Local engines need AI models, downloaded once into `~/.cache/huggingface`: SDXL restyle 12 GB,
 TripoSR 3D 1.9 GB (fast mode 6.5 GB and Hunyuan3D 4 GB only if you use them). Download them in
 **Settings → Local AI models** to see GB done, speed and time left. A stopped or interrupted download
-continues where it left off, and **Delete all models** frees the space again.
+continues where it left off.
+
+**Starting over:** Settings → Local AI models & engines → **Start over** deletes every downloaded model and engine
+(the background remover, TripoSR's code and all models) and downloads fresh copies of what your engines need, one
+after another. **Delete everything** only deletes. **Reinstall AI libraries…** opens Terminal and reinstalls PyTorch,
+diffusers and the other AI libraries from scratch (`./scripts/setup-mac.sh --reinstall-ai`).
 Your objects are saved in `~/FormStudio/jobs/`. Each one is a plain folder you can open in Finder.
 
 **To update later:** run `git pull`, then `./scripts/setup-mac.sh` again.

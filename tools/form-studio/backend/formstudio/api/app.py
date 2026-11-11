@@ -293,12 +293,12 @@ def test_key(service: str = "fal") -> dict[str, Any]:
     return {"ok": ok, "message": "Key works." if ok else "fal.ai rejected this key."}
 
 
-# ---- local AI models -------------------------------------------------------------
+# ---- local AI models and engines ---------------------------------------------------
 
 def _pack(pack: str) -> str:
     from .. import models
 
-    if pack not in models.PACKS:
+    if pack not in models.all_packs():
         raise HTTPException(404, "Unknown model pack")
     return pack
 
@@ -307,11 +307,27 @@ def _generation_running() -> bool:
     return any(t.status in ("queued", "running") for t in worker.tasks.values())
 
 
+def _no_generation(what: str = "deleting models") -> None:
+    if _generation_running():
+        raise HTTPException(409, f"Wait for the current step to finish before {what}.")
+
+
 @app.get("/api/models")
-def list_models() -> list[dict[str, Any]]:
+def list_models() -> dict[str, Any]:
     from .. import models
 
     return models.overview()
+
+
+@app.post("/api/models/start-over", status_code=202)
+def start_over() -> dict[str, Any]:
+    """Delete every model and engine download, then download what the current engines need."""
+    from .. import models
+
+    _no_generation("starting over")
+    q = models.downloads.start_over(settings_mod.load())
+    _size_cache["data"] = None
+    return q.public(models.downloads.states)
 
 
 @app.post("/api/models/{pack}/download", status_code=202)
@@ -319,10 +335,9 @@ def download_models(pack: str, fresh: bool = False) -> dict[str, Any]:
     from .. import models
 
     _pack(pack)
-    if fresh and _generation_running():
-        raise HTTPException(409, "Wait for the current step to finish before deleting models.")
-    if fresh:  # a truly fresh download: no reused chunks either
-        models.clear_chunk_cache()
+    if fresh:
+        _no_generation()
+        models.clear_chunk_cache()  # a truly fresh download: no reused chunks either
     return models.downloads.start(pack, fresh=fresh).public()
 
 
@@ -334,32 +349,46 @@ def stop_models(pack: str) -> dict[str, bool]:
     return {"ok": True}
 
 
-def _delete_packs(packs: list[str]) -> dict[str, Any]:
+@app.delete("/api/models/{pack}")
+def delete_models(pack: str) -> dict[str, Any]:
     from .. import models
 
-    if any(models.downloads.running(p) for p in packs):
+    _pack(pack)
+    if models.downloads.running(pack):
         raise HTTPException(409, "Stop the download first.")
-    if _generation_running():
-        raise HTTPException(409, "Wait for the current step to finish before deleting models.")
-    freed = sum(models.delete(p) for p in packs)
-    if set(packs) == set(models.PACKS):  # everything goes: also Hugging Face's shared chunk cache
-        freed += models.clear_chunk_cache()
-    for p in packs:
-        models.downloads.states.pop(p, None)
+    _no_generation()
+    freed = models.delete(pack)
+    models.downloads.states.pop(pack, None)
     _size_cache["data"] = None
     return {"ok": True, "freed_bytes": freed}
 
 
-@app.delete("/api/models/{pack}")
-def delete_models(pack: str) -> dict[str, Any]:
-    return _delete_packs([_pack(pack)])
-
-
 @app.delete("/api/models")
 def delete_all_models() -> dict[str, Any]:
+    """Every model and engine download (stops downloads in progress)."""
     from .. import models
 
-    return _delete_packs(list(models.PACKS))
+    _no_generation()
+    freed = models.downloads.delete_everything()
+    models.downloads.queue = None
+    _size_cache["data"] = None
+    return {"ok": True, "freed_bytes": freed}
+
+
+REINSTALL_CMD = "cd {root} && ./scripts/setup-mac.sh --reinstall-ai"
+
+
+@app.post("/api/models/reinstall-libraries")
+def reinstall_libraries() -> dict[str, Any]:
+    """The AI libraries live in the Python environment this app runs from, so a Terminal script reinstalls them."""
+    import shlex
+
+    cmd = REINSTALL_CMD.format(root=shlex.quote(str(paths.PROJECT_DIR)))
+    opened = False
+    if platform.system() == "Darwin":
+        script = f'tell application "Terminal" to do script "{cmd}"\ntell application "Terminal" to activate'
+        opened = subprocess.run(["osascript", "-e", script], capture_output=True).returncode == 0
+    return {"opened": opened, "command": cmd}
 
 
 # ---- storage -----------------------------------------------------------------------

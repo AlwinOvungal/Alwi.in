@@ -204,8 +204,19 @@ export interface StorageItem {
   bytes: number;
 }
 
+export interface ModelQueue {
+  packs: string[];
+  step: number;
+  total: number;
+  current: string | null;
+  status: "running" | "done" | "error" | "stopped";
+  message: string;
+  error: string | null;
+}
+
 export interface ModelPack {
   id: string;
+  engine: boolean;
   label: string;
   used_by: string;
   status: "missing" | "partial" | "ready" | "unknown";
@@ -240,7 +251,9 @@ export const api = {
   storage: (refresh = false) =>
     req<{ home: string; items: StorageItem[]; total_models_bytes: number }>("GET", `/api/storage${refresh ? "?refresh=1" : ""}`),
   openStorage: (id: string) => req<{ ok: boolean }>("POST", "/api/storage/open", { id }),
-  models: () => req<ModelPack[]>("GET", "/api/models"),
+  models: () => req<{ packs: ModelPack[]; queue: ModelQueue | null }>("GET", "/api/models"),
+  startOver: () => req<ModelQueue>("POST", "/api/models/start-over"),
+  reinstallLibraries: () => req<{ opened: boolean; command: string }>("POST", "/api/models/reinstall-libraries"),
   downloadModels: (id: string, fresh = false) => req<unknown>("POST", `/api/models/${id}/download${fresh ? "?fresh=1" : ""}`),
   stopModels: (id: string) => req<{ ok: boolean }>("POST", `/api/models/${id}/stop`),
   deleteModels: (id?: string) => req<{ ok: boolean; freed_bytes: number }>("DELETE", id ? `/api/models/${id}` : "/api/models"),

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, Engines, formatBytes, ModelPack, Settings, StorageItem } from "./api";
+import { api, Engines, formatBytes, ModelPack, ModelQueue, Settings, StorageItem } from "./api";
 import { EnginePicker, Switch, useToast } from "./ui";
 
 type Save = (patch: Parameters<typeof api.saveSettings>[0], msg?: string) => Promise<void>;
@@ -55,12 +55,15 @@ function KeyCard(props: {
 
 function ModelsCard() {
   const [packs, setPacks] = useState<ModelPack[] | null>(null);
+  const [queue, setQueue] = useState<ModelQueue | null>(null);
+  const [reinstall, setReinstall] = useState<{ opened: boolean; command: string } | null>(null);
   const toast = useToast();
-  const load = () => api.models().then(setPacks).catch((e) => toast(e.message, true));
+  const load = () =>
+    api.models().then((r) => (setPacks(r.packs), setQueue(r.queue))).catch((e) => toast(e.message, true));
   useEffect(() => {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
-  const downloading = packs?.some((p) => p.download?.status === "downloading");
+  const downloading = packs?.some((p) => p.download?.status === "downloading") || queue?.status === "running";
   useEffect(() => {
     if (!downloading) return;
     const t = setInterval(load, 1000);
@@ -77,23 +80,68 @@ function ModelsCard() {
     load();
   };
   const onDisk = packs?.reduce((n, p) => n + p.on_disk_bytes, 0) ?? 0;
+  const label = (id: string) => packs?.find((p) => p.id === id)?.label ?? id;
+  const startOver = () => {
+    if (!confirm(`Start over?\n\nThis deletes every downloaded model and engine (${formatBytes(onDisk)}) and then downloads fresh copies of what your engines need.`)) return;
+    act(() => api.startOver(), "Starting over: deleted, now downloading fresh copies");
+  };
+  const reinstallLibs = async () => {
+    if (!confirm("Reinstall the AI libraries?\n\nForm Studio will quit and a Terminal window will reinstall PyTorch, diffusers and the other AI libraries. Reopen Form Studio when it finishes.")) return;
+    try {
+      setReinstall(await api.reinstallLibraries());
+    } catch (e) {
+      toast((e as Error).message, true);
+    }
+  };
 
   return (
     <div className="card panel stack">
       <div className="row" style={{ justifyContent: "space-between" }}>
-        <h2>Local AI models</h2>
-        <button
-          className="btn sm ghost danger"
-          disabled={!onDisk || downloading}
-          onClick={() => confirm(`Delete all downloaded models and free ${formatBytes(onDisk)}? They can be downloaded again any time.`) && act(() => api.deleteModels(), "Models deleted")}
-        >
-          Delete all models
-        </button>
+        <h2>Local AI models &amp; engines</h2>
       </div>
       <p className="small muted" style={{ margin: 0 }}>
         Free engines that run on this Mac need these. Download them here to see progress and time left; an interrupted
         download continues where it stopped. Cloud engines need none of this.
       </p>
+
+      <div className="start-over">
+        <div className="stack" style={{ gap: 4 }}>
+          <strong style={{ fontWeight: 500 }}>Start over</strong>
+          <span className="small muted">
+            Deletes every model and engine download ({formatBytes(onDisk)} now), then downloads fresh copies of what your
+            engines need, one after another.
+          </span>
+        </div>
+        <div className="row">
+          <button className="btn sm primary" disabled={downloading} onClick={startOver}>Start over</button>
+          <button
+            className="btn sm ghost danger"
+            disabled={!onDisk || downloading}
+            onClick={() => confirm(`Delete every downloaded model and engine (${formatBytes(onDisk)})? Nothing is downloaded again until you ask.`) && act(() => api.deleteModels(), "Deleted")}
+          >
+            Delete everything
+          </button>
+          <button className="btn sm ghost" onClick={reinstallLibs}>Reinstall AI libraries…</button>
+        </div>
+        {queue && queue.status === "running" && (
+          <div className="note info" style={{ display: "block" }}>
+            <b>Step {queue.step} of {queue.total}</b> · {queue.current ? label(queue.current) : ""}
+            <div className="small muted">{queue.packs.map((p, i) => `${i < queue.step - 1 ? "✓" : i === queue.step - 1 ? "↓" : "·"} ${label(p)}`).join("   ")}</div>
+          </div>
+        )}
+        {queue && queue.status === "done" && <div className="note ok">{queue.message}</div>}
+        {queue && (queue.status === "error" || queue.status === "stopped") && (
+          <div className="note bad">Start over stopped at {queue.current ? label(queue.current) : "a download"}: {queue.error ?? "stopped"}. Press Start over or that row's Download to continue.</div>
+        )}
+        {reinstall && (
+          <div className="note info" style={{ display: "block" }}>
+            {reinstall.opened
+              ? "Terminal is reinstalling the AI libraries. Form Studio will quit; reopen it when Terminal says Done, then press Start over."
+              : "Run this in Terminal (Form Studio quits while it runs), then reopen the app and press Start over:"}
+            <div className="kbd" style={{ marginTop: 6, display: "block", whiteSpace: "pre-wrap", wordBreak: "break-all" }}>{reinstall.command}</div>
+          </div>
+        )}
+      </div>
       <div className="files">
         {packs?.map((p) => {
           const d = p.download;

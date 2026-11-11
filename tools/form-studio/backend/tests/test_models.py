@@ -153,13 +153,13 @@ def test_models_api(fake_hub):
     from formstudio.api.app import app
 
     with TestClient(app) as c:
-        rows = {r["id"]: r for r in c.get("/api/models").json()}
-        assert {"sdxl", "sdxl-turbo", "triposr", "hunyuan", "test"} <= set(rows)
+        rows = {r["id"]: r for r in c.get("/api/models").json()["packs"]}
+        assert {"matting", "triposr-code", "sdxl", "sdxl-turbo", "triposr", "hunyuan", "test"} <= set(rows)
         assert rows["test"]["status"] == "missing" and rows["test"]["total_bytes"] == 5100
         r = c.post("/api/models/test/download")
         assert r.status_code == 202
         for _ in range(200):
-            row = {x["id"]: x for x in c.get("/api/models").json()}["test"]
+            row = {x["id"]: x for x in c.get("/api/models").json()["packs"]}["test"]
             if row["download"]["status"] != "downloading":
                 break
             time.sleep(0.02)
@@ -202,3 +202,84 @@ def test_delete_follows_links_into_the_shared_store(fake_hub):
     freed = models.delete("test")
     assert freed >= 7000
     assert not mine.exists() and shared.exists()  # shared data kept for the other model
+
+
+@pytest.fixture
+def fake_engines(tmp_path, monkeypatch, fake_hub):
+    u2net = tmp_path / "u2net"
+    monkeypatch.setenv("U2NET_HOME", str(u2net))
+    vendor = models.paths.home() / "vendor" / "TripoSR"
+
+    def matting():
+        (u2net / "models").mkdir(parents=True, exist_ok=True)  # newer rembg keeps models one folder down
+        (u2net / "models" / "isnet-general-use.onnx").write_bytes(b"o" * (60 * 1024**2))
+
+    def triposr(dest):
+        (dest / "tsr").mkdir(parents=True)
+        (dest / "tsr" / "system.py").write_text("# fake")
+
+    monkeypatch.setattr(models, "_matting_download", matting)
+    monkeypatch.setattr(models, "_triposr_download", triposr)
+    yield u2net, vendor
+    import shutil
+
+    shutil.rmtree(vendor, ignore_errors=True)
+
+
+def test_engine_packs_download_and_delete(fake_engines):
+    u2net, vendor = fake_engines
+    for pack in ("matting", "triposr-code"):
+        assert models.status(pack)["status"] == "missing"
+        models.download(pack)
+        assert models.status(pack)["status"] == "ready"
+    assert (vendor / "tsr").is_dir()
+    assert models.delete("matting") >= 60 * 1024**2 and not u2net.exists()
+    models.delete("triposr-code")
+    assert not vendor.exists()
+
+
+def test_packs_needed_follow_the_engines():
+    assert models.packs_needed({"engines": {"stylize": "local-sdxl", "reconstruct": "triposr"}}) == \
+        ["matting", "sdxl", "triposr-code", "triposr"]
+    assert models.packs_needed({"engines": {"stylize": "local-sdxl", "reconstruct": "triposr"}, "fast_mode": True})[1] == "sdxl-turbo"
+    assert models.packs_needed({"engines": {"stylize": "openai-image", "reconstruct": "meshy"}}) == ["matting"]
+
+
+def test_start_over_deletes_everything_then_downloads(fake_engines, monkeypatch):
+    u2net, vendor = fake_engines
+    models.download("test")
+    models.download("matting")
+    stale = models.hub_cache() / "models--org--model-a" / "stale.bin"
+    stale.write_bytes(b"old")
+    monkeypatch.setattr(models, "packs_needed", lambda settings: ["matting", "triposr-code", "test"])
+    dl = models.Downloads()
+    q = dl.start_over({})
+    assert not stale.exists()  # the old files went first
+    for _ in range(300):
+        if q.status != "running":
+            break
+        time.sleep(0.02)
+    assert q.status == "done" and q.public(dl.states)["step"] == 3
+    assert all(models.status(p)["status"] == "ready" for p in ("matting", "triposr-code", "test"))
+
+
+def test_start_over_api_and_refusal_during_generation(fake_engines, monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from formstudio.api import app as app_mod
+
+    monkeypatch.setattr(models, "packs_needed", lambda settings: ["matting"])
+    with TestClient(app_mod.app) as c:
+        r = c.post("/api/models/start-over")
+        assert r.status_code == 202 and r.json()["total"] == 1
+        for _ in range(200):
+            q = c.get("/api/models").json()["queue"]
+            if q["status"] != "running":
+                break
+            time.sleep(0.02)
+        assert q["status"] == "done"
+        assert c.delete("/api/models").json()["freed_bytes"] >= 60 * 1024**2
+        r = c.post("/api/models/reinstall-libraries").json()
+        assert r["command"].endswith("./scripts/setup-mac.sh --reinstall-ai") and r["opened"] is False  # Linux
+        monkeypatch.setattr(app_mod, "_generation_running", lambda: True)
+        assert c.post("/api/models/start-over").status_code == 409

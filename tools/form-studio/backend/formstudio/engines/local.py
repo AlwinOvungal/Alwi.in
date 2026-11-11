@@ -94,6 +94,18 @@ def _ensure_models(pack: str, progress: Progress, lo: float = 0.0, hi: float = 0
     downloads.ensure(pack, lambda p, m: progress(None if p is None else lo + (hi - lo) * p, m))
 
 
+def style_reference(style) -> tuple[Image.Image, float]:
+    """The picture the IP-Adapter copies the look from, and how strongly.
+
+    The SDXL pipeline always has the IP-Adapter loaded, and it refuses to run without
+    an image ("requires the keyword argument image_embeds"). A style without reference
+    pictures gets a plain white image at strength 0, so its words alone set the look.
+    """
+    if style.reference is not None:
+        return Image.open(style.reference).convert("RGB"), float(style.stylize.get("ip_adapter_scale", 0.6))
+    return Image.new("RGB", (224, 224), (255, 255, 255)), 0.0
+
+
 def _on_white(img: Image.Image) -> Image.Image:
     """Clean the generated image: object on pure white, ready for 3D."""
     rgba = remove_background(img)
@@ -168,9 +180,9 @@ class LocalSDXL:
         progress(None, "Loading the models into memory")
         pipe = self._pipe(ctx, fast)
         depth = None if fast else self._depth(ctx, photo)
-        ref = Image.open(inp.style.reference).convert("RGB") if (inp.style.reference and not fast) else None
-        if not fast and hasattr(pipe, "set_ip_adapter_scale"):
-            pipe.set_ip_adapter_scale(float(cfg.get("ip_adapter_scale", 0.6)))
+        ref, ip_scale = (None, 0.0) if fast else style_reference(inp.style)
+        if ref is not None and ip_scale == 0.0:
+            progress(None, "Style from words only. Add reference pictures in Styles for a closer match.")
 
         out = []
         n = len(inp.seeds)
@@ -182,6 +194,8 @@ class LocalSDXL:
                 return kw
 
             gen = torch.Generator("cpu").manual_seed(int(seed))
+            if not fast and hasattr(pipe, "set_ip_adapter_scale"):
+                pipe.set_ip_adapter_scale(ip_scale)  # every run: one style's strength must not carry over
             prompt = inp.style.prompt_for(inp.subject)
             if fast:
                 img = pipe(prompt=prompt, image=photo, strength=0.6, num_inference_steps=steps, guidance_scale=0.0,
@@ -240,14 +254,13 @@ class LocalTripoSR:
         why = missing("torch", "omegaconf", "einops")
         if why:
             return False, why
-        if not (triposr_dir() / "tsr").exists():
-            return False, f"TripoSR code not found in {triposr_dir()}. Run scripts/setup-mac.sh."
-        return True, ""
+        return True, ""  # the code and model download on first use (Settings → Local AI models)
 
     def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
         import torch
         import trimesh
 
+        _ensure_models("triposr-code", progress, 0.0, 0.02)
         sys.path.insert(0, str(triposr_dir()))
         _install_torchmcubes_shim()
         from tsr.system import TSR  # type: ignore
