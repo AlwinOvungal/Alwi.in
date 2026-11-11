@@ -98,7 +98,10 @@ function NewObject({ styles, claude }: { styles: Style[]; claude: boolean }) {
     setFile(f);
     setPreview(URL.createObjectURL(f));
     // with Claude on, leave it empty so Claude names it; otherwise guess from the file name
-    setSubject(claude ? "" : f.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").replace(/\b(img|dsc|photo)\s*\d*\b/gi, "").trim());
+    // names like "Pasted 11 11 2026 at 11.57.58", "Screenshot …" or "IMG_1234" say nothing about the object
+    const guess = f.name.replace(/\.[^.]+$/, "").replace(/[_-]+/g, " ").trim();
+    const meaningless = /^(pasted|screenshot|screen shot|image|img|dsc|photo|pxl|whatsapp)\b/i.test(guess) || !/[a-z]{3}/i.test(guess);
+    setSubject(claude || meaningless ? "" : guess);
   };
 
   const create = async () => {

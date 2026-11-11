@@ -293,6 +293,75 @@ def test_key(service: str = "fal") -> dict[str, Any]:
     return {"ok": ok, "message": "Key works." if ok else "fal.ai rejected this key."}
 
 
+# ---- local AI models -------------------------------------------------------------
+
+def _pack(pack: str) -> str:
+    from .. import models
+
+    if pack not in models.PACKS:
+        raise HTTPException(404, "Unknown model pack")
+    return pack
+
+
+def _generation_running() -> bool:
+    return any(t.status in ("queued", "running") for t in worker.tasks.values())
+
+
+@app.get("/api/models")
+def list_models() -> list[dict[str, Any]]:
+    from .. import models
+
+    return models.overview()
+
+
+@app.post("/api/models/{pack}/download", status_code=202)
+def download_models(pack: str, fresh: bool = False) -> dict[str, Any]:
+    from .. import models
+
+    _pack(pack)
+    if fresh and _generation_running():
+        raise HTTPException(409, "Wait for the current step to finish before deleting models.")
+    if fresh:  # a truly fresh download: no reused chunks either
+        models.clear_chunk_cache()
+    return models.downloads.start(pack, fresh=fresh).public()
+
+
+@app.post("/api/models/{pack}/stop")
+def stop_models(pack: str) -> dict[str, bool]:
+    from .. import models
+
+    models.downloads.stop(_pack(pack))
+    return {"ok": True}
+
+
+def _delete_packs(packs: list[str]) -> dict[str, Any]:
+    from .. import models
+
+    if any(models.downloads.running(p) for p in packs):
+        raise HTTPException(409, "Stop the download first.")
+    if _generation_running():
+        raise HTTPException(409, "Wait for the current step to finish before deleting models.")
+    freed = sum(models.delete(p) for p in packs)
+    if set(packs) == set(models.PACKS):  # everything goes: also Hugging Face's shared chunk cache
+        freed += models.clear_chunk_cache()
+    for p in packs:
+        models.downloads.states.pop(p, None)
+    _size_cache["data"] = None
+    return {"ok": True, "freed_bytes": freed}
+
+
+@app.delete("/api/models/{pack}")
+def delete_models(pack: str) -> dict[str, Any]:
+    return _delete_packs([_pack(pack)])
+
+
+@app.delete("/api/models")
+def delete_all_models() -> dict[str, Any]:
+    from .. import models
+
+    return _delete_packs(list(models.PACKS))
+
+
 # ---- storage -----------------------------------------------------------------------
 
 _size_cache: dict[str, Any] = {"at": 0.0, "data": None}

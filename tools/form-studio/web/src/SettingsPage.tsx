@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, Engines, formatBytes, Settings, StorageItem } from "./api";
+import { api, Engines, formatBytes, ModelPack, Settings, StorageItem } from "./api";
 import { EnginePicker, Switch, useToast } from "./ui";
 
 type Save = (patch: Parameters<typeof api.saveSettings>[0], msg?: string) => Promise<void>;
@@ -49,6 +49,100 @@ function KeyCard(props: {
       )}
       {msg && <div className={`note ${msg.ok ? "ok" : "bad"}`}>{msg.message}</div>}
       {children}
+    </div>
+  );
+}
+
+function ModelsCard() {
+  const [packs, setPacks] = useState<ModelPack[] | null>(null);
+  const toast = useToast();
+  const load = () => api.models().then(setPacks).catch((e) => toast(e.message, true));
+  useEffect(() => {
+    load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const downloading = packs?.some((p) => p.download?.status === "downloading");
+  useEffect(() => {
+    if (!downloading) return;
+    const t = setInterval(load, 1000);
+    return () => clearInterval(t);
+  }, [downloading]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const act = async (fn: () => Promise<unknown>, msg?: string) => {
+    try {
+      await fn();
+      if (msg) toast(msg);
+    } catch (e) {
+      toast((e as Error).message, true);
+    }
+    load();
+  };
+  const onDisk = packs?.reduce((n, p) => n + p.on_disk_bytes, 0) ?? 0;
+
+  return (
+    <div className="card panel stack">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <h2>Local AI models</h2>
+        <button
+          className="btn sm ghost danger"
+          disabled={!onDisk || downloading}
+          onClick={() => confirm(`Delete all downloaded models and free ${formatBytes(onDisk)}? They can be downloaded again any time.`) && act(() => api.deleteModels(), "Models deleted")}
+        >
+          Delete all models
+        </button>
+      </div>
+      <p className="small muted" style={{ margin: 0 }}>
+        Free engines that run on this Mac need these. Download them here to see progress and time left; an interrupted
+        download continues where it stopped. Cloud engines need none of this.
+      </p>
+      <div className="files">
+        {packs?.map((p) => {
+          const d = p.download;
+          const active = d?.status === "downloading";
+          const total = p.total_bytes ?? d?.total_bytes ?? 0;
+          const chip =
+            p.status === "ready" ? "Ready" : p.status === "partial" ? `Partly downloaded (${formatBytes(p.done_bytes)} of ${formatBytes(total)})` : p.status === "unknown" ? `${formatBytes(p.on_disk_bytes)} on disk` : "Not downloaded";
+          return (
+            <div key={p.id} className="model-row">
+              <div className="stack" style={{ gap: 4, minWidth: 0 }}>
+                <div className="row" style={{ gap: 8 }}>
+                  <strong style={{ fontWeight: 500 }}>{p.label}</strong>
+                  {total > 0 && <span className="label">{formatBytes(total)}</span>}
+                  <span className={`chip ${p.status === "ready" ? "" : "offline"}`}><span className="dot" />{active ? "Downloading" : chip}</span>
+                </div>
+                <span className="small muted">{p.used_by}</span>
+                {active && d && (
+                  <div className="progress">
+                    <span className="small">{d.message}</span>
+                    <div className={`bar ${d.done_bytes <= 0 ? "indet" : ""}`}><i style={{ width: `${d.total_bytes ? (100 * d.done_bytes) / d.total_bytes : 0}%` }} /></div>
+                  </div>
+                )}
+                {!active && d && (d.status === "error" || d.status === "stopped") && (
+                  <div className={`note ${d.status === "error" ? "bad" : "info"}`}>{d.error || d.message}</div>
+                )}
+              </div>
+              <div className="row" style={{ justifyContent: "flex-end" }}>
+                {active ? (
+                  <button className="btn sm" onClick={() => act(() => api.stopModels(p.id))}>Stop</button>
+                ) : (
+                  <>
+                    {p.status !== "ready" && (
+                      <button className="btn sm primary" onClick={() => act(() => api.downloadModels(p.id))}>
+                        {p.status === "partial" ? "Resume" : "Download"}
+                      </button>
+                    )}
+                    {p.on_disk_bytes > 0 && (
+                      <>
+                        <button className="btn sm" onClick={() => confirm(`Delete ${p.label} and download it again from scratch?`) && act(() => api.downloadModels(p.id, true))}>Download fresh</button>
+                        <button className="btn sm ghost danger" onClick={() => confirm(`Delete ${p.label} (${formatBytes(p.on_disk_bytes)})?`) && act(() => api.deleteModels(p.id), "Deleted")}>Delete</button>
+                      </>
+                    )}
+                  </>
+                )}
+              </div>
+            </div>
+          );
+        }) ?? <p className="small muted">Checking models…</p>}
+      </div>
     </div>
   );
 }
@@ -297,6 +391,7 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
           <p className="small muted" style={{ margin: 0 }}>Your objects live in <span className="kbd">~/FormStudio/jobs</span>, your styles in <span className="kbd">~/FormStudio/styles</span>.</p>
         </div>
       </div>
+      <ModelsCard />
       <StorageCard />
     </div>
   );

@@ -8,6 +8,7 @@ import pytest
 # isolate every test run from the real ~/FormStudio
 os.environ["FORMSTUDIO_HOME"] = tempfile.mkdtemp(prefix="formstudio-test-")
 os.environ["FORMSTUDIO_MATTING"] = "threshold"
+os.environ["HF_HUB_OFFLINE"] = "1"  # tests never download models
 
 
 @pytest.fixture(scope="session")

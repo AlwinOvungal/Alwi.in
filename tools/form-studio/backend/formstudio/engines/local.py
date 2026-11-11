@@ -71,6 +71,24 @@ def unload_all() -> None:
     _empty_cache()
 
 
+def _speedups(pipe) -> None:
+    """Memory savers, whichever way the installed diffusers spells them."""
+    if hasattr(pipe, "enable_attention_slicing"):
+        pipe.enable_attention_slicing()
+    vae = getattr(pipe, "vae", None)
+    if vae is not None and hasattr(vae, "enable_tiling"):
+        vae.enable_tiling()
+    elif hasattr(pipe, "enable_vae_tiling"):
+        pipe.enable_vae_tiling()
+
+
+def _ensure_models(pack: str, progress: Progress, lo: float = 0.0, hi: float = 0.02) -> None:
+    """Download the engine's models first (with GB, speed and time left), if they're missing."""
+    from ..models import downloads
+
+    downloads.ensure(pack, lambda p, m: progress(None if p is None else lo + (hi - lo) * p, m))
+
+
 def _on_white(img: Image.Image) -> Image.Image:
     """Clean the generated image: object on pure white, ready for 3D."""
     rgba = remove_background(img)
@@ -103,7 +121,7 @@ class LocalSDXL:
 
                 p = AutoPipelineForImage2Image.from_pretrained("stabilityai/sdxl-turbo", torch_dtype=dtype, variant="fp16" if dtype == torch.float16 else None)
                 p.to(device)
-                p.enable_attention_slicing()
+                _speedups(p)
                 return p
 
             return _cached(f"sdxl-turbo:{device}", make)
@@ -119,8 +137,7 @@ class LocalSDXL:
             )
             p.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models", weight_name="ip-adapter_sdxl.safetensors")
             p.to(device)
-            p.enable_attention_slicing()
-            p.enable_vae_tiling()
+            _speedups(p)
             return p
 
         return _cached(f"sdxl:{device}", make)
@@ -142,11 +159,12 @@ class LocalSDXL:
         cfg = inp.style.stylize
         size = 512 if fast else int(cfg.get("size", 1024))
         photo = Image.open(inp.cutout).convert("RGB").resize((size, size), Image.LANCZOS)
-        progress(0.02, "Loading models (first run downloads ~10 GB)")
+        _ensure_models("sdxl-turbo" if fast else "sdxl", progress, 0.0, 0.5)
+        progress(None, "Loading the models into memory")
         pipe = self._pipe(ctx, fast)
         depth = None if fast else self._depth(ctx, photo)
         ref = Image.open(inp.style.reference).convert("RGB") if (inp.style.reference and not fast) else None
-        if not fast:
+        if not fast and hasattr(pipe, "set_ip_adapter_scale"):
             pipe.set_ip_adapter_scale(float(cfg.get("ip_adapter_scale", 0.6)))
 
         out = []
@@ -238,7 +256,8 @@ class LocalTripoSR:
             m.to(device)
             return m
 
-        progress(0.05, "Loading TripoSR (first run downloads ~1.7 GB)")
+        _ensure_models("triposr", progress, 0.0, 0.25)
+        progress(None, "Loading TripoSR into memory")
         model = _cached(f"triposr:{device}", make)
         img = resize_foreground(_rgba(inp), 0.85)
         arr = np.asarray(img).astype(np.float32) / 255.0
@@ -283,7 +302,8 @@ class LocalHunyuanMini:
                 "tencent/Hunyuan3D-2mini", subfolder="hunyuan3d-dit-v2-mini", use_safetensors=True, device=device,
             )
 
-        progress(0.05, "Loading Hunyuan3D-2 mini (first run downloads ~2.5 GB)")
+        _ensure_models("hunyuan", progress, 0.0, 0.2)
+        progress(None, "Loading Hunyuan3D-2 mini into memory")
         pipe = _cached(f"hunyuan:{device}", make)
         progress(0.25, "Building the shape")
         steps = 30

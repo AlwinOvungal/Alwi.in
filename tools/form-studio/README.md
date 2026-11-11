@@ -55,7 +55,10 @@ Spotlight and drag it to your Dock.
 | `--with-hunyuan` | Adds Hunyuan3D-2 mini, which gives better local 3D shapes. |
 | `--with-step` | Adds STEP export. |
 
-The first local run downloads the AI models (about 10 GB, once) into `~/.cache/huggingface`.
+Local engines need AI models, downloaded once into `~/.cache/huggingface`: SDXL restyle 12 GB,
+TripoSR 3D 1.9 GB (fast mode 6.5 GB and Hunyuan3D 4 GB only if you use them). Download them in
+**Settings → Local AI models** to see GB done, speed and time left. A stopped or interrupted download
+continues where it left off, and **Delete all models** frees the space again.
 Your objects are saved in `~/FormStudio/jobs/`. Each one is a plain folder you can open in Finder.
 
 **To update later:** run `git pull`, then `./scripts/setup-mac.sh` again.

@@ -100,6 +100,7 @@ say "Done"
 cat <<MSG
 Open Form Studio from Launchpad, Spotlight, or ~/Applications, and drag it to your Dock.
 
-The first local run downloads the AI models (about 10 GB, once) into ~/.cache/huggingface.
+Local engines need AI models (SDXL 12 GB, TripoSR 1.9 GB), downloaded once. In the app, open
+Settings → Local AI models to download them with progress and time left.
 Your objects are saved in $FS_HOME/jobs.
 MSG

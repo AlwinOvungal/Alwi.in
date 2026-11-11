@@ -204,6 +204,25 @@ export interface StorageItem {
   bytes: number;
 }
 
+export interface ModelPack {
+  id: string;
+  label: string;
+  used_by: string;
+  status: "missing" | "partial" | "ready" | "unknown";
+  total_bytes: number | null;
+  done_bytes: number;
+  on_disk_bytes: number;
+  download: {
+    status: "idle" | "downloading" | "done" | "error" | "stopped";
+    done_bytes: number;
+    total_bytes: number;
+    speed: number;
+    eta_s: number | null;
+    message: string;
+    error: string | null;
+  } | null;
+}
+
 export function formatBytes(n: number) {
   if (n < 1024) return `${n} B`;
   const units = ["KB", "MB", "GB", "TB"];
@@ -221,6 +240,10 @@ export const api = {
   storage: (refresh = false) =>
     req<{ home: string; items: StorageItem[]; total_models_bytes: number }>("GET", `/api/storage${refresh ? "?refresh=1" : ""}`),
   openStorage: (id: string) => req<{ ok: boolean }>("POST", "/api/storage/open", { id }),
+  models: () => req<ModelPack[]>("GET", "/api/models"),
+  downloadModels: (id: string, fresh = false) => req<unknown>("POST", `/api/models/${id}/download${fresh ? "?fresh=1" : ""}`),
+  stopModels: (id: string) => req<{ ok: boolean }>("POST", `/api/models/${id}/stop`),
+  deleteModels: (id?: string) => req<{ ok: boolean; freed_bytes: number }>("DELETE", id ? `/api/models/${id}` : "/api/models"),
   engines: () => req<Engines>("GET", "/api/engines"),
   settings: () => req<Settings>("GET", "/api/settings"),
   saveSettings: (

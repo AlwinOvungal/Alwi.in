@@ -263,3 +263,5 @@ a.ref { grid-template-columns: auto 1fr; gap: 24px; }
 .storage-row .path { display: inline-block; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; align-self: start; }
 .storage-row .size { font: 500 14px var(--mono); white-space: nowrap; }
 @media (max-width: 640px) { .storage-row { grid-template-columns: 1fr auto; } .storage-row .btn { grid-column: 1 / -1; } }
+.model-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 16px; align-items: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+@media (max-width: 640px) { .model-row { grid-template-columns: 1fr; } }
