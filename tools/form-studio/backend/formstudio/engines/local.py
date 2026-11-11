@@ -164,6 +164,18 @@ def _speedups(pipe, attention_slicing: bool = True) -> None:
         pipe.enable_vae_tiling()
 
 
+def _vae_slicing(pipe) -> None:
+    """Decode a batch of images one at a time (less memory), however the installed diffusers spells it.
+
+    diffusers 0.42 removed pipe.enable_vae_slicing(); the VAE itself still has enable_slicing().
+    """
+    vae = getattr(pipe, "vae", None)
+    if vae is not None and hasattr(vae, "enable_slicing"):
+        vae.enable_slicing()
+    elif hasattr(pipe, "enable_vae_slicing"):
+        pipe.enable_vae_slicing()
+
+
 def _ensure_models(pack: str, progress: Progress, lo: float = 0.0, hi: float = 0.02) -> None:
     """Download the engine's models first (with GB, speed and time left), if they're missing."""
     from ..models import downloads

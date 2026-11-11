@@ -171,7 +171,7 @@ class LocalViews:
         return True, ""
 
     def _pipe(self, ctx: EngineContext):
-        from .local import _cached
+        from .local import _cached, _vae_slicing
 
         _mvadapter_on_path()
 
@@ -190,7 +190,7 @@ class LocalViews:
             pipe.load_custom_adapter("huanngzh/mv-adapter", weight_name="mvadapter_i2mv_sdxl.safetensors")
             pipe.to(device=ctx.device, dtype=dtype)
             pipe.cond_encoder.to(device=ctx.device, dtype=dtype)
-            pipe.enable_vae_slicing()
+            _vae_slicing(pipe)  # diffusers 0.42 has no pipe.enable_vae_slicing()
             return pipe
 
         return _cached(f"mvadapter:{ctx.device}", make)

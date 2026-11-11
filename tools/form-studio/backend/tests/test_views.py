@@ -305,6 +305,9 @@ def _fake_mvadapter(root, utils_init="import nvdiffrast  # NVIDIA-only: fails on
         "from PIL import Image\n"
         "class _Enc:\n"
         "    def to(self, **kw): return self\n"
+        "class _Vae:\n"
+        "    sliced = False\n"
+        "    def enable_slicing(self): _Vae.sliced = True\n"
         "class MVAdapterI2MVSDXLPipeline:\n"
         "    scheduler = None\n"
         "    cond_encoder = _Enc()\n"
@@ -313,7 +316,7 @@ def _fake_mvadapter(root, utils_init="import nvdiffrast  # NVIDIA-only: fails on
         "    def init_custom_adapter(self, num_views): self.n = num_views\n"
         "    def load_custom_adapter(self, *a, **kw): pass\n"
         "    def to(self, **kw): return self\n"
-        "    def enable_vae_slicing(self): pass\n"
+        "    vae = _Vae()  # like diffusers 0.42: no pipe.enable_vae_slicing(), the VAE has enable_slicing()\n"
         "    def __call__(self, prompt, num_images_per_prompt, callback_on_step_end, control_image, **kw):\n"
         "        assert control_image.shape[0] == num_images_per_prompt == 6\n"
         "        callback_on_step_end(self, 0, 0, {})\n"
@@ -352,6 +355,8 @@ def test_local_view_maker_works_without_nvidia(confirmed_job, monkeypatch, tmp_p
     picked = [max(range(3), key=lambda k: sum(c[k] for c in Image.open(v[n][0]).convert("RGB").resize((32, 32)).getdata()
                                               if c != (255, 255, 255))) for n in ("front", "left", "back")]
     assert picked == [0, 1, 2]  # 0°, 90° and 180° of the six turns
+    pipe_mod = sys.modules["mvadapter.pipelines.pipeline_mvadapter_i2mv_sdxl"]
+    assert pipe_mod._Vae.sliced and not hasattr(pipe_mod.MVAdapterI2MVSDXLPipeline, "enable_vae_slicing")
     local.unload_all()
 
 
