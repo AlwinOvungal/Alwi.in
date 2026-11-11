@@ -135,8 +135,9 @@ def test_meshy_failure_and_plan_messages(cutout, tmp_path):
     inp = ReconstructInput(cutout, cutout.with_name("01_cutout_mask.png"), 0, tmp_path / "m.glb")
     with pytest.raises(RuntimeError, match="image too dark"):
         RECONSTRUCTORS["meshy"].reconstruct(inp, meshy_ctx(FakeMeshy(final="FAILED")), lambda p, m: None)
-    with pytest.raises(RuntimeError, match="Pro plan"):
+    with pytest.raises(RuntimeError, match="Pro plan") as e:
         RECONSTRUCTORS["meshy"].reconstruct(inp, meshy_ctx(FakeMeshy(create_status=402)), lambda p, m: None)
+    assert [label for label, _ in e.value.links] == ["Open Meshy plans", "Open Meshy API keys"] and e.value.steps
     ok, why = RECONSTRUCTORS["meshy"].available(EngineContext(settings={}, secrets={}))
     assert not ok and "Meshy" in why
 

@@ -166,3 +166,17 @@ def test_style_draft_is_cleaned_up(monkeypatch, cutout):
     assert "{subject}" in out.prompt and "{subject}" in out.edit_prompt
     assert out.body.hex == "#808080" and out.base.hex == "#111111"  # invalid hex replaced
     assert out.soften_mm == 3.0 and out.min_feature_mm == 0.8
+
+
+def test_fal_errors_say_where_to_fix_them():
+    import httpx
+    import pytest
+
+    from formstudio.engines.base import EngineError
+    from formstudio.engines.cloud import FalClient
+
+    for status, words, link in ((402, "balance is empty", "Open fal.ai billing"), (401, "rejected the API key", "Open fal.ai keys")):
+        client = FalClient("fal-test", transport=httpx.MockTransport(lambda r, s=status: httpx.Response(s, text="nope")))
+        with pytest.raises(EngineError) as e:
+            client.run("fal-ai/x", {})
+        assert words in str(e.value) and e.value.links[0][0] == link and e.value.detail == "nope"

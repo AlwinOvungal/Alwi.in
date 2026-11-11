@@ -18,7 +18,10 @@ import httpx
 from PIL import Image
 
 from ..core.ingest import remove_background
-from .base import EngineContext, Progress, ReconstructInput, StylizeInput
+from .base import EngineContext, EngineError, Progress, ReconstructInput, StylizeInput
+
+FAL_KEYS = ("Open fal.ai keys", "https://fal.ai/dashboard/keys")
+FAL_BILLING = ("Open fal.ai billing", "https://fal.ai/dashboard/billing")
 
 QUEUE = "https://queue.fal.run"
 ENDPOINTS = {
@@ -47,10 +50,12 @@ class FalClient:
 
     def run(self, endpoint: str, args: dict[str, Any], progress: Progress | None = None) -> dict[str, Any]:
         r = self.http.post(f"{QUEUE}/{endpoint}", json=args)
+        said = r.text[:300] if r.status_code >= 400 else ""
         if r.status_code in (401, 403):
-            raise PermissionError("fal.ai rejected the API key")
+            raise EngineError("fal.ai rejected the API key. Check it in Settings → Cloud accounts → fal.ai.", said, [FAL_KEYS])
         if r.status_code == 402:
-            raise PermissionError("Your fal.ai balance is empty. Top it up at fal.ai.")
+            raise EngineError("Your fal.ai balance is empty.", said, [FAL_BILLING],
+                              steps=["Top up your fal.ai balance.", "Then press Try again."])
         r.raise_for_status()
         job = r.json()
         status_url, response_url = job["status_url"], job["response_url"]
@@ -61,7 +66,7 @@ class FalClient:
             if state == "COMPLETED":
                 break
             if state not in ("IN_QUEUE", "IN_PROGRESS"):
-                raise RuntimeError(f"fal.ai job failed: {s}")
+                raise EngineError("fal.ai couldn't finish this job. Try again, or use another engine.", str(s)[:500])
             if progress:
                 pos = s.get("queue_position")
                 progress(None, f"Queued (position {pos})" if state == "IN_QUEUE" and pos is not None else "Running on fal.ai")  # type: ignore[arg-type]
@@ -71,7 +76,7 @@ class FalClient:
         res = self.http.get(response_url)
         if res.status_code >= 400:
             detail = res.json().get("detail") if "json" in res.headers.get("content-type", "") else res.text[:300]
-            raise RuntimeError(f"fal.ai couldn't process this: {detail}")
+            raise EngineError(f"fal.ai couldn't process this: {detail}", str(detail)[:500])
         return res.json()
 
     def download(self, url: str, dest: Path) -> None:

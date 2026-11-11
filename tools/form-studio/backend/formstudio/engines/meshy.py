@@ -10,7 +10,10 @@ import time
 
 import httpx
 
-from .base import EngineContext, Progress, ReconstructInput
+from .base import EngineContext, EngineError, Progress, ReconstructInput
+
+KEYS = ("Open Meshy API keys", "https://www.meshy.ai/settings/api")
+PRICING = ("Open Meshy plans", "https://www.meshy.ai/pricing")
 from .cloud import _data_uri, _transparent_upload
 
 API = "https://api.meshy.ai/openapi/v1/image-to-3d"
@@ -64,7 +67,8 @@ class MeshyImageTo3D:
                     break
                 if status in ("FAILED", "CANCELED"):
                     msg = (task.get("task_error") or {}).get("message") or status.lower()
-                    raise RuntimeError(f"Meshy couldn't build this shape: {msg}")
+                    raise EngineError(f"Meshy couldn't build this shape: {msg}", detail=str(task.get("task_error") or ""),
+                                      steps=["Try another chosen picture, or another 3D engine."])
                 pct = float(task.get("progress") or 0) / 100
                 progress(min(pct, 0.97), "Waiting in Meshy's queue" if status == "PENDING" else f"Meshy is building the shape ({int(pct * 100)}%)")
                 if time.time() - start > 900:
@@ -91,9 +95,18 @@ def _check(r: httpx.Response) -> None:
         message = r.json().get("message", "")
     except ValueError:
         message = r.text[:200]
-    raise RuntimeError({
-        401: "Meshy rejected the API key. Check it in Settings.",
-        402: "Meshy says this account can't use the API or is out of credits. API use needs a Pro plan or higher.",
-        403: "Meshy declined this image.",
-        429: "Meshy's rate limit was hit. Wait a minute and try again.",
-    }.get(r.status_code, f"Meshy error ({r.status_code}): {message}"))
+    if r.status_code == 401:
+        raise EngineError("Meshy rejected the API key. Check it in Settings → Cloud accounts → Meshy.", message, [KEYS])
+    if r.status_code == 402:
+        raise EngineError(
+            "Meshy says this account can't use the API or is out of credits. API use needs a Pro plan or higher.",
+            message, [PRICING, KEYS],
+            steps=["Check that your Meshy plan is Pro or higher (the API isn't in the free plan).",
+                   "Check you have credits left; each 3D shape uses about 5–20.",
+                   "Then press Try again."],
+        )
+    if r.status_code == 403:
+        raise EngineError("Meshy declined this image. Try another picture.", message)
+    if r.status_code == 429:
+        raise EngineError("Meshy's rate limit was hit. Wait a minute and try again.", message)
+    raise EngineError(f"Meshy error ({r.status_code}). Try again.", message)
