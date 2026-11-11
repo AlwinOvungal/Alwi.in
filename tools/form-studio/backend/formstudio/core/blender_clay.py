@@ -1,6 +1,7 @@
 """Runs INSIDE Blender (not Form Studio's Python): the "Blender clay" 3D finish.
 
     blender -b --factory-startup --python-exit-code 1 -P blender_clay.py -- in.stl out.stl params.json
+    python blender_clay.py -- in.stl out.stl params.json     (with Blender's Python package, bpy)
 
 1. voxel remesh: even, closed topology
 2. smooth: soften what the AI left lumpy
@@ -25,7 +26,8 @@ strength = float(p.get("texture_mm", 0.25))
 grain = float(p.get("grain_mm", 3.0))
 target = int(p.get("target_faces", 60000))
 
-# start empty (factory startup has a cube, camera and light)
+# start empty: factory settings (no add-ons or preferences), then remove the default cube, camera and light
+bpy.ops.wm.read_factory_settings(use_empty=True)
 for ob in list(bpy.data.objects):
     bpy.data.objects.remove(ob, do_unlink=True)
 

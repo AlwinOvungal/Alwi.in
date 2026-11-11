@@ -648,20 +648,43 @@ def cleanup_run(body: CleanupBody) -> dict[str, Any]:
     return {"freed": freed, "items": items, "total": sum(i["bytes"] for i in items)}
 
 
+BLENDER_TASK = "_blender"
+
+
+def _blender_view(found: dict | None) -> dict[str, Any]:
+    from ..core import blender
+
+    t = worker.tasks.get(BLENDER_TASK)
+    return {"found": bool(found), **(found or {}), "download": "https://www.blender.org/download/",
+            "can_install": bool(blender.bpy_spec()), "task": t.public() if t else None}
+
+
 @app.get("/api/blender")
 def blender_status() -> dict[str, Any]:
     from ..core import blender
 
-    found = blender.find_blender()
-    return {"found": bool(found), **(found or {}), "download": "https://www.blender.org/download/"}
+    return _blender_view(blender.find_blender())
+
+
+@app.post("/api/blender/install")
+def blender_install() -> dict[str, Any]:
+    """Put Blender inside Form Studio (its Python package, in its own small environment). A background task."""
+    from ..core import blender
+
+    if not blender.bpy_spec():
+        raise HTTPException(400, "Blender's Python package isn't available for this Python; install the Blender app instead.")
+    try:
+        worker.submit(BLENDER_TASK, "blender", lambda p: blender.install(p))
+    except RuntimeError:
+        raise HTTPException(409, "Blender is already being installed.")
+    return _blender_view(blender.find_blender())
 
 
 @app.post("/api/blender/find")
 def blender_find() -> dict[str, Any]:
     from ..core import blender
 
-    found = blender.find_blender(refresh=True)
-    return {"found": bool(found), **(found or {}), "download": "https://www.blender.org/download/"}
+    return _blender_view(blender.find_blender(refresh=True))
 
 
 class StorageOpen(BaseModel):

@@ -548,15 +548,30 @@ function BlenderRow({ s, save }: { s: Settings; save: Save }) {
   const [b, setB] = useState<BlenderStatus | null>(null);
   const [looking, setLooking] = useState(false);
   const [path, setPath] = useState(s.blender_path ?? "");
+  const toast = useToast();
+  const load = () => api.blender().then(setB).catch(() => {});
   useEffect(() => {
-    api.blender().then(setB).catch(() => {});
-  }, []);
+    load();
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  const installing = !!b?.task && (b.task.status === "running" || b.task.status === "queued");
+  useEffect(() => {
+    if (!installing) return;
+    const t = setInterval(load, 1500);
+    return () => clearInterval(t);
+  }, [installing]); // eslint-disable-line react-hooks/exhaustive-deps
   const look = async () => {
     setLooking(true);
     try {
       setB(await api.findBlender());
     } finally {
       setLooking(false);
+    }
+  };
+  const install = async () => {
+    try {
+      setB(await api.installBlender());
+    } catch (e) {
+      toast((e as Error).message, true);
     }
   };
   return (
@@ -567,16 +582,26 @@ function BlenderRow({ s, save }: { s: Settings; save: Save }) {
           {b === null
             ? "Looking for Blender…"
             : b.found
-              ? <>Found: Blender {b.version} at <span className="kbd">{b.path}</span>. Used by the <b>Blender clay</b> 3D finish.</>
-              : <>Not found. The <b>Blender clay</b> finish needs Blender (free): <a href={b.download} target="_blank" rel="noreferrer">download it</a>, put it in Applications, then press Look again.</>}
+              ? <>Ready: Blender {b.version}{b.kind === "bpy" ? " inside Form Studio" : <> at <span className="kbd">{b.path}</span></>}. Used by the <b>Blender clay</b> 3D finish.</>
+              : b.can_install
+                ? <>Not installed. The <b>Blender clay</b> finish needs Blender: install it inside Form Studio (about 230 MB, no Blender app), or use the Blender app if you have it.</>
+                : <>Not found. The <b>Blender clay</b> finish needs Blender (free): <a href={b.download} target="_blank" rel="noreferrer">download it</a>, put it in Applications, then press Look again.</>}
         </span>
       </div>
-      <div className="row" style={{ gap: 8 }}>
-        <input className="input grow" placeholder="Optional: path to Blender, if it isn't in Applications" value={path}
-          onChange={(e) => setPath(e.target.value)}
-          onBlur={() => path !== (s.blender_path ?? "") && save({ blender_path: path.trim() }, "Blender path saved").then(look)} />
-        <button className="btn sm" disabled={looking} onClick={look}>{looking ? "Looking…" : "Look again"}</button>
-      </div>
+      {installing && b?.task ? (
+        <Progress task={b.task} />
+      ) : (
+        <>
+          {b?.task?.status === "error" && <ErrorCard title="Blender didn't install" task={b.task} onRetry={install} />}
+          <div className="row" style={{ gap: 8 }}>
+            {b && !b.found && b.can_install && <button className="btn sm primary" onClick={install}>Install Blender</button>}
+            <input className="input grow" placeholder="Optional: path to the Blender app" value={path}
+              onChange={(e) => setPath(e.target.value)}
+              onBlur={() => path !== (s.blender_path ?? "") && save({ blender_path: path.trim() }, "Blender path saved").then(look)} />
+            <button className="btn sm" disabled={looking} onClick={look}>{looking ? "Looking…" : "Look again"}</button>
+          </div>
+        </>
+      )}
     </div>
   );
 }

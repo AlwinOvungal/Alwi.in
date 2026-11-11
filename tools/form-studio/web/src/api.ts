@@ -62,7 +62,12 @@ export interface BlenderStatus {
   found: boolean;
   path?: string;
   version?: string;
+  /** "bpy": Blender inside Form Studio; "app": the Blender program */
+  kind?: "bpy" | "app";
   download: string;
+  /** Blender can be put inside Form Studio with one click */
+  can_install?: boolean;
+  task?: Task | null;
 }
 
 export type PrintFormat = "stand" | "magnet" | "keychain";
@@ -421,6 +426,7 @@ export const api = {
   removeViews: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/views`),
   blender: () => req<BlenderStatus>("GET", "/api/blender"),
   findBlender: () => req<BlenderStatus>("POST", "/api/blender/find"),
+  installBlender: () => req<BlenderStatus>("POST", "/api/blender/install"),
   cleanup: () => req<{ items: CleanupItem[]; total: number }>("GET", "/api/cleanup"),
   runCleanup: (ids: string[]) => req<{ freed: number; items: CleanupItem[]; total: number }>("POST", "/api/cleanup", { ids }),
   useNow: (id: string, candidate: number, engine?: string, views = false) =>

@@ -393,6 +393,9 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
 19. **Clean up:** `core/cleanup.py` must never touch objects' files, styles in use, or models the default engines
     need. Unused models are listed but not ticked.
 20. **Blender clay finish:**
+    - Preferred: `bpy` in its own venv `~/FormStudio/vendor/blender-py`, kept apart from the main venv because
+      bpy 5.0 for Python 3.11 pins `numpy<2`. Run as `python -P blender_clay.py -- …`. Installed by setup or
+      `POST /api/blender/install`.
     - `core/blender.py` finds Blender (setting `blender_path`, `$FORMSTUDIO_BLENDER`, /Applications, PATH) and runs
       `core/blender_clay.py` inside it with `--factory-startup` (STL in/out, params JSON).
     - The script supports Blender 3.6–5.x (the STL operators were renamed in 4.2). It has only been run with a

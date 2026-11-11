@@ -46,7 +46,7 @@ def _params(**geo):
 
 def test_finds_blender_and_its_version(fake_blender):
     exe, _ = fake_blender
-    assert blender.find_blender(refresh=True) == {"path": str(exe), "version": "5.3.0"}
+    assert blender.find_blender(refresh=True) == {"path": str(exe), "version": "5.3.0", "kind": "app"}
     with TestClient(app) as c:
         r = c.get("/api/blender").json()
         assert r["found"] and r["version"] == "5.3.0" and "blender.org" in r["download"]
@@ -109,3 +109,69 @@ def test_real_blender_clay(mug_glb, tmp_path):
     printify.run(mug_glb, tmp_path / "clay2", _params(clay_texture_mm=0.3))
     b = trimesh.load(tmp_path / "clay2" / "body.stl")
     assert len(a.faces) == len(b.faces)  # same input, same result
+
+
+@pytest.fixture
+def fake_bpy_env(tmp_path, monkeypatch):
+    """A stand-in for ~/FormStudio/vendor/blender-py: its python 'has' bpy once installed."""
+    env = tmp_path / "blender-py"
+    (env / "bin").mkdir(parents=True)
+    marker, log = env / "installed", tmp_path / "bpy_calls.jsonl"
+    py = env / "bin" / "python"
+    py.write_text(f"""#!{sys.executable}
+import json, os, shutil, sys
+args = sys.argv[1:]
+with open({str(log)!r}, "a") as f:
+    f.write(json.dumps(args) + "\\n")
+if args[:2] == ["-m", "pip"]:
+    print("Collecting bpy"); print("Successfully installed bpy-5.0.1")
+    open({str(marker)!r}, "w").close(); sys.exit(0)
+if args[:1] == ["-c"]:
+    if not os.path.exists({str(marker)!r}): sys.exit(1)
+    print("5.0.1"); sys.exit(0)
+rest = args[args.index("--") + 1:]
+shutil.copyfile(rest[0], rest[1])
+""")
+    py.chmod(0o755)
+    monkeypatch.setattr(blender, "bpy_env", lambda: env)
+    monkeypatch.setattr(blender, "bpy_spec", lambda: "bpy>=5.0,<5.1")
+    monkeypatch.setenv("FORMSTUDIO_BLENDER", str(tmp_path / "no-app"))
+    monkeypatch.setattr(blender, "MAC_PATHS", [])
+    monkeypatch.setattr(blender.shutil, "which", lambda name: None)
+    blender._found.clear()
+    printify.clear_cache()
+    yield env, marker, log
+    blender._found.clear()
+    printify.clear_cache()
+
+
+def test_install_blender_inside_form_studio_and_use_it(fake_bpy_env, mug_glb, tmp_path):
+    env, marker, log = fake_bpy_env
+    assert blender.find_blender(refresh=True) is None  # not installed yet
+    msgs = []
+    found = blender.install(lambda p, m: msgs.append(m))
+    assert found == {"path": str(env / "bin" / "python"), "version": "5.0.1", "kind": "bpy"}
+    assert any("Successfully installed" in m for m in msgs)
+    rep = printify.run(mug_glb, tmp_path / "o", _params())
+    assert rep["watertight"] and not any("wasn't used" in w for w in rep["warnings"])
+    calls = [json.loads(line) for line in log.read_text().splitlines()]
+    run = next(c for c in calls if "--" in c)
+    assert run[0] == "-P" and run[1].endswith("blender_clay.py")  # this script's folder never on the import path
+    assert ["-m", "pip", "install", "--progress-bar", "off", "bpy>=5.0,<5.1"] in calls
+
+
+def test_install_api_and_status(fake_bpy_env):
+    import time
+
+    with TestClient(app) as c:
+        st = c.get("/api/blender").json()
+        assert not st["found"] and st["can_install"]
+        assert c.post("/api/blender/install").status_code == 200
+        for _ in range(200):
+            st = c.get("/api/blender").json()
+            if st["task"] and st["task"]["status"] in ("done", "error"):
+                break
+            time.sleep(0.05)
+        assert st["task"]["status"] == "done", st["task"]["error"]
+        st = c.post("/api/blender/find").json()
+        assert st["found"] and st["kind"] == "bpy" and st["version"] == "5.0.1"

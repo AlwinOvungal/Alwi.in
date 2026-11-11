@@ -5,6 +5,7 @@
 #   ./scripts/setup-mac.sh --cloud-only    skip the big local models (use fal.ai + offline engines)
 #   ./scripts/setup-mac.sh --with-hunyuan  also install Hunyuan3D-2 mini and multi-view (better local 3D)
 #   ./scripts/setup-mac.sh --with-views    also install MV-Adapter (free local "Make 3 views")
+#   ./scripts/setup-mac.sh --no-blender    skip Blender inside Form Studio (for the Blender clay finish)
 #   ./scripts/setup-mac.sh --with-step     also install STEP export
 #   ./scripts/setup-mac.sh --reinstall-ai  reinstall the AI libraries and TripoSR's code from scratch
 #
@@ -15,12 +16,13 @@ ROOT="$(pwd)"
 FS_HOME="${FORMSTUDIO_HOME:-$HOME/FormStudio}"
 VENV="$ROOT/.venv"
 
-LOCAL_AI=1; HUNYUAN=0; VIEWS=0; STEP=0; REINSTALL_AI=0
+LOCAL_AI=1; HUNYUAN=0; VIEWS=0; STEP=0; REINSTALL_AI=0; BLENDER=1
 for arg in "$@"; do
   case "$arg" in
     --cloud-only) LOCAL_AI=0 ;;
     --with-hunyuan) HUNYUAN=1 ;;
     --with-views) VIEWS=1 ;;
+    --no-blender) BLENDER=0 ;;
     --with-step) STEP=1 ;;
     --reinstall-ai) REINSTALL_AI=1 ;;
     *) echo "Unknown option: $arg"; exit 1 ;;
@@ -100,6 +102,18 @@ if [ "$LOCAL_AI" = 1 ]; then
     git -C "$FS_HOME/vendor/TripoSR" pull --quiet --ff-only || true
   else
     git clone --quiet --depth 1 https://github.com/VAST-AI-Research/TripoSR.git "$FS_HOME/vendor/TripoSR"
+  fi
+fi
+if [ "$BLENDER" = 1 ]; then
+  say "Blender inside Form Studio (for the Blender clay finish, no Blender app needed)"
+  # its own environment: Blender's Python package pins numpy<2, which the AI libraries mustn't get
+  BPY_ENV="$FS_HOME/vendor/blender-py"
+  [ -x "$BPY_ENV/bin/python" ] || "$PY" -m venv "$BPY_ENV"
+  if "$BPY_ENV/bin/python" -c "import bpy" >/dev/null 2>&1; then
+    echo "  already installed"
+  else
+    echo "  downloading Blender's Python package (about 230 MB)"
+    "$BPY_ENV/bin/pip" install --quiet "bpy>=5.0,<5.1" || echo "  note: Blender didn't install; the Blender clay finish uses Soft until it does (Settings → Printing → Install)"
   fi
 fi
 if [ "$VIEWS" = 1 ]; then

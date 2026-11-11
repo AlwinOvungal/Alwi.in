@@ -249,7 +249,11 @@ The new built-ins have no reference pictures; their words alone set the look.
   - A fourth 3D finish made by running the Blender.app on your Mac in the background: voxel remesh, smoothing, a fine
     clay surface texture, remesh and decimate.
   - Sliders: Clay texture, Texture size, Smoothness.
-  - Settings → Printing shows whether Blender was found, with an optional path and **Look again**.
+  - **No Blender app needed:** Blender's own Python package (`bpy`, about 230 MB) is installed inside Form Studio,
+    in its own small environment (`~/FormStudio/vendor/blender-py`), by `setup-mac.sh` (skip with `--no-blender`)
+    or the **Install Blender** button in Settings → Printing.
+  - The Blender app works too, if you have it.
+  - Settings → Printing shows whether Blender is ready, with an optional app path and **Look again**.
   - Without Blender (or if it fails), Soft is used, with a warning.
 - **3 views (Shape step):** **Make 3 views** draws Front · Side · Back of the chosen look, without labels.
   - Drawn by ChatGPT images, Nano Banana, or free on this Mac (MV-Adapter, `setup-mac.sh --with-views`).

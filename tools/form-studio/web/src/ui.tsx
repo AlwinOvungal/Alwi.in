@@ -279,9 +279,10 @@ export function NeedsBlender({ b }: { b: BlenderStatus | null }) {
   if (!b || b.found) return null;
   return (
     <div className="note info" style={{ display: "block" }}>
-      <b>Blender clay needs Blender</b> (free) on this Mac. Until it's installed, the Soft finish is used.{" "}
-      <a href={b.download} target="_blank" rel="noreferrer">Download Blender</a>, put it in Applications, then press <b>Look again</b> in
-      Settings → Printing.
+      <b>Blender clay needs Blender</b> (free). Until it's there, the Soft finish is used.{" "}
+      {b.can_install
+        ? <>Install it inside Form Studio with one click: <a href="#/settings">Settings → Printing → Install Blender</a>. No Blender app needed.</>
+        : <><a href={b.download} target="_blank" rel="noreferrer">Download Blender</a>, put it in Applications, then press <b>Look again</b> in Settings → Printing.</>}
     </div>
   );
 }
