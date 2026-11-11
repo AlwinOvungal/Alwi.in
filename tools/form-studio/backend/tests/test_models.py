@@ -126,6 +126,14 @@ def test_background_download_stop_and_fresh(fake_hub, monkeypatch):
     assert events == []
 
 
+def test_speedups_can_leave_attention_alone():
+    calls = []
+    pipe = SimpleNamespace(enable_attention_slicing=lambda: calls.append("slice"),
+                           vae=SimpleNamespace(enable_tiling=lambda: calls.append("vae.tiling")))
+    _speedups(pipe, attention_slicing=False)  # with an IP-Adapter loaded
+    assert calls == ["vae.tiling"]
+
+
 @pytest.mark.parametrize("style", ["new", "old", "none"])
 def test_speedups_work_with_any_diffusers(style):
     calls = []

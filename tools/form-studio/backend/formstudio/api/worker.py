@@ -121,8 +121,32 @@ class Worker:
             self._emit(t)
 
 
+# errors we raise on purpose already read well; anything else gets a pointer to where it happened
+EXPECTED = (RuntimeError, PermissionError, ValueError, FileNotFoundError, TimeoutError, ConnectionError)
+
+
+def _where(e: BaseException) -> str:
+    """'diffusers/pipelines/…/pipeline_x.py:123' for the innermost frame of the error."""
+    tb = traceback.extract_tb(e.__traceback__)
+    if not tb:
+        return ""
+    frame = tb[-1]
+    parts = frame.filename.replace("\\", "/").split("/")
+    for anchor in ("site-packages", "formstudio"):
+        if anchor in parts:
+            parts = parts[parts.index(anchor) + (1 if anchor == "site-packages" else 0):]
+            break
+    else:
+        parts = parts[-2:]
+    return f"{'/'.join(parts)}:{frame.lineno}"
+
+
 def _friendly(e: Exception) -> str:
     msg = str(e) or e.__class__.__name__
     if "out of memory" in msg.lower() or "MPS backend out of memory" in msg:
         return "Ran out of memory. Turn on Fast mode in Settings, close other apps, or use a cloud engine."
-    return msg
+    if type(e) in EXPECTED:
+        return msg
+    where = _where(e)
+    detail = f" (in {where})" if where else ""
+    return f"{e.__class__.__name__}: {msg}{detail}. The full details are in the log (Settings → Storage)."

@@ -71,9 +71,14 @@ def unload_all() -> None:
     _empty_cache()
 
 
-def _speedups(pipe) -> None:
-    """Memory savers, whichever way the installed diffusers spells them."""
-    if hasattr(pipe, "enable_attention_slicing"):
+def _speedups(pipe, attention_slicing: bool = True) -> None:
+    """Memory savers, whichever way the installed diffusers spells them.
+
+    Attention slicing must stay off once an IP-Adapter is loaded: it swaps in attention
+    layers that can't take the style image, and generation fails with
+    "'tuple' object has no attribute 'shape'".
+    """
+    if attention_slicing and hasattr(pipe, "enable_attention_slicing"):
         pipe.enable_attention_slicing()
     vae = getattr(pipe, "vae", None)
     if vae is not None and hasattr(vae, "enable_tiling"):
@@ -137,7 +142,7 @@ class LocalSDXL:
             )
             p.load_ip_adapter("h94/IP-Adapter", subfolder="sdxl_models", weight_name="ip-adapter_sdxl.safetensors")
             p.to(device)
-            _speedups(p)
+            _speedups(p, attention_slicing=False)  # keeps the IP-Adapter's own attention layers
             return p
 
         return _cached(f"sdxl:{device}", make)

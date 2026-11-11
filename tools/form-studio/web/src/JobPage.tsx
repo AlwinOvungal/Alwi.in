@@ -227,7 +227,7 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
                 if (subject !== job.subject) await api.rename(job.id, { subject });
                 run(api.stylize(job.id, engine));
               }}>
-                Generate {settings?.candidates ?? 4} options
+                Generate {settings?.candidates ?? 4} option{(settings?.candidates ?? 4) === 1 ? "" : "s"}
               </button>
               <button className="btn" disabled={busy} onClick={() => run(api.confirm(job.id, null))} title="Skip restyling: use the cut-out photo for the 3D step">
                 Skip: use photo as is

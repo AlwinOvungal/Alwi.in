@@ -180,3 +180,18 @@ def test_format_switch_through_the_api(client, mug_photo):
     assert client.post(f"/api/jobs/{jid}/printify", json={"format": "bookend"}).status_code == 400
     job = client.post(f"/api/jobs/{jid}/export", json={"formats": ["3mf"]}).json()
     assert job["stage"] == "exported"
+
+
+def test_unexpected_errors_say_where_they_happened():
+    from formstudio.api.worker import _friendly
+
+    def inner():
+        return (1, 2).shape  # noqa: the kind of error a library can raise
+
+    try:
+        inner()
+    except AttributeError as e:
+        msg = _friendly(e)
+    assert msg.startswith("AttributeError: 'tuple' object has no attribute 'shape'")
+    assert "test_api.py:" in msg and "Settings → Storage" in msg
+    assert _friendly(RuntimeError("Add a key")) == "Add a key"
