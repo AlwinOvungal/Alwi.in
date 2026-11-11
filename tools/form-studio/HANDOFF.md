@@ -183,7 +183,7 @@ cancelling}`.
   the least recently used are unloaded only when needed.
   - Setting `keep_loaded`: `auto` (the default) or `one` (the old way).
   - Out of memory → unload everything and retry once.
-- **Warm-up:** `local.warm()` loads the default local engines (only if downloaded and they fit) when the app opens, a
+- **Warm-up:** `local.warm()` loads the default local engines (only if downloaded, only if they fit, only on 16 GB+ Macs) when the app opens, a
   photo is added, or an option is picked. It runs as low-priority worker work; setting `warm_up`.
 - **Quality (`sdxl_quality`):**
   - `best`: 30 steps

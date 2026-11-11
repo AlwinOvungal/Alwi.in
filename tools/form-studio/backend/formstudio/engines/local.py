@@ -520,6 +520,8 @@ def warm(ctx: EngineContext, stylize_engine: str | None, reconstruct_engine: str
     from . import RECONSTRUCTORS, STYLIZERS
 
     done: list[str] = []
+    if (ram_gb() or 16.0) < 15:  # on an 8 GB Mac, loading SDXL nobody asked for yet would slow everything down
+        return done
 
     def ready(packs: list[str]) -> bool:
         try:
