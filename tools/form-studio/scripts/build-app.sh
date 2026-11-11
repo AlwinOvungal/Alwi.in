@@ -71,8 +71,8 @@ if [ "$NATIVE" = 0 ]; then
 export PATH="/opt/homebrew/bin:/usr/local/bin:\$PATH"
 export PYTORCH_ENABLE_MPS_FALLBACK=1
 mkdir -p "\$(dirname "$LOG")"
-cd "$ROOT"
-"$ROOT/.venv/bin/python" -m formstudio.desktop --browser >> "$LOG" 2>&1 &
+cd "$ROOT/backend"
+"$ROOT/.venv/bin/python" -P -m formstudio.desktop --browser >> "$LOG" 2>&1 &
 PID=\$!
 sleep 4
 if ! kill -0 \$PID 2>/dev/null; then

@@ -86,8 +86,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSWindowDelegate,
 
         let p = Process()
         p.executableURL = URL(fileURLWithPath: python)
-        p.arguments = ["-m", "formstudio.desktop", "--serve", "--port", String(port)]
-        p.currentDirectoryURL = URL(fileURLWithPath: root)
+        // -P and starting in backend/: a stray "formstudio" folder elsewhere can't shadow the real package
+        p.arguments = ["-P", "-m", "formstudio.desktop", "--serve", "--port", String(port)]
+        p.currentDirectoryURL = URL(fileURLWithPath: root + "/backend")
         var env = ProcessInfo.processInfo.environment
         env["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
         env["PYTHONUNBUFFERED"] = "1"

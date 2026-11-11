@@ -40,6 +40,23 @@ if ! xcode-select -p >/dev/null 2>&1 || ! command -v swiftc >/dev/null 2>&1; the
 fi
 PY="$(brew --prefix python@3.11)/bin/python3.11"
 
+say "Tidying up files from older versions"
+# An earlier version kept its code in tools/form-studio/formstudio/. Folders like that, which git
+# no longer tracks, would be loaded instead of backend/formstudio. Move them aside (never delete).
+LEFTOVERS="$FS_HOME/old-version-leftovers/$(date +%Y%m%d-%H%M%S)"
+MOVED=0
+for item in formstudio tests pyproject.toml setup.py setup.cfg build dist ./*.egg-info; do
+  item="${item#./}"
+  [ -e "$item" ] || continue
+  if [ -z "$(git ls-files -- "$item" 2>/dev/null)" ]; then
+    mkdir -p "$LEFTOVERS"
+    mv "$item" "$LEFTOVERS/"
+    echo "  moved $item → $LEFTOVERS/"
+    MOVED=1
+  fi
+done
+if [ "$MOVED" = 0 ]; then echo "  nothing to tidy"; fi
+
 say "Python environment ($VENV)"
 # an environment made by an older Python (or moved folder) is rebuilt
 if [ -x "$VENV/bin/python" ] && ! "$VENV/bin/python" -c "import sys" >/dev/null 2>&1; then rm -rf "$VENV"; fi
@@ -49,6 +66,15 @@ EXTRAS="matting,heic"
 [ "$LOCAL_AI" = 1 ] && EXTRAS="local-ai,heic"
 [ "$STEP" = 1 ] && EXTRAS="$EXTRAS,step"
 "$VENV/bin/pip" install --quiet -e "backend[$EXTRAS]"
+
+say "Removing old installs from the Python environment"
+"$VENV/bin/python" -I "$ROOT/scripts/cleanup_old_install.py" "$ROOT"
+if ! (cd "$ROOT/backend" && "$VENV/bin/python" -P -c "import formstudio, sys; sys.exit(0 if formstudio.__file__ and formstudio.__file__.endswith('backend/formstudio/__init__.py') else 1)") 2>/dev/null; then
+  echo "!! Python still can't find Form Studio's code in backend/formstudio."
+  echo "   Delete the environment and run this script again:  rm -rf \"$VENV\" && ./scripts/setup-mac.sh"
+  exit 1
+fi
+echo "  import check passed"
 
 if [ "$LOCAL_AI" = 1 ]; then
   say "TripoSR (local image → 3D)"

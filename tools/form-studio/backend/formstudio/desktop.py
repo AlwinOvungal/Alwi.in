@@ -15,6 +15,7 @@ import threading
 import time
 import traceback
 import urllib.request
+from pathlib import Path
 
 from . import paths
 
@@ -27,6 +28,19 @@ def _setup_logging() -> None:
     if sys.stderr and sys.stderr.isatty():
         handlers.append(logging.StreamHandler())
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s: %(message)s", handlers=handlers, force=True)
+
+
+def _check_package() -> str | None:
+    """An old copy of Form Studio (a stray 'formstudio' folder or install) can shadow this one."""
+    import formstudio
+
+    here = Path(__file__).resolve().parent
+    found = getattr(formstudio, "__file__", None)
+    if found and Path(found).resolve().parent == here:
+        return None
+    where = ", ".join(str(p) for p in getattr(formstudio, "__path__", [])) or "unknown"
+    return (f"Python is loading 'formstudio' from {where} instead of {here}. "
+            "An old copy of Form Studio is in the way. Run scripts/setup-mac.sh to clean it up.")
 
 
 def _free_port(preferred: int = 8765) -> int:
@@ -68,6 +82,11 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(sys.argv[1:] if argv is None else argv)
 
     _setup_logging()
+    problem = _check_package()
+    if problem:
+        log.error(problem)
+        print(problem, file=sys.stderr)
+        return 1
     try:
         if args.serve:
             log.info("Form Studio server starting on port %s", args.port)

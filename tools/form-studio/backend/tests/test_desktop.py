@@ -45,3 +45,34 @@ def test_startup_errors_are_logged_not_silent(monkeypatch):
     monkeypatch.setattr(desktop, "_server", boom)
     assert desktop.main(["--serve", "--port", "1"]) == 1
     assert "simulated startup failure" in (paths.home() / "formstudio.log").read_text()
+
+
+def test_stray_formstudio_folder_cannot_shadow_the_app(tmp_path):
+    """Leftovers of an older version (a 'formstudio' folder with no __init__.py) broke startup on a Mac."""
+    (tmp_path / "formstudio" / "__pycache__").mkdir(parents=True)
+    port = _port()
+    p = subprocess.Popen([sys.executable, "-P", "-m", "formstudio.desktop", "--serve", "--port", str(port)],
+                         cwd=tmp_path, env=os.environ.copy())
+    try:
+        deadline = time.time() + 60
+        while time.time() < deadline:
+            assert p.poll() is None, "server exited"
+            try:
+                urllib.request.urlopen(f"http://127.0.0.1:{port}/api/health", timeout=1)
+                break
+            except OSError:
+                time.sleep(0.2)
+        else:
+            raise AssertionError("server never answered")
+    finally:
+        p.kill()
+        p.wait()
+
+
+def test_shadowed_package_gives_a_clear_message(tmp_path):
+    """Without -P the stray folder wins; the app must say what's wrong instead of a raw ImportError."""
+    (tmp_path / "formstudio").mkdir()
+    r = subprocess.run([sys.executable, "-c", "import formstudio.desktop as d; raise SystemExit(d.main(['--serve', '--port', '1']))"],
+                       cwd=tmp_path, env=os.environ.copy(), capture_output=True, text=True, timeout=60)
+    assert r.returncode == 1
+    assert "old copy of Form Studio" in r.stderr

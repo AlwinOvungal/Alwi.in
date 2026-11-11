@@ -125,6 +125,10 @@ tail -50 ~/FormStudio/formstudio.log
 If the server fails to start, the app shows an error with these lines and an **Open Log** button.
 Send the log to whoever helps you.
 
+**The log says `cannot import name '__version__' from 'formstudio'`** (or "An old copy of Form Studio is in the way").
+Files from an older version are being loaded instead of the current code. To fix it, run `./scripts/setup-mac.sh` again.
+It moves the leftover folders to `~/FormStudio/old-version-leftovers/` (nothing is deleted) and removes the old install.
+
 **Rebuild just the app** (after `git pull`, or after moving the folder):
 
 ```bash
