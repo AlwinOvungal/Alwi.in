@@ -21,7 +21,7 @@ from PIL import Image
 from .. import paths
 from ..core import timing
 from ..core.ingest import remove_background
-from .base import EngineContext, Progress, ReconstructInput, StylizeInput, missing, quality_of
+from .base import EngineContext, EngineError, Progress, ReconstructInput, StylizeInput, missing, quality_of
 
 log = logging.getLogger(__name__)
 
@@ -502,6 +502,77 @@ class LocalTripoSR:
         return {"model": "stabilityai/TripoSR", "device": device}
 
 
+# ---- Hunyuan3D with transformers 5 ----------------------------------------------------------
+
+# transformers 5 renamed DINOv2's weights (its own from_pretrained converts old checkpoints with these same
+# rules: transformers.conversion_mapping). Hunyuan3D loads its image encoder with a plain load_state_dict,
+# which skips that conversion, so its model file's old names come up "missing".
+DINOV2_RENAMES = [
+    ("attention.attention.query", "attention.q_proj"),
+    ("attention.attention.key", "attention.k_proj"),
+    ("attention.attention.value", "attention.v_proj"),
+    ("attention.output.dense", "attention.o_proj"),
+    ("mlp.weights_out.", "mlp.down_proj."),
+    ("LayerNorm.gamma", "LayerNorm.weight"),
+    ("LayerNorm.beta", "LayerNorm.bias"),
+]
+
+
+def convert_dinov2_keys(state_dict: dict) -> dict:
+    """Old DINOv2 weight names → transformers 5 names, whatever comes before them. Identical maths:
+    the old SwiGLU computed silu(first half) * second half of weights_in; the new one silu(gate) * up."""
+    if not any(".attention.attention." in k or ".mlp.weights_in." in k or ".attention.output.dense." in k for k in state_dict):
+        return state_dict
+    out = {}
+    for k, v in state_dict.items():
+        if ".mlp.weights_in." in k:
+            gate, up = v.chunk(2, dim=0)
+            out[k.replace(".mlp.weights_in.", ".mlp.gate_proj.")] = gate
+            out[k.replace(".mlp.weights_in.", ".mlp.up_proj.")] = up
+            continue
+        for old, new in DINOV2_RENAMES:
+            k = k.replace(old, new)
+        out[k] = v
+    return out
+
+
+def _hy3dgen_compat() -> None:
+    """Let Hunyuan3D's image encoder load its (old-named) DINOv2 weights under transformers 5. Safe to call often."""
+    try:
+        from hy3dgen.shapegen.models import conditioner  # type: ignore
+    except ImportError:
+        return
+    for name in ("SingleImageEncoder", "DualImageEncoder"):
+        cls = getattr(conditioner, name, None)
+        if cls is None or getattr(cls.load_state_dict, "_formstudio", False):
+            continue
+        original = cls.load_state_dict
+
+        def load_state_dict(self, state_dict, *args, _original=original, **kwargs):
+            if any(".attention.q_proj." in k for k in self.state_dict()):  # this transformers uses the new names
+                state_dict = convert_dinov2_keys(dict(state_dict))
+            return _original(self, state_dict, *args, **kwargs)
+
+        load_state_dict._formstudio = True
+        cls.load_state_dict = load_state_dict
+
+
+def _hunyuan_load(make, family: str, device: str):
+    """Load a Hunyuan3D pipeline; explain plainly when the installed libraries can't load it."""
+    _hy3dgen_compat()
+    try:
+        return _cached(f"{family}:{device}", make)
+    except (RuntimeError, KeyError, AttributeError, TypeError) as e:
+        if "state_dict" not in str(e) and "has no attribute" not in str(e):
+            raise
+        raise EngineError(
+            "Hunyuan3D couldn't load its model with the AI libraries installed on this Mac.",
+            str(e)[:1500],
+            steps=["Build the shape with another engine: TRELLIS, Meshy or Hunyuan3D (fal.ai) in the cloud, or TripoSR.",
+                   "Send the details below to whoever set up Form Studio."],
+        ) from e
+
+
 class LocalHunyuanMini:
     id = "hunyuan-mini"
     label = "Hunyuan3D-2 mini (local)"
@@ -525,7 +596,7 @@ class LocalHunyuanMini:
 
         _ensure_models("hunyuan", progress, 0.0, 0.2)
         progress(None, "Loading Hunyuan3D-2 mini into memory")
-        pipe = _cached(f"hunyuan:{device}", make)
+        pipe = _hunyuan_load(make, "hunyuan", device)
         progress(0.25, "Building the shape")
         steps = 30
         mesh = pipe(
@@ -572,7 +643,7 @@ class LocalHunyuanMV:
 
         if not is_loaded("hunyuan-mv"):
             progress(None, "Loading Hunyuan3D-2 multi-view into memory (only the first time)")
-        pipe = _cached(f"hunyuan-mv:{device}", make)
+        pipe = _hunyuan_load(make, "hunyuan-mv", device)
 
         def rgba(img: Path, mask: Path) -> Image.Image:
             im = Image.open(img).convert("RGBA")
