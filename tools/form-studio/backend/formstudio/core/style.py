@@ -213,6 +213,7 @@ class StyleEdit(BaseModel):
     sculpt_guide: str | None = None
     palette: StylePalette | None = None
     geometry: StyleGeometry | None = None
+    based_on: str | None = None  # create only: start from this style's words, finish and formats
 
 
 def _slug(name: str) -> str:
@@ -260,7 +261,7 @@ def _require_editable(style: StyleSpec) -> None:
 
 
 def create_style(edit: StyleEdit) -> StyleSpec:
-    raw = copy.deepcopy(get_style(TEMPLATE_STYLE).raw)
+    raw = copy.deepcopy(get_style(edit.based_on or TEMPLATE_STYLE).raw)
     raw.pop("reference", None)
     raw["references"] = []
     raw["id"] = _unique_id(edit.name)
@@ -319,6 +320,33 @@ def add_reference(style_id: str, data: bytes) -> StyleSpec:
     raw = copy.deepcopy(style.raw)
     raw.pop("reference", None)
     raw["references"] = style.references + [name]
+    raw["version"] = style.version + 1
+    return _write(style.folder, raw)
+
+
+def add_references(style_id: str, files: list[bytes]) -> StyleSpec:
+    """Several pictures at once; refuses the whole upload if it would pass the limit."""
+    style = get_style(style_id)
+    _require_editable(style)
+    room = MAX_REFERENCES - len(style.references)
+    if len(files) > room:
+        raise ValueError(
+            f"A style can have up to {MAX_REFERENCES} reference pictures; there's room for {max(room, 0)} more.")
+    for data in files:
+        style = add_reference(style_id, data)
+    return style
+
+
+def make_reference_first(style_id: str, index: int) -> StyleSpec:
+    style = get_style(style_id)
+    _require_editable(style)
+    if not 0 <= index < len(style.references):
+        raise IndexError("No such reference image.")
+    refs = list(style.references)
+    refs.insert(0, refs.pop(index))
+    raw = copy.deepcopy(style.raw)
+    raw.pop("reference", None)
+    raw["references"] = refs
     raw["version"] = style.version + 1
     return _write(style.folder, raw)
 

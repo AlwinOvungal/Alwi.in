@@ -122,3 +122,31 @@ def test_rebuild_from_recipe(mug_photo, monkeypatch):
             assert job["report"]["watertight"]
         finally:
             c.put("/api/settings", json={"anthropic_key": ""})
+
+
+def test_new_style_from_another_with_pictures_and_colours():
+    with TestClient(app) as c:
+        s = c.post("/api/styles", json={"name": "Brick Toys", "description": "", "based_on": "pixel-voxel"}).json()
+        sid = s["id"]
+        assert s["geometry"]["finish"] == "voxel" and "voxel" in s["edit_prompt"].lower() and s["references"] == 0
+        red_cream = io.BytesIO()
+        img = Image.new("RGB", (200, 200), (255, 255, 255))
+        img.paste(Image.new("RGB", (160, 100), (200, 40, 40)), (20, 20))
+        img.paste(Image.new("RGB", (160, 50), (240, 230, 205)), (20, 120))
+        img.save(red_cream, "PNG")
+        files = [("image", (f"{i}.png", red_cream.getvalue(), "image/png")) for i in range(2)]
+        s = c.post(f"/api/styles/{sid}/references", files=files).json()
+        assert s["references"] == 2
+        too_many = [("image", (f"{i}.png", _img((10, 10, 10 * i)), "image/png")) for i in range(3)]
+        r = c.post(f"/api/styles/{sid}/references", files=too_many)
+        assert r.status_code == 400 and "room for 2 more" in r.json()["detail"]
+        s = c.post(f"/api/styles/{sid}/references", files=[("image", ("b.png", _img((20, 90, 200)), "image/png"))]).json()
+        assert s["references"] == 3
+        s = c.post(f"/api/styles/{sid}/references/2/first").json()
+        first = c.get(f"/api/styles/{sid}/references/0").content
+        assert Image.open(io.BytesIO(first)).getpixel((5, 5)) == (20, 90, 200)
+        cols = c.post("/api/styles/suggest-colours", files=[("image", ("rc.png", red_cream.getvalue(), "image/png"))]).json()
+        assert cols["body"]["name"] in ("Red", "Tomato") and cols["base"]["name"] in ("Cream", "Bone White", "Sand")
+        assert c.post("/api/styles/suggest-colours").status_code == 400
+        assert c.post("/api/styles/suggest-colours", params={"style": "clay-minimal"}).json()["body"]["name"] in ("Olive", "Moss", "Brown")
+        c.delete(f"/api/styles/{sid}")

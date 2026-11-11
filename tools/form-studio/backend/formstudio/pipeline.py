@@ -4,6 +4,7 @@ from __future__ import annotations
 import copy
 import logging
 import shutil
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -77,32 +78,82 @@ def ensure_cutout(job: Job) -> None:
     job.save()
 
 
-def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], progress: Progress) -> None:
+def _next_candidate_number(job: Job) -> int:
+    nums = [int(c.get("n") or 0) for c in job.manifest.get("candidates") or []]
+    files = [int(p.stem.split("_")[-1]) for p in job.path(CANDIDATES).glob("candidate_*.png") if p.stem.split("_")[-1].isdigit()]
+    return max(nums + files + [0]) + 1
+
+
+def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], progress: Progress,
+            on_candidate: Callable[[], None] | None = None) -> None:
+    """Make more options. They're added to the ones already there, one at a time as each finishes."""
     style = get_style(job.manifest["style"]["id"])
     engine = STYLIZERS[engine_id]
     ok, why = engine.available(ctx)
     if not ok:
         raise RuntimeError(why)
     ensure_cutout(job)
-    log.info("%s: restyling with %s, seeds %s", job.id, engine_id, seeds)
-    job.reset_after("cutout")
+    log.info("%s: restyling with %s (%s), seeds %s", job.id, engine_id, style.id, seeds)
     out_dir = job.path(CANDIDATES)
     out_dir.mkdir(parents=True, exist_ok=True)
     cut = job.path(CUTOUT)
-    results = engine.stylize(
-        StylizeInput(cut, cut.with_name(cut.stem + "_mask.png"), style, job.manifest["subject"], seeds, out_dir),
-        ctx, progress,
-    )
-    for r in results:
-        r["engine"] = engine_id
-        r["file"] = f"{CANDIDATES}/{r['file']}"
-    job.manifest["candidates"] = results
-    job.manifest["style"]["hash"] = style.hash
-    job.set_stage("stylized")
-    log.info("%s: %d options ready", job.id, len(results))
+    n = len(seeds)
+    made = 0
+    for i, seed in enumerate(seeds):
+        tmp = out_dir / ".run"
+        shutil.rmtree(tmp, ignore_errors=True)
+        tmp.mkdir()
+        results = engine.stylize(
+            StylizeInput(cut, cut.with_name(cut.stem + "_mask.png"), style, job.manifest["subject"], [seed], tmp),
+            ctx, lambda p, m, i=i: progress(None if p is None else (i + p) / n, f"Option {i + 1} of {n}: {m}"),
+        )
+        for r in results:
+            num = _next_candidate_number(job)
+            name = f"candidate_{num}.png"
+            (tmp / r["file"]).replace(out_dir / name)
+            job.manifest.setdefault("candidates", []).append({
+                **r, "n": num, "file": f"{CANDIDATES}/{name}", "engine": engine_id,
+                "style_id": style.id, "style_name": style.name,
+                "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            })
+            made += 1
+        shutil.rmtree(tmp, ignore_errors=True)
+        job.manifest["style"]["hash"] = style.hash
+        if not job.reached("stylized"):
+            job.set_stage("stylized")
+        else:
+            job.save()
+        if on_candidate:
+            on_candidate()  # show it in the app straight away
+    log.info("%s: %d new options (%d in total)", job.id, made, len(job.manifest["candidates"]))
+
+
+def _reset_keeping_options(job: Job) -> None:
+    """Clear the chosen option and everything after it, but keep all generated options."""
+    job.reset_after("stylized" if job.manifest.get("candidates") else "cutout")
+
+
+def remove_candidate(job: Job, index: int) -> None:
+    cands = job.manifest.get("candidates") or []
+    if not 0 <= index < len(cands):
+        raise ValueError("No such option")
+    gone = cands.pop(index)
+    job.path(gone["file"]).unlink(missing_ok=True)
+    if not cands and job.manifest["stage"] == "stylized":
+        job.manifest["stage"] = "cutout"
+    job.save()
+
+
+def clear_candidates(job: Job) -> None:
+    shutil.rmtree(job.path(CANDIDATES), ignore_errors=True)
+    job.manifest["candidates"] = []
+    if job.manifest["stage"] == "stylized":
+        job.manifest["stage"] = "cutout"
+    job.save()
 
 
 def confirm(job: Job, index: int) -> None:
+    """Pick an option for the 3D step. The other options stay, so you can come back and pick again."""
     cands = job.manifest["candidates"]
     if not 0 <= index < len(cands):
         raise ValueError("No such candidate")
@@ -115,7 +166,7 @@ def confirm(job: Job, index: int) -> None:
 def use_photo_as_is(job: Job) -> None:
     """Skip restyling: send the cutout itself to the 3D step (for things already in style, or 2D art)."""
     ensure_cutout(job)
-    job.reset_after("cutout")
+    _reset_keeping_options(job)
     shutil.copyfile(job.path(CUTOUT), job.path(CONFIRMED))
     cut = job.path(CUTOUT)
     shutil.copyfile(cut.with_name(cut.stem + "_mask.png"), job.path("03_confirmed_mask.png"))
@@ -158,9 +209,9 @@ def rebuild_recipe(job: Job, progress: Progress | None = None) -> None:
 
 
 def set_style(job: Job, style_id: str) -> None:
-    """Switch an object to another style. Restyled options and the 3D shape are made again."""
+    """Switch an object to another style. Earlier options stay (labelled with their style); the 3D shape is redone."""
     style = get_style(style_id)
-    job.reset_after("cutout")
+    _reset_keeping_options(job)
     job.manifest["style"] = {"id": style.id, "hash": style.hash}
     job.manifest["print_params"] = style.print_params((job.manifest.get("print_params") or {}).get("format", "stand"))
     job.save()

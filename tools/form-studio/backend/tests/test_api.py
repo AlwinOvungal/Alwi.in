@@ -195,3 +195,36 @@ def test_unexpected_errors_say_where_they_happened():
     assert msg.startswith("AttributeError: 'tuple' object has no attribute 'shape'")
     assert "test_api.py:" in msg and "Settings → Storage" in msg
     assert _friendly(RuntimeError("Add a key")) == "Add a key"
+
+
+def test_options_accumulate_and_can_be_removed(client, mug_photo):
+    with mug_photo.open("rb") as f:
+        jid = client.post("/api/jobs", files={"photo": ("acc.png", f, "image/png")}, data={"subject": "mug"}).json()["id"]
+    client.post(f"/api/jobs/{jid}/stylize", json={"engine": "preview", "n": 2})
+    wait(client, jid)
+    client.post(f"/api/jobs/{jid}/stylize", json={"engine": "preview", "n": 2})
+    job = wait(client, jid)
+    cands = job["candidates"]
+    assert len(cands) == 4 and len({c["seed"] for c in cands}) == 4  # new seeds each run
+    assert [c["n"] for c in cands] == [1, 2, 3, 4] and all(c["style_id"] == "clay-minimal" for c in cands)
+
+    job = client.delete(f"/api/jobs/{jid}/candidates/1").json()
+    assert [c["n"] for c in job["candidates"]] == [1, 3, 4]
+    assert "02_candidates/candidate_2.png" not in job["files"]
+
+    job = client.post(f"/api/jobs/{jid}/confirm", json={"candidate": 2}).json()
+    assert job["confirmed"]["n"] == 4 and len(job["candidates"]) == 3
+    client.post(f"/api/jobs/{jid}/reconstruct", json={"engine": "lathe"})
+    wait(client, jid)
+    job = client.post(f"/api/jobs/{jid}/confirm", json={"candidate": 0}).json()  # change my mind
+    assert job["confirmed"]["n"] == 1 and job["stage"] == "confirmed" and len(job["candidates"]) == 3
+    assert "04_raw.glb" not in job["files"]  # the old shape is redone
+
+    job = client.post(f"/api/jobs/{jid}/style", json={"style": "pixel-voxel"}).json()
+    assert len(job["candidates"]) == 3 and job["stage"] == "stylized"  # options kept across styles
+    client.post(f"/api/jobs/{jid}/stylize", json={"engine": "preview", "n": 1})
+    job = wait(client, jid)
+    assert job["candidates"][-1]["style_id"] == "pixel-voxel" and job["candidates"][-1]["n"] == 5
+
+    job = client.delete(f"/api/jobs/{jid}/candidates").json()
+    assert job["candidates"] == [] and job["stage"] == "cutout"

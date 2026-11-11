@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import json
 import logging
 import platform
@@ -160,8 +161,34 @@ def duplicate_style(style_id: str) -> dict[str, Any]:
 
 
 @app.post("/api/styles/{style_id}/references")
-def add_style_reference(style_id: str, image: UploadFile = File(...)) -> dict[str, Any]:
-    return _style_call(style_mod.add_reference, style_id, image.file.read())
+def add_style_reference(style_id: str, image: list[UploadFile] = File(...)) -> dict[str, Any]:
+    """One or several pictures (form field "image", repeated)."""
+    return _style_call(style_mod.add_references, style_id, [f.file.read() for f in image])
+
+
+@app.post("/api/styles/{style_id}/references/{index}/first")
+def first_style_reference(style_id: str, index: int) -> dict[str, Any]:
+    return _style_call(style_mod.make_reference_first, style_id, index)
+
+
+@app.post("/api/styles/suggest-colours")
+def suggest_colours(style: str | None = None, image: list[UploadFile] | None = File(None)) -> dict[str, Any]:
+    """The two print colours, picked from pictures (uploaded, or a style's references). Free, no AI."""
+    from PIL import Image as PILImage
+
+    from ..core import colours
+
+    pics: list[Any] = []
+    if style:
+        pics += _style(style).reference_paths
+    for f in image or []:
+        try:
+            pics.append(PILImage.open(io.BytesIO(f.file.read())))
+        except Exception:
+            raise HTTPException(400, "One of the files isn't an image.")
+    if not pics:
+        raise HTTPException(400, "Add a reference picture first.")
+    return colours.suggest(pics)
 
 
 @app.delete("/api/styles/{style_id}/references/{index}")
@@ -535,17 +562,36 @@ def stylize(job_id: str, body: StylizeBody) -> dict[str, Any]:
         raise HTTPException(400, "Unknown engine")
     style = get_style(job.manifest["style"]["id"])
     n = max(1, min(8, body.n or s.get("candidates", 4)))
-    if body.seed is None:
-        seeds = (style.seeds * ((n // max(1, len(style.seeds))) + 1))[:n]
-        seeds = [sd + 1000 * (i // len(style.seeds)) for i, sd in enumerate(seeds)]
+    if body.seed is None:  # the style's seeds first, then fresh ones: every run adds new options
+        start = len(job.manifest.get("candidates") or [])
+        k = max(1, len(style.seeds))
+        seeds = [style.seeds[(start + i) % k] + 1000 * ((start + i) // k) for i in range(n)]
     else:
         seeds = [body.seed + i for i in range(n)]
     ctx = settings_mod.context()
-    return _queue(job, "stylize", lambda p: pipeline.stylize(job, ctx, engine, seeds, p))
+    return _queue(job, "stylize", lambda p: pipeline.stylize(job, ctx, engine, seeds, p,
+                                                             on_candidate=lambda: _publish_state(job)))
 
 
 class ConfirmBody(BaseModel):
     candidate: int | None = None  # None = use the photo as is
+
+
+@app.delete("/api/jobs/{job_id}/candidates/{index}")
+def remove_candidate(job_id: str, index: int) -> dict[str, Any]:
+    with _locked(job_id) as job:
+        try:
+            pipeline.remove_candidate(job, index)
+        except ValueError as e:
+            raise _bad(e)
+    return _view(job)
+
+
+@app.delete("/api/jobs/{job_id}/candidates")
+def clear_candidates(job_id: str) -> dict[str, Any]:
+    with _locked(job_id) as job:
+        pipeline.clear_candidates(job)
+    return _view(job)
 
 
 @app.post("/api/jobs/{job_id}/confirm")
