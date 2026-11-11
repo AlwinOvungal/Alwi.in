@@ -50,12 +50,20 @@ export interface Candidate {
   quality?: Quality;
 }
 
-export type Finish = "soft" | "voxel" | "faceted";
+export type Finish = "soft" | "voxel" | "faceted" | "blender";
 export const FINISHES: { id: Finish; label: string; hint: string }[] = [
   { id: "soft", label: "Soft", hint: "Smooth, rounded clay-like surfaces." },
   { id: "voxel", label: "Pixel / voxel", hint: "Rebuilt from cubes, like 3D pixel art." },
   { id: "faceted", label: "Low-poly", hint: "Flat geometric facets, papercraft feel." },
+  { id: "blender", label: "Blender clay", hint: "Finished in Blender: an even, smoothed shape with a fine hand-made clay texture." },
 ];
+
+export interface BlenderStatus {
+  found: boolean;
+  path?: string;
+  version?: string;
+  download: string;
+}
 
 export type PrintFormat = "stand" | "magnet" | "keychain";
 
@@ -65,6 +73,9 @@ export interface PrintParams {
   ring: { enabled: boolean; outer_radius_mm: number; hole_mm: number; thickness_mm: number };
   geometry: {
     finish?: Finish;
+    clay_texture_mm?: number;
+    clay_grain_mm?: number;
+    clay_smooth?: number;
     voxel_size_mm?: number;
     facets?: number;
     height_mm: number;
@@ -174,6 +185,9 @@ export interface StyleGeometry {
   finish: Finish;
   voxel_size_mm: number;
   facets: number;
+  clay_texture_mm?: number;
+  clay_grain_mm?: number;
+  clay_smooth?: number;
 }
 
 export interface StyleEdit {
@@ -213,6 +227,7 @@ export interface Settings {
   keep_loaded: "auto" | "one";
   warm_up: boolean;
   views_auto?: boolean;
+  blender_path?: string;
   memory: { ram_gb: number | null; budget_gb: number; loaded: string[] };
   candidates: number;
   export_formats: string[];
@@ -404,6 +419,8 @@ export const api = {
   cancel: (id: string) => req<Job>("POST", `/api/jobs/${id}/cancel`),
   makeViews: (id: string, engine?: string) => req<Job>("POST", `/api/jobs/${id}/views`, { engine }),
   removeViews: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/views`),
+  blender: () => req<BlenderStatus>("GET", "/api/blender"),
+  findBlender: () => req<BlenderStatus>("POST", "/api/blender/find"),
   cleanup: () => req<{ items: CleanupItem[]; total: number }>("GET", "/api/cleanup"),
   runCleanup: (ids: string[]) => req<{ freed: number; items: CleanupItem[]; total: number }>("POST", "/api/cleanup", { ids }),
   useNow: (id: string, candidate: number, engine?: string, views = false) =>

@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { api, Colour, Finish, FINISHES, Settings, Style, StyleDetail, StyleEdit, StyleGeometry, styleRefUrl } from "./api";
-import { go, Slider, useToast } from "./ui";
+import { ClayFields, go, NeedsBlender, Slider, useBlender, useToast } from "./ui";
 
-const FINISH_LABEL: Record<Finish, string> = { soft: "Soft", voxel: "Pixel / voxel", faceted: "Low-poly" };
+const FINISH_LABEL: Record<Finish, string> = { soft: "Soft", voxel: "Pixel / voxel", faceted: "Low-poly", blender: "Blender clay" };
 const MAX_REFS = 4;
 
 // ---------------------------------------------------------------- shared pieces ----
@@ -43,6 +43,7 @@ function ColourFields({ palette, onChange, disabled }: { palette: { body: Colour
 }
 
 function FinishFields({ g, onChange, disabled }: { g: StyleGeometry; onChange: (g: StyleGeometry) => void; disabled?: boolean }) {
+  const blender = useBlender();
   return (
     <>
       <div className="field">
@@ -57,6 +58,8 @@ function FinishFields({ g, onChange, disabled }: { g: StyleGeometry; onChange: (
         </div>
         <small className="muted">{FINISHES.find((f) => f.id === g.finish)?.hint} Applied to every object's 3D shape, whichever engine made it.</small>
       </div>
+      {g.finish === "blender" && <NeedsBlender b={blender} />}
+      {g.finish === "blender" && <ClayFields g={g} disabled={disabled} set={(patch) => onChange({ ...g, ...patch })} />}
       {g.finish === "voxel" && <Slider label="Block size" unit=" mm" min={1} max={8} step={0.25} value={g.voxel_size_mm} disabled={disabled} onChange={(v) => onChange({ ...g, voxel_size_mm: v })} onCommit={() => {}} />}
       {g.finish === "faceted" && <Slider label="Facets" unit="" min={80} max={2000} step={20} value={g.facets} disabled={disabled} onChange={(v) => onChange({ ...g, facets: v })} onCommit={() => {}} />}
       {g.finish === "soft" && <Slider label="Softness" unit=" mm" min={0} max={3} step={0.1} value={g.soften_mm} disabled={disabled} onChange={(v) => onChange({ ...g, soften_mm: v })} onCommit={() => {}} />}

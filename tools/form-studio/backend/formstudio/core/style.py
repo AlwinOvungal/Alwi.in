@@ -132,6 +132,9 @@ class StyleSpec:
                 "finish": self.geometry.get("finish", "soft"),
                 "voxel_size_mm": self.geometry.get("voxel_size_mm", 2.5),
                 "facets": self.geometry.get("facets", 400),
+                "clay_texture_mm": self.geometry.get("clay_texture_mm", 0.25),
+                "clay_grain_mm": self.geometry.get("clay_grain_mm", 3.0),
+                "clay_smooth": self.geometry.get("clay_smooth", 10),
             },
             # how the reference pictures steer local SDXL: "style" = only the look, "full" = look and composition
             "reference_mode": self.stylize.get("reference_mode", "style"),
@@ -267,9 +270,13 @@ class StyleGeometry(BaseModel):
     height_mm: float = Field(ge=10, le=300)
     soften_mm: float = Field(ge=0, le=3)
     min_feature_mm: float = Field(ge=0.6, le=6)
-    finish: Literal["soft", "voxel", "faceted"] = "soft"
+    finish: Literal["soft", "voxel", "faceted", "blender"] = "soft"
     voxel_size_mm: float = Field(default=2.5, ge=0.8, le=10)
     facets: int = Field(default=400, ge=60, le=5000)
+    # Blender clay finish
+    clay_texture_mm: float = Field(default=0.25, ge=0, le=1)
+    clay_grain_mm: float = Field(default=3.0, ge=1, le=10)
+    clay_smooth: int = Field(default=10, ge=0, le=30)
 
 
 class StyleEdit(BaseModel):
@@ -338,6 +345,7 @@ FINISH_WORDS = {
     "soft": "soft rounded forms, smooth matte surface",
     "voxel": "made of visible cubes like 3D pixel art, flat colours",
     "faceted": "low-poly with crisp flat facets",
+    "blender": "soft rounded clay forms with a fine hand-made surface texture",
 }
 
 

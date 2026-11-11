@@ -307,6 +307,7 @@ class SettingsUpdate(BaseModel):
     keep_loaded: Literal["auto", "one"] | None = None
     warm_up: bool | None = None
     views_auto: bool | None = None
+    blender_path: str | None = None
     candidates: int | None = None
     export_formats: list[str] | None = None
     fal: dict[str, Any] | None = None
@@ -347,6 +348,10 @@ def put_settings(body: SettingsUpdate) -> dict[str, Any]:
         from ..engines import local
 
         local.configure(saved)
+    if "blender_path" in update:
+        from ..core import blender
+
+        blender.find_blender(refresh=True)
     if {"engines", "sdxl_quality", "warm_up", "keep_loaded"} & update.keys():
         _warm_soon()
     return settings_mod.public(saved)
@@ -641,6 +646,22 @@ def cleanup_run(body: CleanupBody) -> dict[str, Any]:
     _size_cache.update(at=0, data=None)  # sizes changed
     items = cleanup.scan(settings_mod.load())
     return {"freed": freed, "items": items, "total": sum(i["bytes"] for i in items)}
+
+
+@app.get("/api/blender")
+def blender_status() -> dict[str, Any]:
+    from ..core import blender
+
+    found = blender.find_blender()
+    return {"found": bool(found), **(found or {}), "download": "https://www.blender.org/download/"}
+
+
+@app.post("/api/blender/find")
+def blender_find() -> dict[str, Any]:
+    from ..core import blender
+
+    found = blender.find_blender(refresh=True)
+    return {"found": bool(found), **(found or {}), "download": "https://www.blender.org/download/"}
 
 
 class StorageOpen(BaseModel):

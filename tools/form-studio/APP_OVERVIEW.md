@@ -245,6 +245,12 @@ The new built-ins have no reference pictures; their words alone set the look.
   - ChatGPT images makes all options in one request; fal runs them in parallel
   - a built-in **Speed test**
   - Details in HANDOFF.md, under "Speed machinery".
+- **Blender clay finish:**
+  - A fourth 3D finish made by running the Blender.app on your Mac in the background: voxel remesh, smoothing, a fine
+    clay surface texture, remesh and decimate.
+  - Sliders: Clay texture, Texture size, Smoothness.
+  - Settings → Printing shows whether Blender was found, with an optional path and **Look again**.
+  - Without Blender (or if it fails), Soft is used, with a warning.
 - **3 views (Shape step):** **Make 3 views** draws Front · Side · Back of the chosen look, without labels.
   - Drawn by ChatGPT images, Nano Banana, or free on this Mac (MV-Adapter, `setup-mac.sh --with-views`).
   - Meshy (multi-image), TRELLIS (multi) and Hunyuan3D-2 (fal multi-view, or local Hunyuan3D-2mv with

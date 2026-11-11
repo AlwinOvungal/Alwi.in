@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
-import { api, BenchReport, CleanupItem, Engine, Engines, formatBytes, formatSeconds, ModelPack, ModelQueue, QUALITIES, Settings, StorageItem, Task } from "./api";
+import { api, BenchReport, BlenderStatus, CleanupItem, Engine, Engines, formatBytes, formatSeconds, ModelPack, ModelQueue, QUALITIES, Settings, StorageItem, Task } from "./api";
 import { ErrorCard, KindChip, Progress, Switch, useToast } from "./ui";
 
 type Save = (patch: Parameters<typeof api.saveSettings>[0], msg?: string) => Promise<void>;
@@ -542,6 +542,45 @@ function SpeedTest() {
   );
 }
 
+// ---------- Blender ----------
+
+function BlenderRow({ s, save }: { s: Settings; save: Save }) {
+  const [b, setB] = useState<BlenderStatus | null>(null);
+  const [looking, setLooking] = useState(false);
+  const [path, setPath] = useState(s.blender_path ?? "");
+  useEffect(() => {
+    api.blender().then(setB).catch(() => {});
+  }, []);
+  const look = async () => {
+    setLooking(true);
+    try {
+      setB(await api.findBlender());
+    } finally {
+      setLooking(false);
+    }
+  };
+  return (
+    <div className="set-row wide">
+      <div className="set-text">
+        <span className="t">Blender</span>
+        <span className="d">
+          {b === null
+            ? "Looking for Blender…"
+            : b.found
+              ? <>Found: Blender {b.version} at <span className="kbd">{b.path}</span>. Used by the <b>Blender clay</b> 3D finish.</>
+              : <>Not found. The <b>Blender clay</b> finish needs Blender (free): <a href={b.download} target="_blank" rel="noreferrer">download it</a>, put it in Applications, then press Look again.</>}
+        </span>
+      </div>
+      <div className="row" style={{ gap: 8 }}>
+        <input className="input grow" placeholder="Optional: path to Blender, if it isn't in Applications" value={path}
+          onChange={(e) => setPath(e.target.value)}
+          onBlur={() => path !== (s.blender_path ?? "") && save({ blender_path: path.trim() }, "Blender path saved").then(look)} />
+        <button className="btn sm" disabled={looking} onClick={look}>{looking ? "Looking…" : "Look again"}</button>
+      </div>
+    </div>
+  );
+}
+
 // ---------- storage ----------
 
 const STORAGE_TONES = ["#5e6b2e", "#8f9a5c", "#c2b98f", "#4b6fa8", "#a1372b", "#9a5b12", "#85837a", "#d6d2c6"];
@@ -901,6 +940,7 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
 
           <Section id="printing" title="Printing" intro="Where your print files go and what's made by default.">
             <Group>
+              <BlenderRow s={s} save={save} />
               <Row title="Slicer" desc="Open in slicer sends the 3MF here, with both colours already assigned.">
                 <select className="select" value={s.slicer} onChange={(e) => save({ slicer: e.target.value as Settings["slicer"] })}>
                   <option value="bambu">Bambu Studio</option>

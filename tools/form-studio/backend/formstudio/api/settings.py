@@ -28,7 +28,8 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "claude": {"model": "claude-opus-5-5", "effort": "medium", "auto_name": True},
     "openai": {"model": "gpt-image-2.5-sunburst", "quality": "medium"},
     "meshy": {"ai_model": "latest"},
-    "slicer": "bambu",  # bambu | orca | prusa
+    "slicer": "bambu",
+    "blender_path": "",  # empty: look in Applications  # bambu | orca | prusa
 }
 
 SECRETS = ("fal", "anthropic", "openai", "meshy")

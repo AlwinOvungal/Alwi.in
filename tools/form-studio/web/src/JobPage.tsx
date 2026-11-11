@@ -1,7 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { api, Candidate, Engines, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, Settings, Style, useJob } from "./api";
 import { StylePicker } from "./Library";
-import { EnginePicker, ErrorCard, go, Progress, Slider, Switch, useToast } from "./ui";
+import { ClayFields, EnginePicker, ErrorCard, go, NeedsBlender, Progress, Slider, Switch, useBlender, useToast } from "./ui";
 
 const Viewer = lazy(() => import("./Viewer"));
 
@@ -635,6 +635,7 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
   const [p, setP] = useState<PrintParams | null>(job.print_params);
   const [applying, setApplying] = useState(false);
   const [formats, setFormats] = useState<string[]>(settings?.export_formats ?? ["3mf"]);
+  const blender = useBlender();
   const toast = useToast();
   useEffect(() => setP(job.print_params), [job.print_params]);
 
@@ -746,10 +747,16 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           <label className="field">
             <span>3D finish</span>
             <select className="select" value={finish} disabled={busy} onChange={(e) => set("geometry", { finish: e.target.value as Finish }, true)}>
-              {FINISHES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+              {FINISHES.map((f) => (
+                <option key={f.id} value={f.id}>{f.label}{f.id === "blender" && blender && !blender.found ? " (needs Blender)" : ""}</option>
+              ))}
             </select>
             <small className="muted">{FINISHES.find((f) => f.id === finish)?.hint}</small>
           </label>
+          {finish === "blender" && <NeedsBlender b={blender} />}
+          {finish === "blender" && (
+            <ClayFields g={p.geometry} disabled={busy} set={(patch, commit) => set("geometry", patch, commit)} />
+          )}
           {finish === "voxel" && (
             <Slider label="Block size" unit=" mm" min={1} max={8} step={0.25} value={p.geometry.voxel_size_mm ?? 2.5} onChange={(v) => set("geometry", { voxel_size_mm: v })} onCommit={(v) => set("geometry", { voxel_size_mm: v }, true)} disabled={busy} />
           )}

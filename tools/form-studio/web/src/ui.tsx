@@ -1,5 +1,5 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from "react";
-import { formatSeconds, type Engine, type Task } from "./api";
+import { api, formatSeconds, type BlenderStatus, type Engine, type Task } from "./api";
 
 // ---- routing (hash based: works in the app window and any browser) ----
 export function useRoute(): string[] {
@@ -244,6 +244,44 @@ export function ErrorCard({
           <p className="detail">{task.error_detail}</p>
         </details>
       )}
+    </div>
+  );
+}
+
+/** Whether Blender is on this Mac (for the "Blender clay" finish). Asked once per page. */
+export function useBlender(): BlenderStatus | null {
+  const [b, setB] = useState<BlenderStatus | null>(null);
+  useEffect(() => {
+    api.blender().then(setB).catch(() => setB({ found: false, download: "https://www.blender.org/download/" }));
+  }, []);
+  return b;
+}
+
+/** Sliders for the Blender clay finish, shared by the Print step and the style editor. */
+export function ClayFields({ g, set, disabled }: {
+  g: { clay_texture_mm?: number; clay_grain_mm?: number; clay_smooth?: number };
+  set: (patch: { clay_texture_mm?: number; clay_grain_mm?: number; clay_smooth?: number }, commit: boolean) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <>
+      <Slider label="Clay texture" unit=" mm" min={0} max={1} step={0.05} value={g.clay_texture_mm ?? 0.25} disabled={disabled}
+        onChange={(v) => set({ clay_texture_mm: v }, false)} onCommit={(v) => set({ clay_texture_mm: v }, true)} />
+      <Slider label="Texture size" unit=" mm" min={1} max={10} step={0.5} value={g.clay_grain_mm ?? 3} disabled={disabled}
+        onChange={(v) => set({ clay_grain_mm: v }, false)} onCommit={(v) => set({ clay_grain_mm: v }, true)} />
+      <Slider label="Smoothness" unit="" min={0} max={30} step={1} value={g.clay_smooth ?? 10} disabled={disabled}
+        onChange={(v) => set({ clay_smooth: v }, false)} onCommit={(v) => set({ clay_smooth: v }, true)} />
+    </>
+  );
+}
+
+export function NeedsBlender({ b }: { b: BlenderStatus | null }) {
+  if (!b || b.found) return null;
+  return (
+    <div className="note info" style={{ display: "block" }}>
+      <b>Blender clay needs Blender</b> (free) on this Mac. Until it's installed, the Soft finish is used.{" "}
+      <a href={b.download} target="_blank" rel="noreferrer">Download Blender</a>, put it in Applications, then press <b>Look again</b> in
+      Settings → Printing.
     </div>
   );
 }

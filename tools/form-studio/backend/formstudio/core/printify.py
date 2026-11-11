@@ -268,6 +268,43 @@ def clear_cache() -> None:
     CACHE["hits"] = 0
 
 
+def _soft(opened: np.ndarray, origin: np.ndarray, pitch: float, geo: dict[str, Any], w: list[str]) -> trimesh.Trimesh:
+    soften = float(geo.get("soften_mm", 0.9)) / pitch
+    body = surface_from_volume(opened, origin, pitch, soften)
+    iters = int(geo.get("smooth_iters", 8))
+    if iters > 0:
+        trimesh.smoothing.filter_taubin(body, lamb=0.5, nu=-0.53, iterations=iters)
+    target = int(geo.get("target_faces", 60000))
+    if len(body.faces) > target:
+        try:
+            body = body.simplify_quadric_decimation(face_count=target)
+        except Exception as e:  # fast-simplification missing → keep full resolution
+            w.append(f"Decimation skipped ({e.__class__.__name__}).")
+    return body
+
+
+def _blender_clay(opened: np.ndarray, origin: np.ndarray, pitch: float, geo: dict[str, Any], w: list[str]) -> trimesh.Trimesh:
+    """The Blender clay finish; Soft when Blender isn't there or its result can't be printed."""
+    from . import blender
+
+    base = surface_from_volume(opened, origin, pitch, float(geo.get("soften_mm", 0.9)) / pitch)
+    try:
+        body = blender.clay(base, {
+            "voxel_mm": max(pitch, float(geo.get("voxel_mm", 0.5))),
+            "smooth": int(geo.get("clay_smooth", 10)),
+            "texture_mm": float(geo.get("clay_texture_mm", 0.25)),
+            "grain_mm": float(geo.get("clay_grain_mm", 3.0)),
+            "target_faces": int(geo.get("target_faces", 60000)),
+        })
+        to_manifold(body)  # must be a closed solid, like every other finish
+        if body.volume < 0:
+            body.invert()
+        return body
+    except (blender.BlenderError, ValueError) as e:
+        w.append(f"Blender clay wasn't used ({e}); used Soft instead. Install Blender from blender.org.")
+        return _soft(opened, origin, pitch, geo, w)
+
+
 def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | None = None,
              cache_key: str | None = None) -> PrintResult:
     say = progress or (lambda p, m: None)
@@ -289,7 +326,8 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     finish = str(geo.get("finish", "soft"))
     k1 = (cache_key, round(body_h, 4), round(flat_cut, 4), round(pitch_req, 4)) if cache_key and CACHE["enabled"] else None
     k2 = k1 and (*k1, round(min_feat, 4))
-    k3 = k2 and (*k2, finish, *(geo.get(k) for k in ("voxel_size_mm", "facets", "soften_mm", "smooth_iters", "target_faces")))
+    k3 = k2 and (*k2, finish, *(geo.get(k) for k in ("voxel_size_mm", "facets", "soften_mm", "smooth_iters", "target_faces",
+                                                       "clay_texture_mm", "clay_grain_mm", "clay_smooth")))
 
     hit3 = _get(k3)
     if hit3:
@@ -359,19 +397,12 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
                 say(0.5, "Cutting facets")
                 body = surface_from_volume(opened, origin, pitch, min(float(geo.get("soften_mm", 0.9)), 0.5) / pitch)
                 body = facet(body, int(geo.get("facets", 400)), w)
+            elif finish == "blender":
+                say(0.5, "Finishing in Blender (clay)")
+                body = _blender_clay(opened, origin, pitch, geo, w)
             else:
                 say(0.5, "Softening into clay")
-                soften = float(geo.get("soften_mm", 0.9)) / pitch
-                body = surface_from_volume(opened, origin, pitch, soften)
-                iters = int(geo.get("smooth_iters", 8))
-                if iters > 0:
-                    trimesh.smoothing.filter_taubin(body, lamb=0.5, nu=-0.53, iterations=iters)
-                target = int(geo.get("target_faces", 60000))
-                if len(body.faces) > target:
-                    try:
-                        body = body.simplify_quadric_decimation(face_count=target)
-                    except Exception as e:  # fast-simplification missing → keep full resolution
-                        w.append(f"Decimation skipped ({e.__class__.__name__}).")
+                body = _soft(opened, origin, pitch, geo, w)
         warnings += w
         _put(k3, (body, pitch, thin_removed, list(warnings)))
 

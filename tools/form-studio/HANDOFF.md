@@ -392,7 +392,13 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
       written from their official examples but **not run here** (no GPU or memory for them). Verify on the Mac.
 19. **Clean up:** `core/cleanup.py` must never touch objects' files, styles in use, or models the default engines
     need. Unused models are listed but not ticked.
-20. **Git:**
+20. **Blender clay finish:**
+    - `core/blender.py` finds Blender (setting `blender_path`, `$FORMSTUDIO_BLENDER`, /Applications, PATH) and runs
+      `core/blender_clay.py` inside it with `--factory-startup` (STL in/out, params JSON).
+    - The script supports Blender 3.6–5.x (the STL operators were renamed in 4.2). It has only been run with a
+      stand-in here (running a downloaded Blender wasn't allowed); verify on the Mac.
+    - `printify` falls back to Soft with a warning, so a print is never blocked.
+21. **Git:**
     - work on the feature branch
     - don't commit `web_dist`, `.venv` or models
     - keep commits descriptive
