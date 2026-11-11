@@ -367,3 +367,23 @@ def test_cameras_match_mv_adapter():
     assert tuple(round(float(v), 3) for v in c2w[0, :3, 3]) == (0.0, -1.8, 0.0)  # front camera in front
     assert tuple(round(float(v), 3) for v in c2w[2, :3, 3]) == (0.0, 1.8, 0.0)  # back camera behind
     assert float(c2w[0, 3, 3]) == 1.0
+
+
+def test_project_caches_are_found_and_only_those_go(tmp_path, monkeypatch):
+    proj = tmp_path / "form-studio"
+    keep = [proj / "backend/formstudio/web_dist/index.html", proj / ".venv/lib/x/__pycache__/a.pyc",
+            proj / ".git/objects/__pycache__/b", proj / "backend/formstudio/core.py"]
+    gone = [proj / "backend/formstudio/__pycache__/a.pyc", proj / "backend/tests/__pycache__/b.pyc",
+            proj / "backend/.pytest_cache/v/c"]
+    for f in keep + gone + [proj / "web/node_modules/vite/x.js"]:
+        f.parent.mkdir(parents=True, exist_ok=True)
+        f.write_bytes(b"z" * 2000)
+    monkeypatch.setattr(cleanup, "_project_dir", lambda: proj)
+    items = {i["id"]: i for i in cleanup.scan({"engines": {}})}
+    assert items["pycache"]["count"] == 3
+    assert items["buildtools"]["careful"] is True  # listed, not ticked
+    cleanup.clean(["pycache"], {"engines": {}})
+    assert all(f.exists() for f in keep) and not any(f.exists() for f in gone)
+    assert (proj / "web/node_modules/vite/x.js").exists()
+    cleanup.clean(["buildtools"], {"engines": {}})
+    assert not (proj / "web/node_modules").exists()

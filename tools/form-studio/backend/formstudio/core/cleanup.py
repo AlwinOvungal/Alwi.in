@@ -17,6 +17,31 @@ from .. import paths
 TEMP_PATTERNS = ("02_candidates/.run*", "03_views.tmp", "04_raw.tmp.glb", "04_upload.png", "manifest.json.tmp")
 
 
+SKIP_DIRS = {".git", ".venv", "node_modules", "web_dist"}
+
+
+def _project_dir() -> Path:
+    return paths.PROJECT_DIR
+
+
+def _python_caches() -> list[Path]:
+    """__pycache__ and .pytest_cache folders in the project (never inside .venv, .git or node_modules)."""
+    out: list[Path] = []
+    for root, dirs, _files in os.walk(_project_dir()):
+        for d in list(dirs):
+            if d in SKIP_DIRS:
+                dirs.remove(d)
+            elif d in ("__pycache__", ".pytest_cache", ".mypy_cache", ".ruff_cache"):
+                out.append(Path(root) / d)
+                dirs.remove(d)
+    return out
+
+
+def _build_tools() -> list[Path]:
+    nm = _project_dir() / "web" / "node_modules"
+    return [nm] if nm.exists() else []
+
+
 def _size(p: Path) -> int:
     if not p.exists():
         return 0
@@ -121,6 +146,12 @@ def scan(settings: dict[str, Any]) -> list[dict[str, Any]]:
         if size or files:
             items.append({"id": id_, "label": label, "note": note, "bytes": size, "count": len(files), **(extra or {})})
 
+    add("pycache", "Python caches in the project", "Made again automatically the next time the app runs.", _python_caches())
+    nm = _build_tools()
+    if nm:
+        items.append({"id": "buildtools", "label": "Interface build tools", "careful": True, "count": 1,
+                      "note": "web/node_modules: only needed when setup-mac.sh rebuilds the interface, and setup puts it back.",
+                      "bytes": sum(_size(p) for p in nm)})
     add("temp", "Unfinished working files", "Left by steps that were stopped or crashed.", _temp_files())
     add("partial", "Unfinished model downloads", "Downloads that were stopped. Download starts them again.", _partial_downloads())
     add("chunk", "Download cache", "Copies Hugging Face keeps while downloading. Your models stay.", _chunk_cache())
@@ -154,6 +185,8 @@ def clean(ids: list[str], settings: dict[str, Any]) -> int:
     groups = {
         "temp": _temp_files, "partial": _partial_downloads, "chunk": _chunk_cache, "bench": _old_bench,
         "styles": _unused_styles,
+        "pycache": _python_caches,
+        "buildtools": _build_tools,
         "shape": lambda: [p for p in [paths.home() / "cache" / "shape"] if p.exists()],
         "leftovers": lambda: [p for p in [paths.home() / "old-version-leftovers"] if p.exists()],
         "pip": lambda: [p for p in [_pip_cache()] if p.exists()],

@@ -7,3 +7,10 @@ tools/form-studio/backend/formstudio/web_dist/
 tools/form-studio/backend/*.egg-info/
 __pycache__/
 .pytest_cache/
+*.pyc
+.mypy_cache/
+.ruff_cache/
+.vite/
+*.log
+.coverage
+htmlcov/
