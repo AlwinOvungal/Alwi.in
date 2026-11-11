@@ -13,7 +13,7 @@ import re
 import shutil
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import yaml
 from PIL import Image, ImageOps
@@ -107,6 +107,7 @@ class StyleSpec:
             "editable": self.editable,
             "references": len(self.reference_paths),
             "has_reference": bool(self.reference_paths),
+            "finish": self.geometry.get("finish", "soft"),
             "defaults": self.print_params(),
             "formats": [{"id": k, "label": v.get("label", k.title())} for k, v in self.formats.items()],
         }
@@ -119,7 +120,12 @@ class StyleSpec:
             "edit_prompt": self.edit_prompt,
             "negative_prompt": self.negative_prompt,
             "sculpt_guide": self.sculpt_guide,
-            "geometry": {k: self.geometry.get(k) for k in ("height_mm", "soften_mm", "min_feature_mm")},
+            "geometry": {
+                **{k: self.geometry.get(k) for k in ("height_mm", "soften_mm", "min_feature_mm")},
+                "finish": self.geometry.get("finish", "soft"),
+                "voxel_size_mm": self.geometry.get("voxel_size_mm", 2.5),
+                "facets": self.geometry.get("facets", 400),
+            },
         }
 
 
@@ -193,6 +199,9 @@ class StyleGeometry(BaseModel):
     height_mm: float = Field(ge=10, le=300)
     soften_mm: float = Field(ge=0, le=3)
     min_feature_mm: float = Field(ge=0.6, le=6)
+    finish: Literal["soft", "voxel", "faceted"] = "soft"
+    voxel_size_mm: float = Field(default=2.5, ge=0.8, le=10)
+    facets: int = Field(default=400, ge=60, le=5000)
 
 
 class StyleEdit(BaseModel):

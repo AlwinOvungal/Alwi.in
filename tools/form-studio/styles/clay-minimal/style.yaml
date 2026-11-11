@@ -19,10 +19,11 @@ negative_prompt: >-
   thin wires, multiple objects, cluttered background, cropped, cast shadow on background
 # Cloud editing models take an instruction rather than a description.
 edit_prompt: >-
-  Turn this {subject} into a small handmade matte clay figurine: chunky simplified
-  shapes, soft rounded edges, a smooth uniform matte surface in a single muted olive
-  green, no text or fine detail. Keep the same pose and silhouette, centred on a plain
-  white background with soft diffuse light.
+  Completely redraw this {subject} as a small handmade matte clay figurine. Keep only
+  its overall silhouette and recognisable parts; make the shapes chunky and simplified
+  with soft rounded edges, a smooth uniform matte surface in a single muted olive green,
+  and no text or fine detail. Show the whole object centred on a plain white background
+  with soft diffuse light.
 
 # Claude Sculpt reads this when it rebuilds an object from building blocks.
 sculpt_guide: >-
@@ -43,6 +44,7 @@ palette:
   base: {name: Bone White, hex: "#F2F0EA"}
 
 geometry:
+  finish: soft           # soft | voxel (pixel cubes) | faceted (low-poly)
   height_mm: 50          # total printed height, base included
   voxel_mm: 0.5          # remesh resolution
   soften_mm: 0.9         # blur radius that gives the soft clay look

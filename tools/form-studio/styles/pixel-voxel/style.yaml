@@ -1,0 +1,80 @@
+# Pixel / Voxel: the object as 3D pixel art, built from cubes.
+id: pixel-voxel
+name: Pixel Voxel
+version: 1
+description: 3D pixel art. Every object is rebuilt from visible cubes with flat colours.
+references: []
+
+prompt: >-
+  a {subject} as 3D voxel pixel art, built entirely from visible equal-sized cubes,
+  blocky stepped silhouette, limited palette of flat solid colours, isometric toy look,
+  no smooth curves, no text, studio product render, centered, whole object in frame,
+  plain white background, soft diffuse light
+negative_prompt: >-
+  smooth surfaces, curves, gradients, photorealistic texture, blurry, text, logo,
+  multiple objects, cluttered background, cropped, cast shadow on background
+edit_prompt: >-
+  Completely redraw this {subject} as 3D voxel pixel art, as if built from Lego-like
+  equal-sized cubes. Keep only its overall silhouette and recognisable parts; turn every
+  curve into stepped blocks, use a few flat solid colours, no gradients, no fine detail
+  and no text. Show the whole object centred on a plain white background with soft
+  diffuse light, in a slight isometric view.
+
+sculpt_guide: >-
+  Think in blocks: use mostly rounded_box parts with roundness 0, aligned to the axes,
+  stacked like voxel art. Curves become steps. Few, bold parts.
+
+seeds: [11, 23, 37, 51]
+
+stylize:
+  size: 1024
+  steps: 30
+  guidance: 6.0
+  ip_adapter_scale: 0.6   # how strongly reference.png steers the look
+  controlnet_scale: 0.55  # how strongly the photo's shape is kept
+
+palette:
+  body: {name: Pixel Blue, hex: "#3A6FD8"}
+  base: {name: Charcoal, hex: "#2B2B2B"}
+
+geometry:
+  finish: voxel          # rebuild the shape from cubes
+  voxel_size_mm: 2.5     # cube size in the print
+  height_mm: 50
+  voxel_mm: 0.5
+  soften_mm: 0.0
+  min_feature_mm: 2.5
+  smooth_iters: 0
+  target_faces: 200000
+  flat_cut: 0.0
+
+base:
+  enabled: true
+  margin_mm: 3
+  thickness_mm: 3
+  fillet_mm: 1.2
+
+magnet:
+  enabled: false
+  diameter_mm: 6
+  depth_mm: 2
+  clearance_mm: 0.15
+
+# What the object becomes. The Print step switches between these; each one
+# starts from the settings above, with these changes on top.
+formats:
+  stand:
+    label: Stand
+  magnet:
+    label: Magnet
+    geometry: {height_mm: 35}
+    base: {enabled: false}
+    magnet: {enabled: true, diameter_mm: 10, depth_mm: 2}
+    flat_back: {enabled: true, thickness_mm: 9}
+  keychain:
+    label: Keychain
+    geometry: {height_mm: 40}
+    base: {enabled: false}
+    magnet: {enabled: false}
+    flat_back: {enabled: true, thickness_mm: 7}
+    ring: {enabled: true, outer_radius_mm: 4.5, hole_mm: 4.5, thickness_mm: 3.5}

@@ -160,7 +160,7 @@ def test_style_draft_is_cleaned_up(monkeypatch, cutout):
         name="Glossy Toy", description="Shiny toys.", prompt="glossy toy, bright", edit_prompt="Make it a glossy toy",
         negative_prompt="matte", sculpt_guide="Round and bold.",
         body=claude.Colour(name="Red", hex="d33"), base=claude.Colour(name="Black", hex="#111111"),
-        soften_mm=9, min_feature_mm=0.1)
+        soften_mm=9, min_feature_mm=0.1, finish="voxel")
     monkeypatch.setattr(claude, "_client", lambda key: FakeClaude(draft))
     out = claude.draft_style("k", None, [cutout], "")
     assert "{subject}" in out.prompt and "{subject}" in out.edit_prompt

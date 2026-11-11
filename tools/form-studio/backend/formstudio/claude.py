@@ -10,7 +10,7 @@ import base64
 import io
 import logging
 from pathlib import Path
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 
 from PIL import Image
 from pydantic import BaseModel
@@ -141,6 +141,7 @@ class StyleDraft(BaseModel):
     base: Colour
     soften_mm: float
     min_feature_mm: float
+    finish: Literal["soft", "voxel", "faceted"]
 
 
 STYLE_SYSTEM = """You are an art director defining a house style for a series of 3D-printed miniatures.
@@ -158,6 +159,7 @@ STYLE_PROMPT = """Write the style definition.
 - body / base: filament colours as names and #RRGGBB hex taken from the references.
 - soften_mm: 0.3 (crisp) to 2.0 (very soft, clay-like).
 - min_feature_mm: 1.2 to 3.0 (thinnest part kept).
+- finish: how the printed shape is finished: "soft" (smooth, rounded: clay, plush, toys), "voxel" (built from cubes: pixel art, voxel, Lego-like) or "faceted" (flat geometric facets: low-poly, papercraft, crystal).
 {notes}"""
 
 

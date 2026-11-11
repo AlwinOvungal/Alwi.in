@@ -105,6 +105,41 @@ def surface_from_volume(vol: np.ndarray, origin: np.ndarray, pitch: float, softe
     return m
 
 
+# ---- finishes --------------------------------------------------------------------
+
+def voxel_surface(vol: np.ndarray, origin: np.ndarray, pitch: float, block_mm: float) -> trimesh.Trimesh:
+    """Pixel-art look: resample to cubes of `block_mm`, then surface them crisply.
+
+    Each block is split 4× before surfacing so marching cubes gives flat faces with
+    only a small bevel on the edges: blocky, watertight and kind to the printer.
+    """
+    f = max(1, int(round(block_mm / pitch)))
+    pad = [(0, (-n) % f) for n in vol.shape]
+    v = np.pad(vol.astype(np.float32), pad)
+    nx, ny, nz = (n // f for n in v.shape)
+    blocks = v.reshape(nx, f, ny, f, nz, f).mean(axis=(1, 3, 5)) >= 0.5
+    if not blocks.any():  # object smaller than one block: keep a single block
+        blocks = np.zeros((1, 1, 1), bool)
+        blocks[0, 0, 0] = True
+    blocks = _largest_component(blocks)
+    fine = np.repeat(np.repeat(np.repeat(blocks, 4, 0), 4, 1), 4, 2)
+    return surface_from_volume(fine, origin, f * pitch / 4, 0.0)
+
+
+def facet(mesh: trimesh.Trimesh, faces: int, warnings: list[str]) -> trimesh.Trimesh:
+    """Low-poly look: a few hundred flat faces. Grows the count if a cut would break the solid."""
+    target = max(60, faces)
+    for _ in range(6):
+        try:
+            low = mesh.simplify_quadric_decimation(face_count=target)
+            to_manifold(low)  # must stay a printable solid
+            return low
+        except Exception:
+            target *= 2
+    warnings.append("Couldn't facet this shape cleanly; kept it smooth.")
+    return mesh
+
+
 # ---- base and magnet -------------------------------------------------------------
 
 def make_base(radius: float, thickness: float, fillet: float, segments: int = 128) -> mf.Manifold:
@@ -203,7 +238,7 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     ring_p = params.get("ring") or {}
     use_base = bool(base_p.get("enabled", True)) and not flat.get("enabled")
     base_t = float(base_p.get("thickness_mm", 3)) if use_base else 0.0
-    flat_cut = float(geo.get("flat_cut", 0.03))
+    flat_cut = 0.0 if geo.get("finish") == "voxel" else float(geo.get("flat_cut", 0.03))
     body_h = height - base_t + (SINK_MM if use_base else 0.0)
 
     say(0.05, "Standing the mesh up")
@@ -242,18 +277,27 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     if thin_removed > 0.08:
         warnings.append(f"{thin_removed:.0%} of the volume was too thin to print and was removed.")
 
-    say(0.5, "Softening into clay")
-    soften = float(geo.get("soften_mm", 0.9)) / pitch
-    body = surface_from_volume(opened, origin, pitch, soften)
-    iters = int(geo.get("smooth_iters", 8))
-    if iters > 0:
-        trimesh.smoothing.filter_taubin(body, lamb=0.5, nu=-0.53, iterations=iters)
-    target = int(geo.get("target_faces", 60000))
-    if len(body.faces) > target:
-        try:
-            body = body.simplify_quadric_decimation(face_count=target)
-        except Exception as e:  # fast-simplification missing → keep full resolution
-            warnings.append(f"Decimation skipped ({e.__class__.__name__}).")
+    finish = str(geo.get("finish", "soft"))
+    if finish == "voxel":
+        say(0.5, "Rebuilding from blocks")
+        body = voxel_surface(opened, origin, pitch, float(geo.get("voxel_size_mm", 2.5)))
+    elif finish == "faceted":
+        say(0.5, "Cutting facets")
+        body = surface_from_volume(opened, origin, pitch, min(float(geo.get("soften_mm", 0.9)), 0.5) / pitch)
+        body = facet(body, int(geo.get("facets", 400)), warnings)
+    else:
+        say(0.5, "Softening into clay")
+        soften = float(geo.get("soften_mm", 0.9)) / pitch
+        body = surface_from_volume(opened, origin, pitch, soften)
+        iters = int(geo.get("smooth_iters", 8))
+        if iters > 0:
+            trimesh.smoothing.filter_taubin(body, lamb=0.5, nu=-0.53, iterations=iters)
+        target = int(geo.get("target_faces", 60000))
+        if len(body.faces) > target:
+            try:
+                body = body.simplify_quadric_decimation(face_count=target)
+            except Exception as e:  # fast-simplification missing → keep full resolution
+                warnings.append(f"Decimation skipped ({e.__class__.__name__}).")
 
     say(0.7, "Cutting a flat bottom")
     body_m = to_manifold(body)

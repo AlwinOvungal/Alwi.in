@@ -23,10 +23,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "export_formats": ["3mf"],
     "fal": {"endpoints": {}},  # engine id → custom endpoint (Settings → Advanced)
     "claude": {"model": "claude-opus-5-5", "effort": "medium", "auto_name": True},
+    "openai": {"model": "gpt-image-2.5-sunburst", "quality": "medium"},
+    "meshy": {"ai_model": "latest"},
     "slicer": "bambu",  # bambu | orca | prusa
 }
 
-SECRETS = ("fal", "anthropic")
+SECRETS = ("fal", "anthropic", "openai", "meshy")
 
 _lock = threading.Lock()
 _memory_secrets: dict[str, str] = {}  # used only if no keychain is available (e.g. CI)

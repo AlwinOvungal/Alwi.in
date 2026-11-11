@@ -140,3 +140,35 @@ def test_switching_format_starts_from_its_defaults(style):
     assert switched["ring"]["enabled"] and not switched["base"]["enabled"]
     with pytest.raises(KeyError):
         style.print_params("bookend")
+
+
+def test_voxel_finish_is_blocky_and_printable(style, mug_glb, tmp_path):
+    import numpy as np
+
+    p = style.print_params()
+    p["geometry"].update(finish="voxel", voxel_size_mm=2.5)
+    rep = printify.run(mug_glb, tmp_path, p)
+    body = trimesh.load(tmp_path / "body.stl")
+    assert body.is_watertight and rep["watertight"]
+    axis_aligned = (np.abs(body.face_normals).max(axis=1) > 0.99).mean()
+    assert axis_aligned > 0.7  # mostly flat cube faces
+    assert rep["size_mm"][2] == pytest.approx(p["geometry"]["height_mm"], abs=0.1)
+
+
+def test_faceted_finish_keeps_few_faces(style, mug_glb, tmp_path):
+    p = style.print_params()
+    p["geometry"].update(finish="faceted", facets=400)
+    printify.run(mug_glb, tmp_path, p)
+    body = trimesh.load(tmp_path / "body.stl")
+    assert body.is_watertight and len(body.faces) <= 3200  # a few hundred, doubled at most if needed
+
+
+def test_preset_styles_load_with_their_finish():
+    from formstudio.core.style import get_style
+
+    expect = {"clay-minimal": "soft", "soft-clay": "soft", "pixel-voxel": "voxel", "low-poly": "faceted"}
+    for sid, finish in expect.items():
+        s = get_style(sid)
+        assert s.geometry["finish"] == finish and "{subject}" in s.edit_prompt
+        assert "Completely redraw" in s.edit_prompt  # a real style conversion, not a cut-out
+        assert {"stand", "magnet", "keychain"} <= set(s.formats)

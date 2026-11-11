@@ -13,6 +13,7 @@ from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
 from typing import Any
 
+import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
@@ -218,9 +219,13 @@ class SettingsUpdate(BaseModel):
     export_formats: list[str] | None = None
     fal: dict[str, Any] | None = None
     claude: dict[str, Any] | None = None
+    openai: dict[str, Any] | None = None
+    meshy: dict[str, Any] | None = None
     slicer: str | None = None
     fal_key: str | None = None  # "" removes it
     anthropic_key: str | None = None
+    openai_key: str | None = None
+    meshy_key: str | None = None
 
 
 @app.get("/api/settings")
@@ -231,11 +236,11 @@ def get_settings() -> dict[str, Any]:
 @app.put("/api/settings")
 def put_settings(body: SettingsUpdate) -> dict[str, Any]:
     update = body.model_dump(exclude_none=True)
-    for field, name in (("fal_key", "fal"), ("anthropic_key", "anthropic")):
+    for field, name in (("fal_key", "fal"), ("anthropic_key", "anthropic"), ("openai_key", "openai"), ("meshy_key", "meshy")):
         key = update.pop(field, None)
         if key is not None:
             settings_mod.set_secret(name, key.strip() or None)
-    for section in ("fal", "claude"):
+    for section in ("fal", "claude", "openai", "meshy"):
         if section in update:
             update[section] = {k: v for k, v in update[section].items() if k not in ("has_key", "key_hint")}
     if "engines" in update:
@@ -265,6 +270,20 @@ def test_key(service: str = "fal") -> dict[str, Any]:
         except anthropic.APIError as e:
             return {"ok": False, "message": f"Couldn't check the key: {e.__class__.__name__}"}
         return {"ok": True, "message": "Key works."}
+    if service in ("openai", "meshy"):
+        url, auth = {
+            "openai": ("https://api.openai.com/v1/models", f"Bearer {key}"),
+            "meshy": ("https://api.meshy.ai/openapi/v1/image-to-3d?page_size=1", f"Bearer {key}"),
+        }[service]
+        try:
+            r = httpx.get(url, headers={"Authorization": auth}, timeout=20)
+        except httpx.HTTPError as e:
+            return {"ok": False, "message": f"Couldn't reach {service}: {e.__class__.__name__}"}
+        if r.status_code in (401, 403):
+            return {"ok": False, "message": "This key was rejected."}
+        if r.status_code == 402:
+            return {"ok": False, "message": "Key works, but this Meshy account can't use the API (needs Pro or credits)."}
+        return {"ok": r.status_code < 400, "message": "Key works." if r.status_code < 400 else f"Unexpected answer ({r.status_code})."}
     try:
         ok = FalClient(key).check()
     except Exception as e:

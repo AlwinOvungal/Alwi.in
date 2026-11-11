@@ -1,0 +1,80 @@
+# Soft Clay: puffy pastel clay toys.
+id: soft-clay
+name: Soft Clay
+version: 1
+description: Puffy pastel clay toys with rounded, slightly squashed, cute proportions.
+references: []
+
+prompt: >-
+  a {subject} as a cute puffy soft clay toy, inflated rounded forms, slightly squashed
+  chubby proportions, pastel peach colour, smooth matte surface with soft subsurface glow,
+  no text, no fine detail, kawaii designer toy, studio product photo, centered,
+  whole object in frame, plain white background, soft diffuse light
+negative_prompt: >-
+  photorealistic texture, sharp edges, thin parts, glossy reflections, text, logo, pattern,
+  multiple objects, cluttered background, cropped, cast shadow on background
+edit_prompt: >-
+  Completely redraw this {subject} as a cute puffy soft clay toy. Keep only its overall
+  silhouette and recognisable parts; inflate every form so it looks soft and rounded,
+  make the proportions slightly squashed and chubby, remove all fine detail and text,
+  and give it a smooth matte pastel peach clay surface. Show the whole object centred
+  on a plain white background with soft diffuse light.
+
+sculpt_guide: >-
+  Puffy, inflated forms like a soft designer toy: very few parts, every part as round as
+  possible (capsules, spheres and heavily rounded boxes), slightly squashed proportions,
+  no sharp edges and no small details.
+
+seeds: [11, 23, 37, 51]
+
+stylize:
+  size: 1024
+  steps: 30
+  guidance: 6.0
+  ip_adapter_scale: 0.6   # how strongly reference.png steers the look
+  controlnet_scale: 0.55  # how strongly the photo's shape is kept
+
+palette:
+  body: {name: Peach, hex: "#F2A98B"}
+  base: {name: Cream, hex: "#FBF3E6"}
+
+geometry:
+  finish: soft
+  height_mm: 50
+  voxel_mm: 0.5
+  soften_mm: 2.0         # extra soft and puffy
+  min_feature_mm: 2.4    # drop small details
+  smooth_iters: 12
+  target_faces: 60000
+  flat_cut: 0.04
+
+base:
+  enabled: true
+  margin_mm: 3
+  thickness_mm: 3
+  fillet_mm: 1.2
+
+magnet:
+  enabled: false
+  diameter_mm: 6
+  depth_mm: 2
+  clearance_mm: 0.15
+
+# What the object becomes. The Print step switches between these; each one
+# starts from the settings above, with these changes on top.
+formats:
+  stand:
+    label: Stand
+  magnet:
+    label: Magnet
+    geometry: {height_mm: 35}
+    base: {enabled: false}
+    magnet: {enabled: true, diameter_mm: 10, depth_mm: 2}
+    flat_back: {enabled: true, thickness_mm: 9}
+  keychain:
+    label: Keychain
+    geometry: {height_mm: 40}
+    base: {enabled: false}
+    magnet: {enabled: false}
+    flat_back: {enabled: true, thickness_mm: 7}
+    ring: {enabled: true, outer_radius_mm: 4.5, hole_mm: 4.5, thickness_mm: 3.5}
