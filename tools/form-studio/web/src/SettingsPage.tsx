@@ -1,5 +1,5 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
-import { api, BenchReport, Engine, Engines, formatBytes, formatSeconds, ModelPack, ModelQueue, QUALITIES, Settings, StorageItem, Task } from "./api";
+import { api, BenchReport, CleanupItem, Engine, Engines, formatBytes, formatSeconds, ModelPack, ModelQueue, QUALITIES, Settings, StorageItem, Task } from "./api";
 import { ErrorCard, KindChip, Progress, Switch, useToast } from "./ui";
 
 type Save = (patch: Parameters<typeof api.saveSettings>[0], msg?: string) => Promise<void>;
@@ -25,7 +25,7 @@ const FAL_ENGINES: [string, string, string][] = [
 /** Which account or section unlocks an engine that isn't available yet. */
 function unlockFor(e: Engine): { service?: Service; section: SectionId; label: string } {
   if (e.id.startsWith("fal-")) return { service: "fal", section: "accounts", label: "Connect fal.ai" };
-  if (e.id === "openai-image") return { service: "openai", section: "accounts", label: "Connect OpenAI" };
+  if (e.id.startsWith("openai")) return { service: "openai", section: "accounts", label: "Connect OpenAI" };
   if (e.id === "meshy") return { service: "meshy", section: "accounts", label: "Connect Meshy" };
   if (e.id === "claude-sculpt") return { service: "anthropic", section: "accounts", label: "Connect Anthropic" };
   return { section: "local", label: "Set up" };
@@ -546,6 +546,65 @@ function SpeedTest() {
 
 const STORAGE_TONES = ["#5e6b2e", "#8f9a5c", "#c2b98f", "#4b6fa8", "#a1372b", "#9a5b12", "#85837a", "#d6d2c6"];
 
+function CleanUp({ onDone }: { onDone: () => void }) {
+  const [data, setData] = useState<{ items: CleanupItem[]; total: number } | null>(null);
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+  const show = (d: { items: CleanupItem[]; total: number }) => {
+    setData(d);
+    setPicked(new Set(d.items.filter((i) => !i.careful).map((i) => i.id))); // models only when you tick them
+  };
+  useEffect(() => {
+    api.cleanup().then(show).catch(() => {});
+  }, []);
+  const chosen = (data?.items ?? []).filter((i) => picked.has(i.id));
+  const size = chosen.reduce((n, i) => n + i.bytes, 0);
+  const run = async () => {
+    if (!confirm(`Remove ${formatBytes(size)} of files Form Studio doesn't need?\n\n${chosen.map((i) => `• ${i.label}`).join("\n")}\n\nYour objects and styles stay.`)) return;
+    setBusy(true);
+    try {
+      const r = await api.runCleanup(chosen.map((i) => i.id));
+      toast(`Freed ${formatBytes(r.freed)}`);
+      show(r);
+      onDone();
+    } catch (e) {
+      toast((e as Error).message, true);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const toggle = (id: string) => setPicked((p) => {
+    const n = new Set(p);
+    if (n.has(id)) n.delete(id);
+    else n.add(id);
+    return n;
+  });
+  return (
+    <Group title="Clean up" note={data ? (data.items.length ? `${formatBytes(data.total)} can go` : "Nothing to remove") : "Looking…"}>
+      {!data && <Row title="Looking for files Form Studio doesn't need…" desc="Leftovers, caches, older speed tests and models no engine uses." />}
+      {data && data.items.length === 0 && (
+        <Row title="Nothing to clean up" desc="No leftovers, caches or unused models right now. Your objects and styles are never touched." />
+      )}
+      {data?.items.map((i) => (
+        <label key={i.id} className="set-row clean-row">
+          <input type="checkbox" checked={picked.has(i.id)} onChange={() => toggle(i.id)} />
+          <span className="set-text">
+            <span className="t">{i.label}{i.careful ? <span className="small muted"> · not ticked: you might want these</span> : null}</span>
+            <span className="d">{i.note}</span>
+          </span>
+          <span className="set-ctrl"><span className="size">{formatBytes(i.bytes)}</span></span>
+        </label>
+      ))}
+      {data && data.items.length > 0 && (
+        <Row title={`Remove ${formatBytes(size)}`} desc="Your objects (photos, options, shapes, print files) and styles are never touched.">
+          <button className="btn sm primary" disabled={busy || !chosen.length} onClick={run}>{busy ? "Removing…" : "Remove selected"}</button>
+        </Row>
+      )}
+    </Group>
+  );
+}
+
 function StorageSection() {
   const [data, setData] = useState<{ home: string; items: StorageItem[]; total_models_bytes: number } | null>(null);
   const [busy, setBusy] = useState(false);
@@ -577,8 +636,9 @@ function StorageSection() {
       intro={data ? <>Form Studio uses <b>{formatBytes(total)}</b> on this Mac, mostly local AI models ({formatBytes(data.total_models_bytes)}). If you only use cloud engines, you can delete them under Local AI.</> : "Measuring folders…"}
       action={<button className="btn sm" disabled={busy} onClick={() => load(true)}>{busy ? "Measuring…" : "Measure again"}</button>}
     >
+      <CleanUp onDone={() => load(true)} />
       {data && (
-        <Group>
+        <Group title="Folders">
           {total > 0 && (
             <div className="set-row wide">
               <div className="usage" role="img" aria-label="Disk use by folder">
@@ -711,6 +771,9 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
             </Group>
             <Group title="3D shape · picture → model" note="Turns the chosen picture into a printable shape">
               <EngineList engines={engines.reconstruct} value={s.engines.reconstruct} onChange={(id) => save({ engines: { ...s.engines, reconstruct: id } }, "Default 3D engine saved")} onUnlock={unlock} />
+            </Group>
+            <Group title="3 views · picture → front, side, back" note="Optional, in the Shape step: lets Meshy, TRELLIS and Hunyuan3D see the whole object">
+              <EngineList engines={engines.views} value={s.engines.views ?? ""} onChange={(id) => save({ engines: { ...s.engines, views: id } }, "Default view maker saved")} onUnlock={unlock} />
             </Group>
             <Group>
               <Row title="Options per Generate" desc="How many pictures each Generate makes. You can change it on each object.">

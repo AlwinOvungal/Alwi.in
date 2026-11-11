@@ -83,6 +83,20 @@ PACKS: dict[str, dict[str, Any]] = {
             ],
         },
     },
+    "hunyuan-mv": {
+        "label": "3D · Hunyuan3D-2 multi-view",
+        "used_by": "Hunyuan3D-2 multi-view (local, builds from 3 views; optional)",
+        "repos": {
+            "tencent/Hunyuan3D-2mv": ["hunyuan3d-dit-v2-mv/config.yaml", "hunyuan3d-dit-v2-mv/model.fp16.safetensors"],
+        },
+    },
+    "mvadapter": {
+        "label": "3 views · MV-Adapter",
+        "used_by": "Free on this Mac view maker (front, side, back; optional, uses SDXL too)",
+        "repos": {
+            "huanngzh/mv-adapter": ["mvadapter_i2mv_sdxl.safetensors"],
+        },
+    },
 }
 
 
@@ -553,6 +567,10 @@ def packs_needed(settings: dict[str, Any]) -> list[str]:
         need += ["triposr-code", "triposr"]
     elif engines.get("reconstruct") == "hunyuan-mini":
         need.append("hunyuan")
+    elif engines.get("reconstruct") == "hunyuan-mv":
+        need.append("hunyuan-mv")
+    if engines.get("views") == "local-views":
+        need += [p for p in ("sdxl", "mvadapter") if p not in need]
     return need
 
 

@@ -28,6 +28,7 @@ INPUT_STEM = "00_input"
 CUTOUT = "01_cutout.png"
 CANDIDATES = "02_candidates"
 CONFIRMED = "03_confirmed.png"
+VIEWS_DIR = "03_views"  # front / left / back of the chosen look ("Make 3 views")
 RAW_MESH = "04_raw.glb"
 PRINT_DIR = "05_print"
 MANIFEST = "manifest.json"
@@ -126,6 +127,8 @@ class Job:
         if idx < STAGES.index("confirmed"):
             self.path(CONFIRMED).unlink(missing_ok=True)
             self.manifest["confirmed"] = None
+            shutil.rmtree(self.path(VIEWS_DIR), ignore_errors=True)  # views belong to the chosen picture
+            self.manifest["views"] = None
         if idx < STAGES.index("reconstructed"):
             self.path(RAW_MESH).unlink(missing_ok=True)
             self.path("04_recipe.json").unlink(missing_ok=True)

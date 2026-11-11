@@ -14,17 +14,19 @@ from .base import EngineContext, EngineError, Progress, ReconstructInput
 
 KEYS = ("Open Meshy API keys", "https://www.meshy.ai/settings/api")
 PRICING = ("Open Meshy plans", "https://www.meshy.ai/pricing")
-from .cloud import _data_uri, _transparent_upload
+from .cloud import _data_uri, _transparent_upload, view_uris
 
 API = "https://api.meshy.ai/openapi/v1/image-to-3d"
+MULTI_API = "https://api.meshy.ai/openapi/v1/multi-image-to-3d"  # 1–4 views of the same object, front first
 MODELS = {"latest": "Meshy 7.1 (best, ~20 credits)", "meshy-6-lite": "Meshy 6 Lite (~5 credits)"}
 
 
 class MeshyImageTo3D:
     id = "meshy"
     label = "Meshy (meshy.ai cloud)"
+    multi_view = True
     kind = "cloud"
-    note = "Paid, ~5–20 credits per object (≈$0.10–0.40 on the Pro plan). Strong shapes, made for printing."
+    note = "Paid, ~5–20 credits per object (≈$0.10–0.40 on the Pro plan). Strong shapes, made for printing. Uses all 3 views when you make them."
 
     def available(self, ctx: EngineContext) -> tuple[bool, str]:
         ok = bool(ctx.secrets.get("meshy"))
@@ -37,10 +39,13 @@ class MeshyImageTo3D:
         model = (ctx.settings.get("meshy") or {}).get("ai_model") or "latest"
         poll = float((ctx.settings.get("meshy") or {}).get("_poll", 3.0))
         transport = ctx.settings.get("_meshy_transport")
+        views = view_uris(inp)
+        api_url = MULTI_API if views else API
         upload = _transparent_upload(inp)
         try:
             body = {
-                "image_url": _data_uri(upload),
+                **({"image_urls": [views[k] for k in ("front", "left", "back") if k in views]} if views
+                   else {"image_url": _data_uri(upload)}),
                 "ai_model": model,
                 "should_texture": False,
                 "should_remesh": True,
@@ -53,13 +58,13 @@ class MeshyImageTo3D:
 
         headers = {"Authorization": f"Bearer {key}"}
         with httpx.Client(timeout=60, transport=transport) as api:
-            r = api.post(API, json=body, headers=headers)
+            r = api.post(api_url, json=body, headers=headers)
             _check(r)
             task_id = r.json()["result"]
             progress(0.02, "Meshy accepted the image")
             start = time.time()
             while True:
-                r = api.get(f"{API}/{task_id}", headers=headers)
+                r = api.get(f"{api_url}/{task_id}", headers=headers)
                 _check(r)
                 task = r.json()
                 status = task.get("status")
@@ -85,7 +90,7 @@ class MeshyImageTo3D:
                     for chunk in resp.iter_bytes():
                         f.write(chunk)
         progress(1.0, "Done")
-        return {"task_id": task_id, "model": model, "credits": task.get("consumed_credits")}
+        return {"task_id": task_id, "model": model, "credits": task.get("consumed_credits"), **({"views": len(views)} if views else {})}
 
 
 def _check(r: httpx.Response) -> None:

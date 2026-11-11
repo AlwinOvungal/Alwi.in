@@ -9,6 +9,7 @@ import pytest
 os.environ["FORMSTUDIO_HOME"] = tempfile.mkdtemp(prefix="formstudio-test-")
 os.environ["FORMSTUDIO_MATTING"] = "threshold"
 os.environ["HF_HUB_OFFLINE"] = "1"  # tests never download models
+os.environ["FORMSTUDIO_NO_WARMUP"] = "1"  # nor load real models in the background
 
 
 @pytest.fixture(scope="session")

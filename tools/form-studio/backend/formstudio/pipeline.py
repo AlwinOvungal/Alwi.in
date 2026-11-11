@@ -16,9 +16,10 @@ from . import paths
 from .core import export as export_mod
 from .core import timing
 from .core import ingest, printify as printify_mod
-from .core.job import CANDIDATES, CONFIRMED, CUTOUT, PRINT_DIR, RAW_MESH, Job
+from .core.job import CANDIDATES, CONFIRMED, CUTOUT, PRINT_DIR, RAW_MESH, VIEWS_DIR, Job
 from .core.style import get_style
-from .engines import RECONSTRUCTORS, STYLIZERS, EngineContext, ReconstructInput, StylizeInput
+from .engines import RECONSTRUCTORS, STYLIZERS, VIEWERS, EngineContext, ReconstructInput, StylizeInput
+from .engines.base import VIEW_NAMES, ViewInput
 
 Progress = Callable[[float | None, str], None]
 
@@ -243,6 +244,60 @@ def use_photo_as_is(job: Job) -> None:
     job.set_stage("confirmed")
 
 
+def _views(job: Job) -> dict[str, tuple[Path, Path]] | None:
+    """The object's front / side / back pictures, if it has them."""
+    if not job.manifest.get("views"):
+        return None
+    out = {}
+    for name in VIEW_NAMES:
+        img = job.path(VIEWS_DIR, f"{name}.png")
+        mask = img.with_name(f"{name}_mask.png")
+        if not (img.exists() and mask.exists()):
+            return None
+        out[name] = (img, mask)
+    return out
+
+
+def make_views(job: Job, ctx: EngineContext, engine_id: str, progress: Progress) -> None:
+    """Draw front, side and back of the chosen picture, so multi-view 3D engines can see the whole object."""
+    if not job.reached("confirmed"):
+        raise RuntimeError("Pick an option first.")
+    engine = VIEWERS[engine_id]
+    ok, why = engine.available(ctx)
+    if not ok:
+        raise RuntimeError(why)
+    out = job.path(VIEWS_DIR)
+    tmp = job.path(VIEWS_DIR + ".tmp")
+    shutil.rmtree(tmp, ignore_errors=True)
+    tmp.mkdir()
+    img = job.path(CONFIRMED)
+    style = get_style(job.manifest["style"]["id"])
+    seed = int((job.manifest.get("confirmed") or {}).get("seed") or 0)
+    t0 = time.perf_counter()
+    try:
+        with timing.stage("views", engine=engine_id, device=ctx.device):
+            engine.make_views(ViewInput(img, img.with_name(img.stem + "_mask.png"), style, job.manifest["subject"], tmp, seed),
+                              ctx, progress)
+        missing_views = [n for n in VIEW_NAMES if not (tmp / f"{n}.png").exists()]
+        if missing_views:
+            raise RuntimeError(f"The view maker didn't return the {', '.join(missing_views)} view. Try again.")
+        shutil.rmtree(out, ignore_errors=True)
+        tmp.replace(out)
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+    job.manifest["views"] = {"engine": engine_id, "files": [f"{VIEWS_DIR}/{n}.png" for n in VIEW_NAMES],
+                             "created": time.strftime("%Y-%m-%dT%H:%M:%S")}
+    _note_time(job, "views", time.perf_counter() - t0, engine=engine_id)
+    job.save()
+    log.info("%s: 3 views made with %s", job.id, engine_id)
+
+
+def remove_views(job: Job) -> None:
+    shutil.rmtree(job.path(VIEWS_DIR), ignore_errors=True)
+    job.manifest["views"] = None
+    job.save()
+
+
 SHAPE_CACHE = {"enabled": True, "max_bytes": 2 * 1024**3}
 
 
@@ -258,6 +313,10 @@ def _shape_key(job: Job, engine_id: str, ctx: EngineContext, seed: int) -> str |
         if not p.exists():
             return None
         h.update(p.read_bytes())
+    views = _views(job) if getattr(engine, "multi_view", False) else None
+    for _, (img, mask) in sorted((views or {}).items()):
+        h.update(img.read_bytes())
+        h.update(mask.read_bytes())
     s = ctx.settings
     facts = {
         "engine": engine_id, "seed": seed, "version": getattr(engine, "version", 1),
@@ -310,7 +369,9 @@ def reconstruct(job: Job, ctx: EngineContext, engine_id: str, progress: Progress
         info["cached"] = True
         timing.record("reconstruct", time.perf_counter() - t0, engine=engine_id, cached=True)
     else:
-        inp = ReconstructInput(img, img.with_name(img.stem + "_mask.png"), seed, tmp, style=style, subject=job.manifest["subject"])
+        views = _views(job) if getattr(engine, "multi_view", False) else None
+        inp = ReconstructInput(img, img.with_name(img.stem + "_mask.png"), seed, tmp, style=style, subject=job.manifest["subject"],
+                               views=views)
         with timing.stage("reconstruct", engine=engine_id, device=ctx.device, cached=False):
             info = engine.reconstruct(inp, ctx, lambda p, m: progress(None if p is None else p * 0.8, m)) or {}
         tmp.replace(job.path(RAW_MESH))

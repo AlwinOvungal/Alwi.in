@@ -27,7 +27,7 @@ from .. import __version__, paths, pipeline
 from ..core.job import PRINT_DIR, Job
 from ..core import style as style_mod
 from ..core.style import get_style, list_styles
-from ..engines import RECONSTRUCTORS, STYLIZERS, describe
+from ..engines import RECONSTRUCTORS, STYLIZERS, VIEWERS, describe
 from ..engines.cloud import FalClient
 from . import settings as settings_mod
 from ..core import timing
@@ -112,7 +112,7 @@ WARM = "_warm"
 def _warm_soon(stylize: bool = True, reconstruct: bool = True) -> None:
     """Load the default local engines in the background (low priority, only what's downloaded and fits)."""
     s = settings_mod.load()
-    if not s.get("warm_up", True):
+    if not s.get("warm_up", True) or os.environ.get("FORMSTUDIO_NO_WARMUP") == "1":
         return
     st = s["engines"]["stylize"] if stylize else None
     rc = s["engines"]["reconstruct"] if reconstruct else None
@@ -293,6 +293,7 @@ def engines() -> dict[str, Any]:
     return {
         "stylize": [describe(e, ctx) for e in STYLIZERS.values()],
         "reconstruct": [describe(e, ctx) for e in RECONSTRUCTORS.values()],
+        "views": [describe(e, ctx) for e in VIEWERS.values()],
         "device": ctx.device,
     }
 
@@ -335,7 +336,7 @@ def put_settings(body: SettingsUpdate) -> dict[str, Any]:
             update[section] = {k: v for k, v in update[section].items() if k not in ("has_key", "key_hint")}
     if "engines" in update:
         for step, eid in update["engines"].items():
-            reg = STYLIZERS if step == "stylize" else RECONSTRUCTORS if step == "reconstruct" else None
+            reg = {"stylize": STYLIZERS, "reconstruct": RECONSTRUCTORS, "views": VIEWERS}.get(step)
             if reg is None or eid not in reg:
                 raise HTTPException(400, f"Unknown engine {eid} for {step}")
     if "candidates" in update:
@@ -615,6 +616,32 @@ def storage(refresh: bool = False) -> dict[str, Any]:
     return data
 
 
+@app.get("/api/cleanup")
+def cleanup_scan() -> dict[str, Any]:
+    """Files Form Studio no longer needs: leftovers, caches, older speed tests, models no engine uses."""
+    from ..core import cleanup
+
+    items = cleanup.scan(settings_mod.load())
+    return {"items": items, "total": sum(i["bytes"] for i in items)}
+
+
+class CleanupBody(BaseModel):
+    ids: list[str]
+
+
+@app.post("/api/cleanup")
+def cleanup_run(body: CleanupBody) -> dict[str, Any]:
+    from .. import models
+    from ..core import cleanup
+
+    if _generation_running() or models.downloads.any_running():
+        raise HTTPException(409, "Wait for the current step or download to finish, then clean up.")
+    freed = cleanup.clean(body.ids, settings_mod.load())
+    _size_cache.update(at=0, data=None)  # sizes changed
+    items = cleanup.scan(settings_mod.load())
+    return {"freed": freed, "items": items, "total": sum(i["bytes"] for i in items)}
+
+
 class StorageOpen(BaseModel):
     id: str
 
@@ -809,6 +836,27 @@ def reconstruct(job_id: str, body: EngineBody) -> dict[str, Any]:
     ctx = settings_mod.context()
     return _queue(job, "reconstruct", lambda p: pipeline.reconstruct(job, ctx, engine, p),
                   meta={"engine": engine, "device": ctx.device}, eta_s=_eta("reconstruct", engine))
+
+
+@app.post("/api/jobs/{job_id}/views")
+def make_views(job_id: str, body: EngineBody) -> dict[str, Any]:
+    """Draw front, side and back of the chosen picture (a task, like restyling)."""
+    job = _job(job_id)
+    engine = body.engine or settings_mod.load()["engines"].get("views") or "openai-views"
+    if engine not in VIEWERS:
+        raise HTTPException(400, "Unknown view maker")
+    if not job.reached("confirmed"):
+        raise HTTPException(400, "Pick an option first.")
+    ctx = settings_mod.context()
+    return _queue(job, "views", lambda p: pipeline.make_views(Job.load(job_id), ctx, engine, p),
+                  meta={"engine": engine, "device": ctx.device}, eta_s=_eta("views", engine))
+
+
+@app.delete("/api/jobs/{job_id}/views")
+def remove_views(job_id: str) -> dict[str, Any]:
+    with _locked(job_id) as job:
+        pipeline.remove_views(job)
+    return _view(job)
 
 
 class StyleBody(BaseModel):

@@ -453,6 +453,88 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
 }
 
 // ---------------------------------------------------------------- 3. shape ----
+const VIEW_LABELS = ["Front", "Side", "Back"];
+
+/** Front, side and back of the chosen picture, so multi-view 3D engines see the whole object. */
+function ViewsCard({ job, busy, engines, settings, run }: StepProps & { engines: Engines | null }) {
+  const [maker, setMaker] = useState("");
+  const [zoom, setZoom] = useState<number | null>(null);
+  useEffect(() => setMaker((m) => m || pickAvailable(engines?.views, job.views?.engine ?? settings?.engines.views)), [engines, settings]); // eslint-disable-line react-hooks/exhaustive-deps
+  const working = busy && job.task?.kind === "views";
+  const { failed, dismiss } = useFailure(job, "views");
+  const other = otherEngine(engines?.views, maker);
+  const files = job.views?.files ?? [];
+  const has = files.length === 3;
+  const chosen = engines?.views.find((e) => e.id === maker);
+  const make = () => (dismiss(), run(api.makeViews(job.id, maker)));
+
+  return (
+    <div className="card panel stack">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <h3>3 views · front, side, back</h3>
+        {has && <span className="chip"><span className="dot" />Ready</span>}
+      </div>
+      <p className="small muted" style={{ margin: 0 }}>
+        Draws your chosen look from the front, side and back, so the 3D model sees the whole object instead of guessing the back.
+        Meshy, TRELLIS and Hunyuan3D build from all three.
+      </p>
+      {has && (
+        <div className="views">
+          {files.map((f, i) => (
+            <button key={f} className="view-tile" onClick={() => setZoom(i)} aria-label={`View the ${VIEW_LABELS[i].toLowerCase()} view large`}>
+              <img src={fileUrl(job, f)} alt={`${VIEW_LABELS[i]} view`} />
+              <span className="chip">{VIEW_LABELS[i]}</span>
+            </button>
+          ))}
+        </div>
+      )}
+      {working && job.task ? (
+        <Progress task={job.task} onCancel={() => run(api.cancel(job.id))} />
+      ) : (
+        <>
+          {failed && (
+            <ErrorCard
+              title="Couldn't make the views"
+              task={failed}
+              onRetry={make}
+              onOther={other ? () => (dismiss(), setMaker(other)) : undefined}
+              onDismiss={dismiss}
+            />
+          )}
+          <label className="field">
+            <span>Drawn by</span>
+            <select className="select" value={maker} disabled={busy} onChange={(e) => setMaker(e.target.value)}>
+              {engines?.views.map((e) => (
+                <option key={e.id} value={e.id} disabled={!e.available}>{e.label}{e.available ? "" : " (not set up)"}</option>
+              ))}
+            </select>
+            {chosen && <small className="muted">{chosen.available ? chosen.note : chosen.reason}</small>}
+          </label>
+          <div className="row" style={{ gap: 8 }}>
+            <button className="btn" disabled={busy || !maker || !chosen?.available} onClick={make}>{has ? "Make again" : "Make 3 views"}</button>
+            {has && <button className="btn ghost danger" disabled={busy} onClick={() => run(api.removeViews(job.id))}>Remove views</button>}
+          </div>
+        </>
+      )}
+      {zoom !== null && files[zoom] && (
+        <div className="lightbox" role="dialog" aria-modal="true" onClick={() => setZoom(null)}>
+          <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
+            <img src={fileUrl(job, files[zoom])} alt={`${VIEW_LABELS[zoom]} view`} />
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <b className="small">{VIEW_LABELS[zoom]} view</b>
+              <span className="row" style={{ gap: 6 }}>
+                <button className="btn sm" disabled={zoom === 0} onClick={() => setZoom(zoom - 1)}>←</button>
+                <button className="btn sm" disabled={zoom === 2} onClick={() => setZoom(zoom + 1)}>→</button>
+                <button className="btn sm ghost" onClick={() => setZoom(null)}>Close</button>
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines: Engines | null }) {
   const [engine, setEngine] = useState("");
   useEffect(
@@ -470,9 +552,16 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
         <figcaption className="chip">Chosen look</figcaption>
       </figure>
       <div className="stack">
+        <ViewsCard job={job} busy={busy} engines={engines} settings={settings} run={run} />
         <div className="card panel stack">
           <h2>Build the 3D shape</h2>
-          <p className="small muted" style={{ margin: 0 }}>The 3D model guesses the back and sides from this one image. Form Studio then cleans it up for printing.</p>
+          <p className="small muted" style={{ margin: 0 }}>
+            {job.views && engines?.reconstruct.find((e) => e.id === engine)?.multi_view
+              ? "This engine builds from all 3 views. Form Studio then cleans the shape up for printing."
+              : job.views
+                ? "This engine uses the front view only. Meshy, TRELLIS and Hunyuan3D use all 3 views."
+                : "The 3D model guesses the back and sides from this one image. Make 3 views above for a better back. Form Studio then cleans it up for printing."}
+          </p>
           {engines && <EnginePicker engines={engines.reconstruct} value={engine} onChange={setEngine} />}
         </div>
         <div className="card panel stack">

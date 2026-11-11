@@ -43,7 +43,7 @@ def pick_device(pref: str = "auto") -> str:
 _models: "OrderedDict[str, Any]" = OrderedDict()
 _models_lock = threading.RLock()
 # roughly what each family takes in memory (GB, fp16 on Apple Silicon)
-FAMILY_GB = {"sdxl": 9.0, "sdxl-turbo": 7.0, "triposr": 2.0, "hunyuan": 6.0}
+FAMILY_GB = {"sdxl": 9.0, "sdxl-turbo": 7.0, "triposr": 2.0, "hunyuan": 6.0, "hunyuan-mv": 7.0, "mvadapter": 12.0}
 _policy = {"keep_loaded": "auto"}
 
 
@@ -526,6 +526,61 @@ class LocalHunyuanMini:
         mesh.export(inp.out)  # Hunyuan already uses glTF y-up
         progress(1.0, "Done")
         return {"model": "tencent/Hunyuan3D-2mini", "device": device}
+
+
+class LocalHunyuanMV:
+    """Hunyuan3D-2mv: builds the shape from front, side and back views ("Make 3 views"). Without views, the front only."""
+
+    id = "hunyuan-mv"
+    label = "Hunyuan3D-2 multi-view (local)"
+    kind = "local"
+    multi_view = True
+    note = "Free (Tencent community licence). Uses all 3 views for a much better back and sides; ~7 GB, a few minutes."
+
+    def available(self, ctx: EngineContext) -> tuple[bool, str]:
+        why = missing("torch", "hy3dgen")
+        if why:
+            return False, why + " Run ./scripts/setup-mac.sh --with-hunyuan."
+        return True, ""
+
+    def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        _ensure_models("hunyuan-mv", progress, 0.0, 0.2)
+        return _retry_on_oom(lambda: self._reconstruct(inp, ctx, progress))
+
+    def _reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        import torch
+        from hy3dgen.shapegen import DegenerateFaceRemover, FaceReducer, FloaterRemover, Hunyuan3DDiTFlowMatchingPipeline  # type: ignore
+
+        device = ctx.device
+
+        def make():
+            return Hunyuan3DDiTFlowMatchingPipeline.from_pretrained(
+                "tencent/Hunyuan3D-2mv", subfolder="hunyuan3d-dit-v2-mv", use_safetensors=True, device=device,
+            )
+
+        if not is_loaded("hunyuan-mv"):
+            progress(None, "Loading Hunyuan3D-2 multi-view into memory (only the first time)")
+        pipe = _cached(f"hunyuan-mv:{device}", make)
+
+        def rgba(img: Path, mask: Path) -> Image.Image:
+            im = Image.open(img).convert("RGBA")
+            im.putalpha(Image.open(mask).convert("L"))
+            return im
+
+        views = inp.views or {"front": (inp.image, inp.mask)}
+        images = {name: rgba(*paths_) for name, paths_ in views.items()}
+        progress(0.25, f"Building the shape from {len(images)} view{'s' if len(images) > 1 else ''}")
+        with timing.stage("reconstruct_infer", engine=self.id, device=device, n=len(images)):
+            mesh = pipe(
+                image=images, num_inference_steps=30, octree_resolution=380, num_chunks=20000,
+                generator=torch.Generator("cpu").manual_seed(inp.seed), output_type="trimesh",
+            )[0]
+        progress(0.85, "Cleaning up")
+        for fix in (FloaterRemover(), DegenerateFaceRemover(), FaceReducer()):
+            mesh = fix(mesh)
+        mesh.export(inp.out)  # Hunyuan already uses glTF y-up
+        progress(1.0, "Done")
+        return {"model": "tencent/Hunyuan3D-2mv", "device": device, "views": len(images)}
 
 
 # ---------------------------------------------------------------- warm-up ----

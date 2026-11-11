@@ -61,20 +61,7 @@ class OpenAIImage:
             "output_format": "png",
         }
         progress(None, f"OpenAI is restyling ({body['n']} options)")
-        sleep = ctx.settings.get("_sleep") or time.sleep
-        with httpx.Client(timeout=240, transport=ctx.settings.get("_openai_transport")) as http:
-            for attempt in range(4):
-                r = http.post(API, json=body, headers={"Authorization": f"Bearer {key}"})
-                wait = _retry_after(r)
-                if wait is None or attempt == 3:
-                    break
-                # a short per-minute limit (new accounts have low ones): wait it out instead of failing
-                for left in range(int(wait), 0, -1):
-                    progress(None, f"OpenAI asked to slow down; trying again in {left} s")
-                    sleep(1)
-        if r.status_code >= 400:
-            raise _failure(r)
-        data = r.json().get("data") or []
+        data = post_images(body, key, ctx, progress)
         if not data:
             raise RuntimeError("OpenAI returned no images. Try again.")
         out = []
@@ -85,6 +72,24 @@ class OpenAIImage:
             out.append({"file": name, "seed": None, "model": model})
             progress((i + 1) / len(data), f"Option {i + 1} of {len(data)} ready")
         return out
+
+
+def post_images(body: dict, key: str, ctx: EngineContext, progress: Progress) -> list[dict]:
+    """POST an image edit; wait out short rate limits; raise an EngineError people can act on."""
+    sleep = ctx.settings.get("_sleep") or time.sleep
+    with httpx.Client(timeout=300, transport=ctx.settings.get("_openai_transport")) as http:
+        for attempt in range(4):
+            r = http.post(API, json=body, headers={"Authorization": f"Bearer {key}"})
+            wait = _retry_after(r)
+            if wait is None or attempt == 3:
+                break
+            # a short per-minute limit (new accounts have low ones): wait it out instead of failing
+            for left in range(int(wait), 0, -1):
+                progress(None, f"OpenAI asked to slow down; trying again in {left} s")
+                sleep(1)
+    if r.status_code >= 400:
+        raise _failure(r)
+    return r.json().get("data") or []
 
 
 def _error(r: httpx.Response) -> tuple[str, str]:

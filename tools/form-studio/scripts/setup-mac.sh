@@ -3,7 +3,8 @@
 #
 #   ./scripts/setup-mac.sh                 everything: local AI (free) + the app
 #   ./scripts/setup-mac.sh --cloud-only    skip the big local models (use fal.ai + offline engines)
-#   ./scripts/setup-mac.sh --with-hunyuan  also install Hunyuan3D-2 mini (better local 3D)
+#   ./scripts/setup-mac.sh --with-hunyuan  also install Hunyuan3D-2 mini and multi-view (better local 3D)
+#   ./scripts/setup-mac.sh --with-views    also install MV-Adapter (free local "Make 3 views")
 #   ./scripts/setup-mac.sh --with-step     also install STEP export
 #   ./scripts/setup-mac.sh --reinstall-ai  reinstall the AI libraries and TripoSR's code from scratch
 #
@@ -14,11 +15,12 @@ ROOT="$(pwd)"
 FS_HOME="${FORMSTUDIO_HOME:-$HOME/FormStudio}"
 VENV="$ROOT/.venv"
 
-LOCAL_AI=1; HUNYUAN=0; STEP=0; REINSTALL_AI=0
+LOCAL_AI=1; HUNYUAN=0; VIEWS=0; STEP=0; REINSTALL_AI=0
 for arg in "$@"; do
   case "$arg" in
     --cloud-only) LOCAL_AI=0 ;;
     --with-hunyuan) HUNYUAN=1 ;;
+    --with-views) VIEWS=1 ;;
     --with-step) STEP=1 ;;
     --reinstall-ai) REINSTALL_AI=1 ;;
     *) echo "Unknown option: $arg"; exit 1 ;;
@@ -99,6 +101,16 @@ if [ "$LOCAL_AI" = 1 ]; then
   else
     git clone --quiet --depth 1 https://github.com/VAST-AI-Research/TripoSR.git "$FS_HOME/vendor/TripoSR"
   fi
+fi
+if [ "$VIEWS" = 1 ]; then
+  say "MV-Adapter (free local front / side / back views)"
+  mkdir -p "$FS_HOME/vendor"
+  if [ -d "$FS_HOME/vendor/MV-Adapter/.git" ]; then
+    git -C "$FS_HOME/vendor/MV-Adapter" pull --quiet --ff-only || true
+  else
+    git clone --quiet --depth 1 https://github.com/huanngzh/MV-Adapter.git "$FS_HOME/vendor/MV-Adapter"
+  fi
+  echo "  its model (3.6 GB) downloads the first time you press Make 3 views (Settings → Local AI shows progress)"
 fi
 if [ "$HUNYUAN" = 1 ]; then
   say "Hunyuan3D-2 mini (local image → 3D, Tencent community licence)"

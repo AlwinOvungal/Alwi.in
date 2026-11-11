@@ -110,6 +110,8 @@ export interface Job {
   thumbnail: string | null;
   files: string[];
   task: Task | null;
+  /** front / side / back of the chosen picture ("Make 3 views") */
+  views?: { engine: string; files: string[]; created: string } | null;
   style_name?: string;
   style_removed?: boolean;
   timings?: Partial<Record<"cutout" | "stylize" | "reconstruct" | "printify" | "export", StepTime>>;
@@ -122,11 +124,14 @@ export interface Engine {
   note: string;
   available: boolean;
   reason: string;
+  /** builds the 3D shape from front, side and back views when the object has them */
+  multi_view?: boolean;
 }
 
 export interface Engines {
   stylize: Engine[];
   reconstruct: Engine[];
+  views: Engine[];
   device: string;
 }
 
@@ -201,7 +206,7 @@ export interface StyleDraft {
 export const styleRefUrl = (s: Pick<Style, "id" | "version">, n: number) => `/api/styles/${s.id}/references/${n}?v=${s.version}`;
 
 export interface Settings {
-  engines: { stylize: string; reconstruct: string };
+  engines: { stylize: string; reconstruct: string; views?: string };
   device: string;
   resolved_device: string;
   sdxl_quality: Quality;
@@ -276,6 +281,16 @@ export interface ModelPack {
     message: string;
     error: string | null;
   } | null;
+}
+
+export interface CleanupItem {
+  id: string;
+  label: string;
+  note: string;
+  bytes: number;
+  count: number;
+  /** something you may want to keep (e.g. models): not ticked by default */
+  careful?: boolean;
 }
 
 export interface BenchSummary {
@@ -386,6 +401,10 @@ export const api = {
   stylize: (id: string, engine?: string, seed?: number, n?: number, quality?: Quality) =>
     req<Job>("POST", `/api/jobs/${id}/stylize`, { engine, seed, n, quality }),
   cancel: (id: string) => req<Job>("POST", `/api/jobs/${id}/cancel`),
+  makeViews: (id: string, engine?: string) => req<Job>("POST", `/api/jobs/${id}/views`, { engine }),
+  removeViews: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/views`),
+  cleanup: () => req<{ items: CleanupItem[]; total: number }>("GET", "/api/cleanup"),
+  runCleanup: (ids: string[]) => req<{ freed: number; items: CleanupItem[]; total: number }>("POST", "/api/cleanup", { ids }),
   useNow: (id: string, candidate: number, engine?: string) => req<Job>("POST", `/api/jobs/${id}/use-now`, { candidate, engine }),
   bench: () => req<{ task: Task | null; latest: BenchReport | null; photos: number }>("GET", "/api/bench"),
   startBench: (size: "quick" | "full", compare: boolean) =>

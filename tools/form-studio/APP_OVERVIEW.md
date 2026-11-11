@@ -245,6 +245,17 @@ The new built-ins have no reference pictures; their words alone set the look.
   - ChatGPT images makes all options in one request; fal runs them in parallel
   - a built-in **Speed test**
   - Details in HANDOFF.md, under "Speed machinery".
+- **3 views (Shape step):** **Make 3 views** draws Front · Side · Back of the chosen look, without labels.
+  - Drawn by ChatGPT images, Nano Banana, or free on this Mac (MV-Adapter, `setup-mac.sh --with-views`).
+  - Meshy (multi-image), TRELLIS (multi) and Hunyuan3D-2 (fal multi-view, or local Hunyuan3D-2mv with
+    `--with-hunyuan`) build the shape from all three; the other engines use the front.
+  - Picking another option clears the views.
+- **Clean up (Settings → Storage):**
+  - Ticks off what can go: unfinished working files and downloads, the download cache, saved 3D shapes, older
+    speed tests, earlier-version files, deleted styles no object uses, the Python download cache and old timing
+    records.
+  - "Models your engines don't use" is listed but not ticked.
+  - Objects and styles are never touched.
 - **Styles:** any style can be deleted.
   - Built-ins are hidden and yours move to `styles/.deleted`. Objects made with them keep working and show
     "(deleted)".

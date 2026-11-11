@@ -383,7 +383,16 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
     - Raise `EngineError(message, detail, links, steps)` (`engines/base.py`). The worker passes on `error_detail`,
       `error_links` and `error_steps`, and the step shows an `ErrorCard` with Try again / Use another engine.
     - A 429 that waiting can't fix ("Limit 0", "Request too large", quota codes) is never retried.
-18. **Git:**
+18. **3 views:**
+    - View makers live in `engines/views.py` (`VIEWERS`) and write `03_views/{front,left,back}.png` (+ masks).
+      Sheets are cut by `core/views.split_sheet`.
+    - `ReconstructInput.views` reaches engines with `multi_view = True` (Meshy → `/multi-image-to-3d`; fal
+      `trellis/multi`; fal `hunyuan3d/v2/multi-view`; local `hunyuan-mv`). The shape-cache key includes the views.
+    - The local view maker (MV-Adapter, cloned to `~/FormStudio/vendor/MV-Adapter`) and local Hunyuan3D-2mv are
+      written from their official examples but **not run here** (no GPU or memory for them). Verify on the Mac.
+19. **Clean up:** `core/cleanup.py` must never touch objects' files, styles in use, or models the default engines
+    need. Unused models are listed but not ticked.
+20. **Git:**
     - work on the feature branch
     - don't commit `web_dist`, `.venv` or models
     - keep commits descriptive

@@ -66,6 +66,23 @@ class ReconstructInput:
     out: Path        # where to write the GLB (y-up)
     style: StyleSpec | None = None
     subject: str = ""
+    # front / left / back pictures of the same object (from "Make 3 views"), each (image on white, mask).
+    # Engines that can use several views use them; the others use `image` (the front).
+    views: dict[str, tuple[Path, Path]] | None = None
+
+
+VIEW_NAMES = ("front", "left", "back")
+VIEW_LABELS = {"front": "Front", "left": "Side", "back": "Back"}
+
+
+@dataclass
+class ViewInput:
+    image: Path      # the chosen picture, on white
+    mask: Path
+    style: StyleSpec
+    subject: str
+    out_dir: Path    # write front.png / left.png / back.png (or one sheet.png to be split)
+    seed: int = 0
 
 
 class Engine(Protocol):
@@ -87,7 +104,8 @@ class Reconstructor(Engine, Protocol):
 
 def describe(e: Engine, ctx: EngineContext) -> dict:
     ok, why = e.available(ctx)
-    return {"id": e.id, "label": e.label, "kind": e.kind, "note": e.note, "available": ok, "reason": why}
+    return {"id": e.id, "label": e.label, "kind": e.kind, "note": e.note, "available": ok, "reason": why,
+            "multi_view": bool(getattr(e, "multi_view", False))}
 
 
 def missing(*modules: str) -> str | None:

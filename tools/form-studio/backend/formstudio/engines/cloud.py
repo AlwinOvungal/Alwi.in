@@ -29,6 +29,9 @@ ENDPOINTS = {
     "fal-kontext": "fal-ai/flux-kontext/dev",
     "fal-trellis": "fal-ai/trellis",
     "fal-hunyuan": "fal-ai/hunyuan3d/v2/mini",
+    # used instead when the object has front / side / back views
+    "fal-trellis-multi": "fal-ai/trellis/multi",
+    "fal-hunyuan-multi": "fal-ai/hunyuan3d/v2/multi-view",
 }
 
 
@@ -123,6 +126,22 @@ def _clean_to_white(path: Path) -> None:
     canvas.resize((1024, 1024), Image.LANCZOS).save(path)
 
 
+def view_uris(inp: ReconstructInput) -> dict[str, str] | None:
+    """The front / side / back views as transparent PNG data URIs (None when there are no views)."""
+    if not inp.views:
+        return None
+    import io
+
+    out = {}
+    for name, (img, mask) in inp.views.items():
+        im = Image.open(img).convert("RGBA")
+        im.putalpha(Image.open(mask).convert("L"))
+        buf = io.BytesIO()
+        im.save(buf, "PNG")
+        out[name] = "data:image/png;base64," + base64.b64encode(buf.getvalue()).decode()
+    return out
+
+
 def _transparent_upload(inp: ReconstructInput) -> Path:
     """Image-to-3D models expect the object on a transparent background."""
     img = Image.open(inp.image).convert("RGBA")
@@ -210,10 +229,19 @@ class FalKontext(_FalEngine):
 class FalTrellis(_FalEngine):
     id = "fal-trellis"
     label = "TRELLIS (fal.ai cloud)"
-    note = "Paid, ~$0.02 per shape. Good shapes in under a minute; the cheapest cloud 3D."
+    multi_view = True
+    note = "Paid, ~$0.02 per shape. Good shapes in under a minute; the cheapest cloud 3D. Uses all 3 views when you make them."
 
     def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
         client = make_client(ctx)
+        views = view_uris(inp)
+        if views:
+            endpoint = _endpoint(ctx, "fal-trellis-multi")
+            res = client.run(endpoint, {"image_urls": [views[k] for k in ("front", "left", "back") if k in views],
+                                        "seed": int(inp.seed), "texture_size": 512}, _scaled(progress, 0.05, 0.9))
+            client.download(res["model_mesh"]["url"], inp.out)
+            progress(1.0, "Done")
+            return {"endpoint": endpoint, "views": len(views)}
         endpoint = _endpoint(ctx, self.id)
         tmp = _transparent_upload(inp)
         try:
@@ -229,10 +257,21 @@ class FalTrellis(_FalEngine):
 class FalHunyuan(_FalEngine):
     id = "fal-hunyuan"
     label = "Hunyuan3D-2 mini (fal.ai cloud)"
-    note = "Paid, ~$0.10 per shape. Detailed shapes in about 30 seconds."
+    multi_view = True
+    note = "Paid, ~$0.10 per shape. Detailed shapes in about 30 seconds. Uses all 3 views when you make them."
 
     def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
         client = make_client(ctx)
+        views = view_uris(inp)
+        if views and {"front", "left", "back"} <= views.keys():
+            endpoint = _endpoint(ctx, "fal-hunyuan-multi")
+            res = client.run(endpoint, {
+                "front_image_url": views["front"], "left_image_url": views["left"], "back_image_url": views["back"],
+                "seed": int(inp.seed), "num_inference_steps": 50, "octree_resolution": 256, "textured_mesh": False,
+            }, _scaled(progress, 0.05, 0.9))
+            client.download(res["model_mesh"]["url"], inp.out)
+            progress(1.0, "Done")
+            return {"endpoint": endpoint, "views": 3}
         endpoint = _endpoint(ctx, self.id)
         tmp = _transparent_upload(inp)
         try:
