@@ -33,7 +33,8 @@ def test_style_lifecycle():
         builtin = c.get("/api/styles/clay-minimal").json()
         assert builtin["editable"] is False and builtin["references"] == 1
         assert c.put("/api/styles/clay-minimal", json=EDIT).status_code == 403
-        assert c.delete("/api/styles/clay-minimal").status_code == 403
+        assert c.delete("/api/styles/clay-minimal").status_code == 200  # built-ins can be deleted (hidden)
+        assert c.post("/api/styles/restore", json={"which": "builtins"}).json()["restored"] == 1
 
         s = c.post("/api/styles", json=EDIT).json()
         sid = s["id"]
@@ -55,7 +56,8 @@ def test_style_lifecycle():
 
         assert c.delete(f"/api/styles/{sid}/references/0").json()["references"] == 0
         assert c.delete(f"/api/styles/{dup['id']}").json()["ok"]
-        assert c.get(f"/api/styles/{dup['id']}").status_code == 404
+        assert c.get(f"/api/styles/{dup['id']}").json()["removed"] is True  # kept for objects that use it
+        assert dup["id"] not in [x["id"] for x in c.get("/api/styles").json()]
 
 
 def test_object_uses_its_style_and_can_switch(mug_photo):
@@ -159,4 +161,73 @@ def test_reference_mode_round_trips():
     s = c.put(f"/api/styles/{s['id']}", json={"name": "Mode test", "description": "x", "reference_mode": "full"}).json()
     assert s["reference_mode"] == "full" and s["version"] == 2
     assert c.put(f"/api/styles/{s['id']}", json={"name": "Mode test", "reference_mode": "everything"}).status_code == 422
+    c.delete(f"/api/styles/{s['id']}")
+
+
+def test_built_in_styles_can_be_deleted_and_restored(mug_photo):
+    c = TestClient(app)
+    c.post("/api/styles/restore", json={"which": "builtins"})
+    with mug_photo.open("rb") as f:
+        job = c.post("/api/jobs", files={"photo": ("mug.png", f, "image/png")}, data={"subject": "mug", "style": "low-poly"}).json()
+    assert c.delete("/api/styles/low-poly").status_code == 200
+    ids = [s["id"] for s in c.get("/api/styles").json()]
+    assert "low-poly" not in ids
+    assert c.get("/api/styles/removed").json()["builtins"] == 1
+    # the object made with it still works, and says which style it was
+    j = c.get(f"/api/jobs/{job['id']}").json()
+    assert j["style_name"] == "Low Poly" and j["style_removed"] is True
+    assert c.get("/api/styles/low-poly").json()["removed"] is True
+    assert c.post(f"/api/jobs/{job['id']}/confirm", json={"candidate": None}).status_code == 200
+    # a new style can't take over the deleted one's id (older objects point at it)
+    s = c.post("/api/styles", json={"name": "Low Poly", "description": ""}).json()
+    assert s["id"] != "low-poly"
+    c.delete(f"/api/styles/{s['id']}")
+    r = c.post("/api/styles/restore", json={"which": "builtins"}).json()
+    assert r["restored"] == 1 and "low-poly" in [s["id"] for s in c.get("/api/styles").json()]
+    c.delete(f"/api/jobs/{job['id']}")
+
+
+def test_your_deleted_style_keeps_its_objects_working_and_comes_back(mug_photo):
+    c = TestClient(app)
+    s = c.post("/api/styles", json={"name": "Keep Me", "description": "x"}).json()
+    with mug_photo.open("rb") as f:
+        job = c.post("/api/jobs", files={"photo": ("mug.png", f, "image/png")}, data={"subject": "mug", "style": s["id"]}).json()
+    assert c.delete(f"/api/styles/{s['id']}").status_code == 200
+    assert s["id"] not in [x["id"] for x in c.get("/api/styles").json()]
+    assert c.get(f"/api/jobs/{job['id']}").json()["style_name"] == "Keep Me"
+    assert c.put(f"/api/styles/{s['id']}", json={"name": "Changed"}).status_code == 403  # restore before editing
+    assert c.post("/api/styles/restore", json={"which": "deleted"}).json()["restored"] >= 1
+    assert s["id"] in [x["id"] for x in c.get("/api/styles").json()]
+    c.delete(f"/api/jobs/{job['id']}")
+    c.delete(f"/api/styles/{s['id']}")
+
+
+def test_the_last_style_cannot_be_deleted():
+    from formstudio.core import style as style_mod
+
+    c = TestClient(app)
+    visible = [s["id"] for s in c.get("/api/styles").json()]
+    try:
+        for sid in visible[:-1]:
+            assert c.delete(f"/api/styles/{sid}").status_code == 200
+        r = c.delete(f"/api/styles/{visible[-1]}")
+        assert r.status_code == 400 and "at least one" in r.json()["detail"]
+        assert style_mod.default_style_id() == visible[-1]
+    finally:
+        c.post("/api/styles/restore", json={"which": "builtins"})
+        c.post("/api/styles/restore", json={"which": "deleted"})
+
+
+def test_a_new_style_starts_from_your_inputs_only():
+    c = TestClient(app)
+    s = c.post("/api/styles", json={
+        "name": "Candy Glass", "description": "glossy translucent candy",
+        "palette": {"body": {"name": "Cherry", "hex": "#C2185B"}, "base": {"name": "Snow", "hex": "#FAFAFA"}},
+        "geometry": {"height_mm": 40, "soften_mm": 0.9, "min_feature_mm": 1.6, "finish": "faceted"},
+    }).json()
+    words = " ".join([s["prompt"], s["edit_prompt"], s["sculpt_guide"]]).lower()
+    assert "glossy translucent candy" in words and "cherry" in words and "facets" in words
+    assert "olive" not in words and "clay" not in words  # nothing from Clay Minimal
+    assert s["geometry"]["finish"] == "faceted" and s["geometry"]["height_mm"] == 40 and s["references"] == 0
+    assert {f["id"] for f in s["formats"]} == {"stand", "magnet", "keychain"}
     c.delete(f"/api/styles/{s['id']}")

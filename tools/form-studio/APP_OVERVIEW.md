@@ -245,6 +245,11 @@ The new built-ins have no reference pictures; their words alone set the look.
   - ChatGPT images makes all options in one request; fal runs them in parallel
   - a built-in **Speed test**
   - Details in HANDOFF.md, under "Speed machinery".
+- **Styles:** any style can be deleted.
+  - Built-ins are hidden and yours move to `styles/.deleted`. Objects made with them keep working and show
+    "(deleted)".
+  - "Restore" sits at the bottom of the Styles page.
+  - **New style** no longer has "Start from": it's built only from your name, words, pictures, colours and finish.
 - **Error cards:**
   - A failed step shows a card inside the step: what happened in plain words, numbered steps to fix it, buttons to
     the right page (e.g. OpenAI Billing / Limits), **Use another engine**, **Try again**, and the service's own

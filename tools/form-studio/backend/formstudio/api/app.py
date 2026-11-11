@@ -76,6 +76,11 @@ def _job(job_id: str) -> Job:
 
 def _view(job: Job) -> dict[str, Any]:
     d = job.to_dict()
+    try:  # the style's name, even if it was deleted since (older objects keep their style)
+        st = get_style(job.manifest["style"]["id"])
+        d["style_name"], d["style_removed"] = st.name, st.removed
+    except KeyError:
+        d["style_name"], d["style_removed"] = job.manifest["style"]["id"], True
     t = worker.tasks.get(job.id)
     d["task"] = t.public() if t else None
     return d
@@ -171,6 +176,21 @@ def create_style(body: style_mod.StyleEdit) -> dict[str, Any]:
     return _style_call(style_mod.create_style, body)
 
 
+@app.get("/api/styles/removed")
+def removed_styles() -> dict[str, int]:
+    """How many built-in styles you've hidden and how many of yours are deleted (both can be restored)."""
+    return style_mod.removed_counts()
+
+
+class RestoreBody(BaseModel):
+    which: Literal["builtins", "deleted"]
+
+
+@app.post("/api/styles/restore")
+def restore_styles(body: RestoreBody) -> dict[str, int]:
+    return {"restored": style_mod.restore(body.which), **style_mod.removed_counts()}
+
+
 @app.get("/api/styles/{style_id}")
 def style_detail(style_id: str) -> dict[str, Any]:
     return _style(style_id).detail()
@@ -187,6 +207,8 @@ def delete_style(style_id: str) -> dict[str, bool]:
         style_mod.delete_style(style_id)
     except KeyError:
         raise HTTPException(404, "Unknown style")
+    except ValueError as e:
+        raise HTTPException(400, str(e))
     except PermissionError as e:
         raise HTTPException(403, str(e))
     return {"ok": True}
@@ -414,7 +436,7 @@ def start_bench(body: BenchBody) -> dict[str, Any]:
     runs = 2 if body.size == "quick" else 3
 
     def run(progress):
-        bench.run(ctx, photos, style_id="clay-minimal", stylize_engine=s["engines"]["stylize"],
+        bench.run(ctx, photos, style_id=style_mod.default_style_id(), stylize_engine=s["engines"]["stylize"],
                   reconstruct_engine=s["engines"]["reconstruct"], variants=variants, runs=runs,
                   options=4, progress=progress)
 
@@ -624,7 +646,7 @@ def create_job(
     photo: UploadFile = File(...),
     subject: str = Form(""),
     name: str = Form(""),
-    style: str = Form("clay-minimal"),
+    style: str = Form(""),
 ) -> dict[str, Any]:
     suffix = Path(photo.filename or "photo.jpg").suffix.lower() or ".jpg"
     if suffix not in pipeline.PHOTO_TYPES:
@@ -635,7 +657,7 @@ def create_job(
         blank = not subject.strip()
         subject = subject.strip() or Path(photo.filename or "object").stem.replace("_", " ").replace("-", " ")
         try:
-            job = pipeline.create(tmp, name.strip() or subject, subject, style)
+            job = pipeline.create(tmp, name.strip() or subject, subject, style or style_mod.default_style_id())
         except (KeyError, ValueError, OSError) as e:
             raise _bad(e)
     if blank:  # let Claude name it, when there's a key

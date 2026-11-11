@@ -128,8 +128,12 @@ function PicturePicker(props: {
 
 export function StylesList() {
   const [styles, setStyles] = useState<Style[] | null>(null);
+  const [removed, setRemoved] = useState<{ builtins: number; deleted: number }>({ builtins: 0, deleted: 0 });
   const toast = useToast();
-  const load = () => api.styles().then(setStyles, (e) => toast(e.message, true));
+  const load = () => {
+    api.styles().then(setStyles, (e) => toast(e.message, true));
+    api.removedStyles().then(setRemoved).catch(() => {});
+  };
   useEffect(() => {
     load();
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -142,9 +146,19 @@ export function StylesList() {
     }
   };
   const remove = async (s: Style) => {
-    if (!confirm(`Delete the style “${s.name}”? Objects made with it keep their files.`)) return;
+    if (!confirm(confirmDelete(s))) return;
     try {
       await api.deleteStyle(s.id);
+      toast(`${s.name} deleted`);
+      load();
+    } catch (e) {
+      toast((e as Error).message, true);
+    }
+  };
+  const restore = async (which: "builtins" | "deleted") => {
+    try {
+      const r = await api.restoreStyles(which);
+      toast(`${r.restored} style${r.restored === 1 ? "" : "s"} back`);
       load();
     } catch (e) {
       toast((e as Error).message, true);
@@ -186,11 +200,11 @@ export function StylesList() {
               <div className="style-foot">
                 <span className="stage">{s.editable ? `Yours · v${s.version}` : "Built-in"} · {FINISH_LABEL[s.finish ?? "soft"]}</span>
                 <span className="row" style={{ gap: 6, flexWrap: "nowrap" }}>
+                  <button className="btn sm ghost danger" onClick={() => remove(s)} disabled={styles.length <= 1} title={styles.length <= 1 ? "Keep at least one style" : undefined}>
+                    Delete
+                  </button>
                   {s.editable ? (
-                    <>
-                      <button className="btn sm ghost danger" onClick={() => remove(s)}>Delete</button>
-                      <a className="btn sm" href={`#/styles/${s.id}`}>Edit</a>
-                    </>
+                    <a className="btn sm" href={`#/styles/${s.id}`}>Edit</a>
                   ) : (
                     <button className="btn sm" onClick={() => customize(s.id)} title="Make your own editable copy">Customize</button>
                   )}
@@ -200,38 +214,54 @@ export function StylesList() {
           </div>
         ))}
       </div>
+      {(removed.builtins > 0 || removed.deleted > 0) && (
+        <div className="restore-bar small muted">
+          {removed.builtins > 0 && (
+            <span>
+              {removed.builtins} built-in style{removed.builtins === 1 ? "" : "s"} hidden ·{" "}
+              <button className="link" onClick={() => restore("builtins")}>Restore</button>
+            </span>
+          )}
+          {removed.deleted > 0 && (
+            <span>
+              {removed.deleted} deleted style{removed.deleted === 1 ? "" : "s"} of yours ·{" "}
+              <button className="link" onClick={() => restore("deleted")}>Restore</button>
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }
 
+function confirmDelete(s: Pick<Style, "name" | "editable">) {
+  return s.editable
+    ? `Delete the style “${s.name}”?\n\nObjects made with it keep working. You can bring it back at the bottom of the Styles page.`
+    : `Delete the built-in style “${s.name}”?\n\nIt's hidden from your styles; objects made with it keep working. You can restore built-in styles at the bottom of the Styles page.`;
+}
+
 // ---------------------------------------------------------------- new style ----
 
+// A new style starts from nothing but what you give it: no other style's words, colours or finish.
+const NEUTRAL_GEOMETRY: StyleGeometry = { height_mm: 50, soften_mm: 0.9, min_feature_mm: 1.6, finish: "soft", voxel_size_mm: 2.5, facets: 400 };
+const NEUTRAL_PALETTE = { body: { name: "Grey", hex: "#8A8A85" }, base: { name: "White", hex: "#F4F4F1" } };
+
 export function NewStyle() {
-  const [styles, setStyles] = useState<Style[]>([]);
   const [settings, setSettings] = useState<Settings | null>(null);
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<File[]>([]);
-  const [basedOn, setBasedOn] = useState("clay-minimal");
-  const [palette, setPalette] = useState<{ body: Colour; base: Colour }>({ body: { name: "Olive", hex: "#5E6B2E" }, base: { name: "Bone White", hex: "#F2F0EA" } });
-  const [geo, setGeo] = useState<StyleGeometry | null>(null);
+  const [palette, setPalette] = useState<{ body: Colour; base: Colour }>(NEUTRAL_PALETTE);
+  const [geo, setGeo] = useState<StyleGeometry>(NEUTRAL_GEOMETRY);
   const [useClaude, setUseClaude] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const toast = useToast();
   const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
 
   useEffect(() => {
-    api.styles().then(setStyles).catch(() => {});
     api.settings().then(setSettings).catch(() => {});
   }, []);
-  // starting style sets the finish and shape defaults (and colours, until you pick your own)
   const [coloursTouched, setColoursTouched] = useState(false);
-  useEffect(() => {
-    api.style(basedOn).then((s) => {
-      setGeo({ ...s.geometry, finish: s.geometry.finish ?? "soft", voxel_size_mm: s.geometry.voxel_size_mm ?? 2.5, facets: s.geometry.facets ?? 400 });
-      if (!coloursTouched) setPalette({ body: { ...s.palette.body }, base: { ...s.palette.base } });
-    }).catch(() => {});
-  }, [basedOn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const suggest = async (fs = files) => {
     if (!fs.length) return;
@@ -253,7 +283,7 @@ export function NewStyle() {
     if (!name.trim()) return toast("Give the style a name first.", true);
     try {
       setBusy("Creating…");
-      const s = await api.createStyle({ name: name.trim(), description: description.trim(), based_on: basedOn, palette, geometry: geo ?? undefined });
+      const s = await api.createStyle({ name: name.trim(), description: description.trim(), palette, geometry: geo });
       if (files.length) {
         setBusy(`Uploading ${files.length} picture${files.length === 1 ? "" : "s"}…`);
         await api.addReferences(s.id, files);
@@ -265,7 +295,7 @@ export function NewStyle() {
           await api.updateStyle(s.id, {
             name: name.trim(), description: description.trim() || d.description, prompt: d.prompt, edit_prompt: d.edit_prompt,
             negative_prompt: d.negative_prompt, sculpt_guide: d.sculpt_guide, palette,
-            geometry: geo ? { ...geo, soften_mm: d.soften_mm, min_feature_mm: d.min_feature_mm } : undefined,
+            geometry: { ...geo, soften_mm: d.soften_mm, min_feature_mm: d.min_feature_mm },
           });
         } catch (e) {
           toast(`Style created; Claude couldn't draft it: ${(e as Error).message}`, true);
@@ -283,7 +313,7 @@ export function NewStyle() {
       <div className="stack" style={{ gap: 8, marginBottom: 24 }}>
         <a href="#/styles" className="label" style={{ textDecoration: "none" }}>← Styles</a>
         <h1>New style</h1>
-        <p className="lede">Show Form Studio what you like. Your pictures steer how every object is redrawn; the finish shapes the print.</p>
+        <p className="lede">Show Form Studio what you like. Your new style starts empty and is built only from your words, pictures, colours and finish.</p>
       </div>
 
       <div className="stack" style={{ gap: 20 }}>
@@ -309,32 +339,17 @@ export function NewStyle() {
         </section>
 
         <section className="card panel stack">
-          <span className="label">3 · Start from</span>
-          <p className="small muted" style={{ margin: 0 }}>Your style begins as a copy of this one's words, finish and shape settings.</p>
-          <div className="pick-grid">
-            {styles.map((s) => (
-              <button key={s.id} type="button" className={`pick ${basedOn === s.id ? "on" : ""}`} onClick={() => setBasedOn(s.id)}>
-                <span className="pick-thumb"><StyleThumb s={s} srcs={s.references ? [styleRefUrl(s, 0)] : []} /></span>
-                <span className="pick-name">{s.name}</span>
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="card panel stack">
           <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className="label">4 · Print colours</span>
+            <span className="label">3 · Print colours</span>
             <button className="btn sm" disabled={!files.length} onClick={() => suggest()} title={files.length ? "" : "Add pictures first"}>Suggest from pictures</button>
           </div>
           <ColourFields palette={palette} onChange={(p) => (setPalette(p), setColoursTouched(true))} />
         </section>
 
-        {geo && (
-          <section className="card panel stack">
-            <span className="label">5 · 3D shape</span>
-            <FinishFields g={geo} onChange={setGeo} />
-          </section>
-        )}
+        <section className="card panel stack">
+          <span className="label">4 · 3D shape</span>
+          <FinishFields g={geo} onChange={setGeo} />
+        </section>
 
         {claudeReady && (
           <label className="switch card panel">
@@ -471,7 +486,7 @@ export function StyleEditor({ id }: { id: string }) {
     }
   };
   const remove = async () => {
-    if (!confirm(`Delete the style “${style.name}”? Objects made with it keep their files.`)) return;
+    if (!confirm(confirmDelete(style))) return;
     try {
       setDirty(false);
       await api.deleteStyle(style.id);
@@ -497,9 +512,12 @@ export function StyleEditor({ id }: { id: string }) {
           <input className="name" value={form.name} readOnly={ro} size={Math.max(6, Math.min(form.name.length, 28))} aria-label="Style name" onChange={(e) => set({ name: e.target.value })} />
         </div>
         <div className="row">
-          <span className="chip">{ro ? "Built-in" : `Yours · v${style.version}`}</span>
-          {ro ? (
-            <button className="btn primary" onClick={customize}>Customize this style</button>
+          <span className="chip">{style.removed ? "Deleted" : ro ? "Built-in" : `Yours · v${style.version}`}</span>
+          {style.removed ? null : ro ? (
+            <>
+              <button className="btn sm ghost danger" onClick={remove}>Delete</button>
+              <button className="btn primary" onClick={customize}>Customize this style</button>
+            </>
           ) : (
             <>
               <button className="btn sm" onClick={customize}>Duplicate</button>

@@ -79,7 +79,14 @@ export default function JobPage({ id }: { id: string }) {
   }, [job]); // eslint-disable-line react-hooks/exhaustive-deps
   // a failed step explains itself inside the step (ErrorCard), not in a passing toast
 
-  const style = (job && styles.find((s) => s.id === job.style.id)) ?? styles[0] ?? null;
+  // an object made with a style that's since been deleted keeps it: show it, marked "(deleted)"
+  const [gone, setGone] = useState<Style | null>(null);
+  useEffect(() => {
+    if (!job || !styles.length || styles.some((s) => s.id === job.style.id) || gone?.id === job.style.id) return;
+    api.style(job.style.id).then((s) => setGone({ ...s, name: `${s.name} (deleted)` })).catch(() => {});
+  }, [job?.style.id, styles]); // eslint-disable-line react-hooks/exhaustive-deps
+  const allStyles = job && gone?.id === job.style.id && !styles.some((s) => s.id === gone.id) ? [...styles, gone] : styles;
+  const style = (job && allStyles.find((s) => s.id === job.style.id)) ?? styles[0] ?? null;
   if (error) return <div className="page"><p className="note bad">{error}</p><a className="btn" href="#/">Back to library</a></div>;
   if (!job || !step) return <div className="page muted">Loading…</div>;
 
@@ -149,8 +156,8 @@ export default function JobPage({ id }: { id: string }) {
         </ol>
 
         <section className="step-body" aria-live="polite">
-          {step === "photo" && <PhotoStep job={job} busy={busy} engines={engines} settings={settings} run={run} styles={styles} />}
-          {step === "style" && <StyleStep job={job} busy={busy} styles={styles} engines={engines} settings={settings} run={run} />}
+          {step === "photo" && <PhotoStep job={job} busy={busy} engines={engines} settings={settings} run={run} styles={allStyles} />}
+          {step === "style" && <StyleStep job={job} busy={busy} styles={allStyles} engines={engines} settings={settings} run={run} />}
           {step === "shape" && <ShapeStep job={job} busy={busy} engines={engines} settings={settings} run={run} />}
           {step === "print" && <PrintStep job={job} busy={busy} style={style} settings={settings} run={run} />}
         </section>

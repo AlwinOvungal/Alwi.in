@@ -110,6 +110,8 @@ export interface Job {
   thumbnail: string | null;
   files: string[];
   task: Task | null;
+  style_name?: string;
+  style_removed?: boolean;
   timings?: Partial<Record<"cutout" | "stylize" | "reconstruct" | "printify" | "export", StepTime>>;
 }
 
@@ -141,6 +143,9 @@ export interface Style {
   finish: Finish;
   references: number;
   editable: boolean;
+  builtin?: boolean;
+  /** deleted (or a hidden built-in): only shown for objects that still use it */
+  removed?: boolean;
 }
 
 export interface Colour {
@@ -345,6 +350,9 @@ export const api = {
   createStyle: (s: StyleEdit) => req<StyleDetail>("POST", "/api/styles", s),
   updateStyle: (id: string, s: StyleEdit) => req<StyleDetail>("PUT", `/api/styles/${id}`, s),
   deleteStyle: (id: string) => req<{ ok: boolean }>("DELETE", `/api/styles/${id}`),
+  removedStyles: () => req<{ builtins: number; deleted: number }>("GET", "/api/styles/removed"),
+  restoreStyles: (which: "builtins" | "deleted") =>
+    req<{ restored: number; builtins: number; deleted: number }>("POST", "/api/styles/restore", { which }),
   duplicateStyle: (id: string) => req<StyleDetail>("POST", `/api/styles/${id}/duplicate`),
   addReferences: (id: string, files: File[]) => {
     const f = new FormData();

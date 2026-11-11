@@ -23,7 +23,7 @@ export default function Library() {
     api.styles().then(setStyles).catch(() => {});
     api.settings().then(setSettings).catch(() => {});
   }, [toast]);
-  const styleName = (id: string) => styles.find((s) => s.id === id)?.name ?? id;
+  const styleName = (id: string, fallback?: string) => styles.find((s) => s.id === id)?.name ?? fallback ?? id;
 
   return (
     <div className="page">
@@ -56,7 +56,7 @@ export default function Library() {
             <div className="thumb">{j.thumbnail ? <img src={fileUrl(j, j.thumbnail)} alt="" loading="lazy" /> : <span className="muted">No image</span>}</div>
             <div className="meta">
               <strong>{j.name}</strong>
-              <span className="small muted">{styleName(j.style.id)}</span>
+              <span className="small muted">{styleName(j.style.id, j.style_name)}</span>
               <span className={`stage ${j.stage === "exported" ? "done" : ""} ${j.task && (j.task.status === "running" || j.task.status === "queued") ? "busy" : ""}`}>
                 {STAGE_LABEL[j.stage]} · {timeAgo(j.updated)}
               </span>
