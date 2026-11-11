@@ -436,7 +436,10 @@ def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | No
     if fmt and fmt not in style.formats:
         raise ValueError(f"Unknown format '{fmt}'")
     if fmt and fmt != current["format"]:
-        current = style.print_params(fmt)  # a new format starts from its own defaults
+        colours = current.get("colours")
+        current = style.print_params(fmt)  # a new format starts from its own defaults…
+        if colours:
+            current["colours"] = colours  # …but keeps the colours you chose
     params = _deep_merge(style.print_params(current["format"]), current)  # fills keys older objects lack
     params = _deep_merge(params, overrides)
     log.info("%s: preparing print (%s)", job.id, params["format"])
@@ -455,13 +458,45 @@ def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | No
     return report
 
 
+def colours_of(job: Job) -> dict[str, dict[str, str]]:
+    """The object's two filament colours: the ones you chose, else the style's."""
+    palette = get_style(job.manifest["style"]["id"]).palette
+    chosen = (job.manifest.get("print_params") or {}).get("colours") or {}
+    return {part: {**palette[part], **(chosen.get(part) or {})} for part in ("body", "base")}
+
+
+def set_colours(job: Job, colours: dict[str, dict[str, str]] | None) -> None:
+    """Choose the object's colours (None: back to the style's). No rebuild: colour isn't geometry.
+    Files already exported had the old colours, so they're cleared."""
+    from .core import colours as colours_mod
+
+    params = job.manifest.get("print_params") or get_style(job.manifest["style"]["id"]).print_params()
+    if colours is None:
+        params.pop("colours", None)
+    else:
+        merged = dict(params.get("colours") or {})
+        for part, c in colours.items():
+            if not c:
+                continue
+            hexv = c["hex"].upper()
+            rgb = tuple(int(hexv[i:i + 2], 16) for i in (1, 3, 5))
+            merged[part] = {"hex": hexv, "name": (c.get("name") or "").strip() or colours_mod.name_for(rgb)}
+        params["colours"] = merged
+    job.manifest["print_params"] = params
+    for stale in ("model.3mf", "model.step"):  # the files that carry colours; the print STLs stay
+        job.path(PRINT_DIR, stale).unlink(missing_ok=True)
+    job.manifest["exports"] = []
+    if job.manifest["stage"] == "exported":
+        job.manifest["stage"] = "printified"
+    job.save()
+
+
 def export(job: Job, formats: list[str]) -> list[str]:
     if not job.reached("printified"):
         raise RuntimeError("Prepare the print first.")
-    style = get_style(job.manifest["style"]["id"])
     t0 = time.perf_counter()
     with timing.stage("export"):
-        written = export_mod.export(job.path(PRINT_DIR), job.manifest["name"], style.palette, formats)
+        written = export_mod.export(job.path(PRINT_DIR), job.manifest["name"], colours_of(job), formats)
     _note_time(job, "export", time.perf_counter() - t0)
     job.manifest["exports"] = [f"{PRINT_DIR}/{w}" for w in written]
     job.set_stage("exported")

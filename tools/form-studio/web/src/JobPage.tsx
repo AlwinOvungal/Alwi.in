@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { api, Candidate, Engines, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, Settings, Style, useJob } from "./api";
+import { api, Candidate, Colour, Engines, FILAMENTS, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, Settings, Style, useJob } from "./api";
 import { StylePicker } from "./Library";
 import { ClayFields, EnginePicker, ErrorCard, go, NeedsBlender, Progress, Slider, Switch, useBlender, useToast } from "./ui";
 
@@ -622,6 +622,75 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
 }
 
 // ---------------------------------------------------------------- 4. print ----
+
+/** One filament colour: swatch + name; opens a palette of common filaments and a custom colour wheel. */
+function ColourPick({ label, colour, onPick, disabled }: { label: string; colour: Colour; onPick: (c: { hex: string; name?: string }) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false);
+  const [custom, setCustom] = useState(colour.hex);
+  useEffect(() => setCustom(colour.hex), [colour.hex]);
+  return (
+    <div className="colour-pick">
+      <button type="button" className="colour-card" disabled={disabled} onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+        <span className="swatch big" style={{ background: colour.hex }} />
+        <span className="colour-text">
+          <span className="small muted">{label}</span>
+          <b>{colour.name}</b>
+        </span>
+        <span className={`chev ${open ? "open" : ""}`} aria-hidden>›</span>
+      </button>
+      {open && (
+        <div className="filament-pop">
+          <div className="filament-grid" role="listbox" aria-label={`${label} colour`}>
+            {FILAMENTS.map((f) => (
+              <button key={f.hex} type="button" role="option" aria-selected={f.hex.toUpperCase() === colour.hex.toUpperCase()} title={f.name}
+                className={f.hex.toUpperCase() === colour.hex.toUpperCase() ? "on" : ""} style={{ background: f.hex }}
+                onClick={() => (onPick(f), setOpen(false))} aria-label={f.name} />
+            ))}
+          </div>
+          <label className="custom-colour">
+            <input type="color" value={custom} onChange={(e) => setCustom(e.target.value)} />
+            <span className="small">Custom colour</span>
+            <button type="button" className="btn sm" disabled={custom.toUpperCase() === colour.hex.toUpperCase()}
+              onClick={() => (onPick({ hex: custom }), setOpen(false))}>Use</button>
+          </label>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ColoursCard({ job, hasBase, busy, run }: { job: Job; hasBase: boolean; busy: boolean; run: (p: Promise<Job>) => Promise<void> }) {
+  const toast = useToast();
+  const c = job.colours;
+  if (!c) return null;
+  const pick = (part: "body" | "base") => (col: { hex: string; name?: string }) => run(api.setColours(job.id, { [part]: col }));
+  const fromPicture = async () => {
+    try {
+      const s = await api.suggestJobColours(job.id);
+      run(api.setColours(job.id, hasBase ? s : { body: s.body }));
+    } catch (e) {
+      toast((e as Error).message, true);
+    }
+  };
+  return (
+    <div className="card panel stack">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <h3>Colours</h3>
+        {job.colours_custom ? <span className="small muted">Chosen for this object</span> : <span className="small muted">From the style</span>}
+      </div>
+      <div className={`colours-row ${hasBase ? "" : "one"}`}>
+        <ColourPick label="Body · filament 1" colour={c.body} onPick={pick("body")} disabled={busy} />
+        {hasBase && <ColourPick label="Base · filament 2" colour={c.base} onPick={pick("base")} disabled={busy} />}
+      </div>
+      <div className="row" style={{ gap: 6 }}>
+        <button className="btn sm" disabled={busy} onClick={fromPicture}>From the picture</button>
+        {hasBase && <button className="btn sm ghost" disabled={busy} onClick={() => run(api.setColours(job.id, { body: c.base, base: c.body }))}>Swap</button>}
+        {job.colours_custom && <button className="btn sm ghost" disabled={busy} onClick={() => run(api.resetColours(job.id))}>Style colours</button>}
+      </div>
+      <span className="small muted">The 3MF tells your slicer these colours for filaments 1 and 2. Load the matching filaments in your AMS.</span>
+    </div>
+  );
+}
 const FORMAT_HINT: Record<PrintFormat, string> = {
   stand: "Stands upright on a round base in the second colour.",
   magnet: "Flat back with a magnet pocket. Prints lying down, no supports.",
@@ -659,8 +728,9 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
   };
 
   const rep = job.report;
-  const body = style?.palette.body.hex ?? "#5E6B2E";
-  const base = style?.palette.base.hex ?? "#F2F0EA";
+  const colours = job.colours ?? style?.palette;
+  const body = colours?.body.hex ?? "#5E6B2E";
+  const base = colours?.base.hex ?? "#F2F0EA";
   const hasBase = job.files.includes("05_print/base.stl");
   const exported = job.stage === "exported";
   const slicer = settings?.slicer ?? "bambu";
@@ -705,8 +775,8 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           </div>
           {view === "print" && (
             <div className="legend">
-              <span><i className="swatch" style={{ background: body }} />{style?.palette.body.name} · filament 1</span>
-              {hasBase && <span><i className="swatch" style={{ background: base }} />{style?.palette.base.name} · filament 2</span>}
+              <span><i className="swatch" style={{ background: body }} />{colours?.body.name} · filament 1</span>
+              {hasBase && <span><i className="swatch" style={{ background: base }} />{colours?.base.name} · filament 2</span>}
             </div>
           )}
           {rebuilding && <div className="busy"><span className="chip">Rebuilding…</span></div>}
@@ -799,6 +869,8 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
             </div>
           )}
         </div>
+
+        <ColoursCard job={job} hasBase={hasBase} busy={busy || applying} run={run} />
 
         <div className="card panel stack">
           <h3>Export</h3>

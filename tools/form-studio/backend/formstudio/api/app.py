@@ -21,7 +21,7 @@ import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from .. import __version__, paths, pipeline
 from ..core.job import PRINT_DIR, Job
@@ -79,6 +79,8 @@ def _view(job: Job) -> dict[str, Any]:
     try:  # the style's name, even if it was deleted since (older objects keep their style)
         st = get_style(job.manifest["style"]["id"])
         d["style_name"], d["style_removed"] = st.name, st.removed
+        d["colours"] = pipeline.colours_of(job)  # the two filament colours: yours, else the style's
+        d["colours_custom"] = bool((job.manifest.get("print_params") or {}).get("colours"))
     except KeyError:
         d["style_name"], d["style_removed"] = job.manifest["style"]["id"], True
     t = worker.tasks.get(job.id)
@@ -978,6 +980,45 @@ def reset_print(job_id: str) -> dict[str, Any]:
         except (RuntimeError, ValueError) as e:
             raise _bad(e)
     return _view(job)
+
+
+class ColourIn(BaseModel):
+    hex: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
+    name: str | None = Field(default=None, max_length=40)
+
+
+class ColoursBody(BaseModel):
+    body: ColourIn | None = None
+    base: ColourIn | None = None
+
+
+@app.post("/api/jobs/{job_id}/colours")
+def set_colours(job_id: str, body: ColoursBody) -> dict[str, Any]:
+    """Choose this object's filament colours (no rebuild)."""
+    with _locked(job_id) as job:
+        if not job.manifest.get("print_params"):
+            raise HTTPException(400, "Build the 3D shape first.")
+        pipeline.set_colours(job, {k: c.model_dump() for k in ("body", "base") if (c := getattr(body, k))})
+    return _view(job)
+
+
+@app.delete("/api/jobs/{job_id}/colours")
+def reset_colours(job_id: str) -> dict[str, Any]:
+    with _locked(job_id) as job:
+        pipeline.set_colours(job, None)
+    return _view(job)
+
+
+@app.post("/api/jobs/{job_id}/colours/suggest")
+def suggest_job_colours(job_id: str) -> dict[str, Any]:
+    """Two colours from the chosen picture (no AI)."""
+    from ..core import colours as colours_mod
+
+    job = _job(job_id)
+    src = next((job.path(f) for f in ("03_confirmed.png", "01_cutout.png") if job.path(f).exists()), None)
+    if src is None:
+        raise HTTPException(400, "Pick a picture first.")
+    return colours_mod.suggest([src])
 
 
 class ExportBody(BaseModel):

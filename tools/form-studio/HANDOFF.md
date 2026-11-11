@@ -164,6 +164,8 @@ POST /api/jobs/{id}/confirm {index}   POST /api/jobs/{id}/reconstruct {engine}
 POST /api/jobs/{id}/style {style_id}  POST /api/jobs/{id}/suggest-name
 POST /api/jobs/{id}/rebuild-recipe    POST /api/jobs/{id}/printify {overrides}
 POST /api/jobs/{id}/reset-print       POST /api/jobs/{id}/export {formats}
+POST /api/jobs/{id}/colours {body?:{hex,name?}, base?:{hex,name?}}   (saved in print_params.colours; clears 3MF/STEP)
+DELETE /api/jobs/{id}/colours         (back to the style palette)   POST /api/jobs/{id}/colours/suggest (from the picture)
 GET  /api/jobs/{id}/files/{path}      POST /api/jobs/{id}/open   (Finder / slicer)
 GET  /api/jobs/{id}/events            (SSE: {"type":"task",...} progress and {"type":"job", job} state)
 GET|POST /api/bench {size, compare}   POST /api/bench/cancel     GET /api/bench/files/{report.md|options.png}
@@ -297,7 +299,10 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
      - Clear options
    - **Shape:** chosen image, 3D engine, Build / Rebuild, plus the Claude recipe actions.
    - **Print:**
-     - three.js viewer
+     - three.js viewer (`Viewer.tsx`): X/Y/Z gizmo, view buttons and keys, Spin, views from below. View snaps go
+       through drei `useBounds()` (moving the camera directly is undone by `<Bounds>`' own animation)
+     - Colours block: body / base filament per object (`FILAMENTS` in `api.ts`, custom colour, from picture, swap,
+       style colours); `pipeline.colours_of(job)` is what the viewer legend and the 3MF use
      - Format (Stand / Magnet / Keychain)
      - sliders (height, finish + softness / block size / facets, thinnest part, base, magnet, ring); each rebuilds
        in seconds without AI

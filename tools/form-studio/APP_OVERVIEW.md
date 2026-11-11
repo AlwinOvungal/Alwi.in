@@ -103,7 +103,13 @@ Web UI (React + TypeScript + three.js)  web/src/  → built into backend/formstu
    - **Build 3D shape** / **Rebuild shape**
    - with Claude Sculpt: **Rebuild from Claude's recipe (free)** and **Ask Claude again**
 4. **Print**
-   - **3D viewer** (orbit, bed grid, palette colours; looks down at flat formats); **Print / AI mesh** toggle
+   - **3D viewer** (orbit, bed grid, the object's colours; looks down at flat formats); **Print / AI mesh** toggle
+     - **X / Y / Z axis gizmo** (bottom right; click an axis to look along it)
+     - view buttons **Front · Back · Left · Right · Top · Bottom · 3/4** and **Spin**; keys 1 / 3 / 7 / 9 / 0 and R
+     - the camera can go under the bed (to see a magnet pocket); the bed grid hides when you look from below
+   - **Colours:** Body (filament 1) and Base / back (filament 2) per object, from a palette of common filament colours
+     or a Custom colour (named automatically); **From the picture**, **Swap**, **Style colours**. Changing a colour
+     doesn't rebuild the shape; it clears exported 3MF/STEP so you never save old colours.
    - **Format:** Stand · Magnet · Keychain, each with its own defaults
    - **Shape controls:** height; **3D finish** (Soft / Pixel-voxel / Low-poly) with softness, block size or facet
      count; thinnest part; detail
@@ -255,6 +261,10 @@ The new built-ins have no reference pictures; their words alone set the look.
   - The Blender app works too, if you have it.
   - Settings → Printing shows whether Blender is ready, with an optional app path and **Look again**.
   - Without Blender (or if it fails), Soft is used, with a warning.
+- **Colours per object (Print step):** pick each filament's colour (palette or custom), suggest from the picture,
+  swap, or go back to the style's. The 3D view, legend and 3MF use them.
+- **Look around on X, Y, Z:** axis gizmo, Front/Back/Left/Right/Top/Bottom/3/4 buttons, Spin, keys, views from
+  underneath.
 - **3 views (Shape step):** **Make 3 views** draws Front · Side · Back of the chosen look, without labels.
   - Drawn by ChatGPT images, Nano Banana, or free on this Mac (MV-Adapter, `setup-mac.sh --with-views`).
   - Meshy (multi-image), TRELLIS (multi) and Hunyuan3D-2 (fal multi-view, or local Hunyuan3D-2mv with

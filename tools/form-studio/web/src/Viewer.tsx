@@ -1,6 +1,6 @@
-import { Bounds, Center, ContactShadows, Grid, OrbitControls } from "@react-three/drei";
-import { Canvas, useLoader } from "@react-three/fiber";
-import { Suspense, useMemo } from "react";
+import { Bounds, Center, ContactShadows, GizmoHelper, GizmoViewport, Grid, OrbitControls, useBounds } from "@react-three/drei";
+import { Canvas, useFrame, useLoader } from "@react-three/fiber";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
@@ -16,6 +16,18 @@ type Props = {
   flat?: boolean;
 };
 
+/** Directions to look FROM (three.js is y-up; the model faces +z). */
+const VIEWS = {
+  front: { dir: [0, 0, 1], label: "Front", key: "1" },
+  back: { dir: [0, 0, -1], label: "Back", key: "" },
+  left: { dir: [-1, 0, 0], label: "Left", key: "" },
+  right: { dir: [1, 0, 0], label: "Right", key: "3" },
+  top: { dir: [0, 1, 0.0001], label: "Top", key: "7" },
+  bottom: { dir: [0, -1, 0.0001], label: "Bottom", key: "9" },
+  iso: { dir: [0.62, 0.5, 0.78], label: "3/4", key: "0" },
+} as const;
+type ViewId = keyof typeof VIEWS;
+
 function Part({ url, color }: { url: string; color: string }) {
   const geom = useLoader(STLLoader, url);
   const g = useMemo(() => {
@@ -25,7 +37,7 @@ function Part({ url, color }: { url: string; color: string }) {
   }, [geom]);
   return (
     <mesh geometry={g} castShadow receiveShadow>
-      <meshStandardMaterial color={color} roughness={0.92} metalness={0} />
+      <meshStandardMaterial color={color} roughness={0.92} metalness={0} side={THREE.DoubleSide} />
     </mesh>
   );
 }
@@ -40,7 +52,7 @@ function Raw({ url, color }: { url: string; color: string }) {
     s.traverse((o) => {
       if ((o as THREE.Mesh).isMesh) {
         const m = o as THREE.Mesh;
-        m.material = new THREE.MeshStandardMaterial({ color, roughness: 0.92 });
+        m.material = new THREE.MeshStandardMaterial({ color, roughness: 0.92, side: THREE.DoubleSide });
         m.castShadow = true;
         m.geometry.computeVertexNormals();
       }
@@ -50,33 +62,29 @@ function Raw({ url, color }: { url: string; color: string }) {
   return <primitive object={scene} />;
 }
 
-export default function Viewer({ bodyUrl, baseUrl, rawUrl, mode, bodyColor, baseColor, flat }: Props) {
-  const lookDown = flat && mode === "print";
+/** Turns the camera to a named view of the whole model. Goes through <Bounds>, which animates the camera
+ * itself (moving the camera directly would be undone by its own animation). */
+function ViewSnap({ view, nonce }: { view: ViewId | null; nonce: number }) {
+  const bounds = useBounds();
+  useEffect(() => {
+    if (!view) return;
+    const { center, distance } = bounds.refresh().getSize();
+    const dir = new THREE.Vector3(...VIEWS[view].dir).normalize();
+    // looking straight down or up, "up" on screen is the model's back / front
+    const up: [number, number, number] = view === "top" ? [0, 0, -1] : view === "bottom" ? [0, 0, 1] : [0, 1, 0];
+    bounds.moveTo(center.clone().add(dir.multiplyScalar(distance))).lookAt({ target: center, up });
+  }, [view, nonce]); // eslint-disable-line react-hooks/exhaustive-deps
+  return null;
+}
+
+/** The bed grid fades away when you look from underneath, so it never hides the bottom. */
+function BedGrid() {
+  const ref = useRef<THREE.Group>(null);
+  useFrame(({ camera }) => {
+    if (ref.current) ref.current.visible = camera.position.y > -1;
+  });
   return (
-    <Canvas
-      key={lookDown ? "flat" : "standing"}
-      shadows
-      camera={{ position: lookDown ? [0, 160, 45] : [70, 60, 90], fov: 35, near: 0.5, far: 4000 }}
-      dpr={[1, 2]}
-    >
-      <hemisphereLight args={["#ffffff", "#d9d4c5", 1.1]} />
-      <directionalLight position={[60, 120, 80]} intensity={1.6} castShadow shadow-mapSize={[2048, 2048]} />
-      <directionalLight position={[-80, 40, -60]} intensity={0.35} />
-      <Suspense fallback={null}>
-        <Bounds fit clip observe margin={1.5}>
-          {mode === "print" && bodyUrl ? (
-            // STL files are z-up (printer); three.js is y-up
-            <group rotation={[-Math.PI / 2, 0, 0]}>
-              <Part url={bodyUrl} color={bodyColor} />
-              {baseUrl && <Part url={baseUrl} color={baseColor} />}
-            </group>
-          ) : rawUrl ? (
-            <Center bottom>
-              <Raw url={rawUrl} color="#b9b6aa" />
-            </Center>
-          ) : null}
-        </Bounds>
-      </Suspense>
+    <group ref={ref}>
       <ContactShadows position={[0, 0.01, 0]} opacity={0.35} scale={220} blur={2.4} far={60} />
       <Grid
         position={[0, 0, 0]}
@@ -91,7 +99,64 @@ export default function Viewer({ bodyUrl, baseUrl, rawUrl, mode, bodyColor, base
         fadeStrength={1.5}
         infiniteGrid
       />
-      <OrbitControls makeDefault enableDamping target={[0, lookDown ? 0 : 20, 0]} maxPolarAngle={Math.PI * 0.495} />
-    </Canvas>
+    </group>
+  );
+}
+
+export default function Viewer({ bodyUrl, baseUrl, rawUrl, mode, bodyColor, baseColor, flat }: Props) {
+  const lookDown = flat && mode === "print";
+  const [view, setView] = useState<{ id: ViewId | null; n: number }>({ id: null, n: 0 });
+  const [spin, setSpin] = useState(false);
+  const snap = (id: ViewId) => setView((v) => ({ id, n: v.n + 1 }));
+  const onKey = (e: React.KeyboardEvent) => {
+    if (e.key === "r" || e.key === "R") return setSpin((s) => !s);
+    const hit = (Object.keys(VIEWS) as ViewId[]).find((k) => VIEWS[k].key && VIEWS[k].key === e.key);
+    if (hit) snap(hit);
+  };
+
+  return (
+    <div className="viewer-wrap" tabIndex={0} onKeyDown={onKey} aria-label="3D view: drag to turn, scroll to zoom. Keys: 1 front, 3 right, 7 top, 9 bottom, 0 three-quarter, R spin">
+      <Canvas
+        key={lookDown ? "flat" : "standing"}
+        shadows
+        camera={{ position: lookDown ? [0, 160, 45] : [70, 60, 90], fov: 35, near: 0.5, far: 4000 }}
+        dpr={[1, 2]}
+      >
+        <hemisphereLight args={["#ffffff", "#d9d4c5", 1.1]} />
+        <directionalLight position={[60, 120, 80]} intensity={1.6} castShadow shadow-mapSize={[2048, 2048]} />
+        <directionalLight position={[-80, 40, -60]} intensity={0.35} />
+        <directionalLight position={[0, -120, 0]} intensity={0.45} />
+        <Suspense fallback={null}>
+          <Bounds fit clip observe margin={1.5}>
+            {mode === "print" && bodyUrl ? (
+              // STL files are z-up (printer); three.js is y-up
+              <group rotation={[-Math.PI / 2, 0, 0]}>
+                <Part url={bodyUrl} color={bodyColor} />
+                {baseUrl && <Part url={baseUrl} color={baseColor} />}
+              </group>
+            ) : rawUrl ? (
+              <Center bottom>
+                <Raw url={rawUrl} color={bodyColor} />
+              </Center>
+            ) : null}
+            <ViewSnap view={view.id} nonce={view.n} />
+          </Bounds>
+        </Suspense>
+        <BedGrid />
+        {/* full turn in every direction, including underneath (to check a magnet pocket) */}
+        <OrbitControls makeDefault enableDamping target={[0, lookDown ? 0 : 20, 0]} autoRotate={spin} autoRotateSpeed={2.5} />
+        <GizmoHelper alignment="bottom-right" margin={[64, 64]}>
+          <GizmoViewport axisColors={["#c0453a", "#5e8a2e", "#3d6fb6"]} labelColor="#ffffff" />
+        </GizmoHelper>
+      </Canvas>
+      <div className="view-tools" role="toolbar" aria-label="Views">
+        {(Object.keys(VIEWS) as ViewId[]).map((k) => (
+          <button key={k} type="button" className={view.id === k ? "on" : ""} onClick={() => snap(k)} title={VIEWS[k].key ? `${VIEWS[k].label} (key ${VIEWS[k].key})` : VIEWS[k].label}>
+            {VIEWS[k].label}
+          </button>
+        ))}
+        <button type="button" className={spin ? "on" : ""} onClick={() => setSpin((s) => !s)} title="Turn slowly (key R)">Spin</button>
+      </div>
+    </div>
   );
 }

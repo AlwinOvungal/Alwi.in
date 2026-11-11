@@ -58,6 +58,19 @@ export const FINISHES: { id: Finish; label: string; hint: string }[] = [
   { id: "blender", label: "Blender clay", hint: "Finished in Blender: an even, smoothed shape with a fine hand-made clay texture." },
 ];
 
+/** Common printer filament colours (generic names). */
+export const FILAMENTS: Colour[] = [
+  { name: "White", hex: "#FFFFFF" }, { name: "Bone White", hex: "#F2F0EA" }, { name: "Beige", hex: "#E8D5B7" },
+  { name: "Light Grey", hex: "#C8C8C6" }, { name: "Grey", hex: "#8E9089" }, { name: "Charcoal", hex: "#3C3C3C" },
+  { name: "Black", hex: "#111111" }, { name: "Red", hex: "#C12E1F" }, { name: "Terracotta", hex: "#C56A3A" },
+  { name: "Orange", hex: "#FF6A13" }, { name: "Gold", hex: "#D4A84A" }, { name: "Yellow", hex: "#F4D32A" },
+  { name: "Green", hex: "#00AE42" }, { name: "Olive", hex: "#5E6B2E" }, { name: "Mint", hex: "#A5D8B6" },
+  { name: "Teal", hex: "#00827F" }, { name: "Cyan", hex: "#0086D6" }, { name: "Sky Blue", hex: "#7EB6E8" },
+  { name: "Blue", hex: "#0A2989" }, { name: "Purple", hex: "#5E43B7" }, { name: "Lilac", hex: "#B39DDB" },
+  { name: "Pink", hex: "#F55A74" }, { name: "Blush", hex: "#F4B6C2" }, { name: "Brown", hex: "#7B4A2E" },
+  { name: "Silver", hex: "#A6A9AA" },
+];
+
 export interface BlenderStatus {
   found: boolean;
   path?: string;
@@ -130,6 +143,9 @@ export interface Job {
   views?: { engine: string; files: string[]; created: string } | null;
   style_name?: string;
   style_removed?: boolean;
+  /** the two filament colours: chosen for this object, else the style's */
+  colours?: { body: Colour; base: Colour };
+  colours_custom?: boolean;
   timings?: Partial<Record<"cutout" | "stylize" | "reconstruct" | "printify" | "export", StepTime>>;
 }
 
@@ -421,6 +437,10 @@ export const api = {
   remove: (id: string) => req<{ ok: boolean }>("DELETE", `/api/jobs/${id}`),
   stylize: (id: string, engine?: string, seed?: number, n?: number, quality?: Quality) =>
     req<Job>("POST", `/api/jobs/${id}/stylize`, { engine, seed, n, quality }),
+  setColours: (id: string, colours: { body?: { hex: string; name?: string }; base?: { hex: string; name?: string } }) =>
+    req<Job>("POST", `/api/jobs/${id}/colours`, colours),
+  resetColours: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/colours`),
+  suggestJobColours: (id: string) => req<{ body: Colour; base: Colour }>("POST", `/api/jobs/${id}/colours/suggest`),
   cancel: (id: string) => req<Job>("POST", `/api/jobs/${id}/cancel`),
   makeViews: (id: string, engine?: string) => req<Job>("POST", `/api/jobs/${id}/views`, { engine }),
   removeViews: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/views`),
