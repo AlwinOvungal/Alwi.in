@@ -24,6 +24,11 @@ edit_prompt: >-
   green, no text or fine detail. Keep the same pose and silhouette, centred on a plain
   white background with soft diffuse light.
 
+# Claude Sculpt reads this when it rebuilds an object from building blocks.
+sculpt_guide: >-
+  Chunky, simplified forms like a handmade clay toy: few, bold parts with generous
+  rounding, no fine detail, slightly squat proportions, soft edges everywhere.
+
 seeds: [11, 23, 37, 51]
 
 stylize:

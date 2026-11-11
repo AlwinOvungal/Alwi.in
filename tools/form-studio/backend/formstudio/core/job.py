@@ -128,6 +128,7 @@ class Job:
             self.manifest["confirmed"] = None
         if idx < STAGES.index("reconstructed"):
             self.path(RAW_MESH).unlink(missing_ok=True)
+            self.path("04_recipe.json").unlink(missing_ok=True)
             self.manifest["reconstruct"] = None
         if idx < STAGES.index("printified"):
             shutil.rmtree(self.path(PRINT_DIR), ignore_errors=True)

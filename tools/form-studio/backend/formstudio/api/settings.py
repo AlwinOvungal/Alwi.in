@@ -21,9 +21,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "fast_mode": False,
     "candidates": 4,
     "export_formats": ["3mf"],
-    "fal": {"stylize_endpoint": "", "reconstruct_endpoint": ""},
+    "fal": {"endpoints": {}},  # engine id → custom endpoint (Settings → Advanced)
+    "claude": {"model": "claude-opus-5-5", "effort": "medium", "auto_name": True},
     "slicer": "bambu",  # bambu | orca | prusa
 }
+
+SECRETS = ("fal", "anthropic")
 
 _lock = threading.Lock()
 _memory_secrets: dict[str, str] = {}  # used only if no keychain is available (e.g. CI)
@@ -32,7 +35,7 @@ _memory_secrets: dict[str, str] = {}  # used only if no keychain is available (e
 def _merge(base: dict, over: dict) -> dict:
     out = copy.deepcopy(base)
     for k, v in over.items():
-        if isinstance(v, dict) and isinstance(out.get(k), dict):
+        if isinstance(v, dict) and isinstance(out.get(k), dict) and out[k]:
             out[k] = _merge(out[k], v)
         elif k in out:
             out[k] = v
@@ -107,15 +110,17 @@ def set_secret(name: str, value: str | None) -> str:
 
 def context() -> EngineContext:
     s = load()
-    secrets = {k: v for k in ("fal",) if (v := get_secret(k))}
+    secrets = {k: v for k in SECRETS if (v := get_secret(k))}
     return EngineContext(settings=s, device=pick_device(s.get("device", "auto")), secrets=secrets)
 
 
 def public(s: dict[str, Any]) -> dict[str, Any]:
     out = copy.deepcopy(s)
-    key = get_secret("fal")
-    out["fal"]["has_key"] = bool(key)
-    out["fal"]["key_hint"] = f"…{key[-4:]}" if key else ""
+    for name in SECRETS:
+        key = get_secret(name)
+        section = out.setdefault(name if name != "anthropic" else "claude", {})
+        section["has_key"] = bool(key)
+        section["key_hint"] = f"…{key[-4:]}" if key else ""
     out["keychain"] = _keyring() is not None
     out["resolved_device"] = pick_device(s.get("device", "auto"))
     return out

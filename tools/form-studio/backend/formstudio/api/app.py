@@ -20,6 +20,7 @@ from pydantic import BaseModel
 
 from .. import __version__, paths, pipeline
 from ..core.job import PRINT_DIR, Job
+from ..core import style as style_mod
 from ..core.style import get_style, list_styles
 from ..engines import RECONSTRUCTORS, STYLIZERS, describe
 from ..engines.cloud import FalClient
@@ -99,20 +100,102 @@ def health() -> dict[str, Any]:
     return {"ok": True, "version": __version__, "platform": platform.system()}
 
 
+# ---- styles -------------------------------------------------------------------------
+
+def _style(style_id: str):
+    try:
+        return get_style(style_id)
+    except KeyError:
+        raise HTTPException(404, "Unknown style")
+
+
+def _style_call(fn, *args):
+    try:
+        return fn(*args).detail()
+    except KeyError:
+        raise HTTPException(404, "Unknown style")
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    except (ValueError, IndexError) as e:
+        raise HTTPException(400, str(e))
+
+
 @app.get("/api/styles")
 def styles() -> list[dict[str, Any]]:
     return [s.summary() for s in list_styles()]
 
 
-@app.get("/api/styles/{style_id}/reference")
-def style_reference(style_id: str):
+@app.post("/api/styles")
+def create_style(body: style_mod.StyleEdit) -> dict[str, Any]:
+    return _style_call(style_mod.create_style, body)
+
+
+@app.get("/api/styles/{style_id}")
+def style_detail(style_id: str) -> dict[str, Any]:
+    return _style(style_id).detail()
+
+
+@app.put("/api/styles/{style_id}")
+def update_style(style_id: str, body: style_mod.StyleEdit) -> dict[str, Any]:
+    return _style_call(style_mod.update_style, style_id, body)
+
+
+@app.delete("/api/styles/{style_id}")
+def delete_style(style_id: str) -> dict[str, bool]:
     try:
-        s = get_style(style_id)
+        style_mod.delete_style(style_id)
     except KeyError:
         raise HTTPException(404, "Unknown style")
-    if not s.reference or not s.reference.exists():
-        raise HTTPException(404, "No reference image")
-    return FileResponse(s.reference)
+    except PermissionError as e:
+        raise HTTPException(403, str(e))
+    return {"ok": True}
+
+
+@app.post("/api/styles/{style_id}/duplicate")
+def duplicate_style(style_id: str) -> dict[str, Any]:
+    return _style_call(style_mod.duplicate_style, style_id)
+
+
+@app.post("/api/styles/{style_id}/references")
+def add_style_reference(style_id: str, image: UploadFile = File(...)) -> dict[str, Any]:
+    return _style_call(style_mod.add_reference, style_id, image.file.read())
+
+
+@app.delete("/api/styles/{style_id}/references/{index}")
+def remove_style_reference(style_id: str, index: int) -> dict[str, Any]:
+    return _style_call(style_mod.remove_reference, style_id, index)
+
+
+@app.get("/api/styles/{style_id}/references/{index}")
+def style_reference_n(style_id: str, index: int):
+    refs = _style(style_id).reference_paths
+    if not 0 <= index < len(refs):
+        raise HTTPException(404, "No such reference image")
+    return FileResponse(refs[index], headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/styles/{style_id}/reference")
+def style_reference(style_id: str):
+    return style_reference_n(style_id, 0)
+
+
+class DraftBody(BaseModel):
+    notes: str = ""
+
+
+@app.post("/api/styles/{style_id}/draft")
+def draft_style(style_id: str, body: DraftBody) -> dict[str, Any]:
+    """Claude reads the style's reference images and drafts its words, colours and shape settings."""
+    from .. import claude
+
+    style = _style(style_id)
+    ctx = settings_mod.context()
+    try:
+        draft = claude.draft_style(ctx.secrets.get("anthropic"), (ctx.settings.get("claude") or {}).get("model"),
+                                   style.reference_paths, body.notes)
+    except claude.ClaudeError as e:
+        raise HTTPException(400, str(e))
+    return draft.model_dump()
 
 
 @app.get("/api/engines")
@@ -133,9 +216,11 @@ class SettingsUpdate(BaseModel):
     fast_mode: bool | None = None
     candidates: int | None = None
     export_formats: list[str] | None = None
-    fal: dict[str, str] | None = None
+    fal: dict[str, Any] | None = None
+    claude: dict[str, Any] | None = None
     slicer: str | None = None
     fal_key: str | None = None  # "" removes it
+    anthropic_key: str | None = None
 
 
 @app.get("/api/settings")
@@ -146,9 +231,13 @@ def get_settings() -> dict[str, Any]:
 @app.put("/api/settings")
 def put_settings(body: SettingsUpdate) -> dict[str, Any]:
     update = body.model_dump(exclude_none=True)
-    key = update.pop("fal_key", None)
-    if key is not None:
-        settings_mod.set_secret("fal", key.strip() or None)
+    for field, name in (("fal_key", "fal"), ("anthropic_key", "anthropic")):
+        key = update.pop(field, None)
+        if key is not None:
+            settings_mod.set_secret(name, key.strip() or None)
+    for section in ("fal", "claude"):
+        if section in update:
+            update[section] = {k: v for k, v in update[section].items() if k not in ("has_key", "key_hint")}
     if "engines" in update:
         for step, eid in update["engines"].items():
             reg = STYLIZERS if step == "stylize" else RECONSTRUCTORS if step == "reconstruct" else None
@@ -160,10 +249,22 @@ def put_settings(body: SettingsUpdate) -> dict[str, Any]:
 
 
 @app.post("/api/settings/test-key")
-def test_key() -> dict[str, Any]:
-    key = settings_mod.get_secret("fal")
+def test_key(service: str = "fal") -> dict[str, Any]:
+    if service not in settings_mod.SECRETS:
+        raise HTTPException(400, "Unknown service")
+    key = settings_mod.get_secret(service)
     if not key:
         return {"ok": False, "message": "No key saved."}
+    if service == "anthropic":
+        import anthropic
+
+        try:
+            anthropic.Anthropic(api_key=key, max_retries=0, timeout=20).models.list(limit=1)
+        except anthropic.AuthenticationError:
+            return {"ok": False, "message": "Anthropic rejected this key."}
+        except anthropic.APIError as e:
+            return {"ok": False, "message": f"Couldn't check the key: {e.__class__.__name__}"}
+        return {"ok": True, "message": "Key works."}
     try:
         ok = FalClient(key).check()
     except Exception as e:
@@ -191,11 +292,16 @@ def create_job(
     with tempfile.TemporaryDirectory() as d:
         tmp = Path(d) / f"upload{suffix}"
         tmp.write_bytes(photo.file.read())
+        blank = not subject.strip()
         subject = subject.strip() or Path(photo.filename or "object").stem.replace("_", " ").replace("-", " ")
         try:
             job = pipeline.create(tmp, name.strip() or subject, subject, style)
         except (KeyError, ValueError, OSError) as e:
             raise _bad(e)
+    if blank:  # let Claude name it, when there's a key
+        suggested = pipeline.suggest_name(settings_mod.context(), job)
+        if suggested:
+            job.update(subject=suggested, name=suggested if not name.strip() else job.manifest["name"])
     return _view(job)
 
 
@@ -280,6 +386,45 @@ def reconstruct(job_id: str, body: EngineBody) -> dict[str, Any]:
         raise HTTPException(400, "Pick a style candidate first.")
     ctx = settings_mod.context()
     return _queue(job, "reconstruct", lambda p: pipeline.reconstruct(job, ctx, engine, p))
+
+
+class StyleBody(BaseModel):
+    style: str
+
+
+@app.post("/api/jobs/{job_id}/style")
+def set_job_style(job_id: str, body: StyleBody) -> dict[str, Any]:
+    with _locked(job_id) as job:
+        try:
+            pipeline.set_style(job, body.style)
+        except KeyError:
+            raise HTTPException(404, "Unknown style")
+    return _view(job)
+
+
+@app.post("/api/jobs/{job_id}/suggest-name")
+def suggest_name(job_id: str) -> dict[str, Any]:
+    from .. import claude
+
+    job = _job(job_id)
+    ctx = settings_mod.context()
+    try:
+        pipeline.ensure_cutout(job)
+        name = claude.name_object(ctx.secrets.get("anthropic"), (ctx.settings.get("claude") or {}).get("model"),
+                                  job.path("01_cutout.png"))
+    except claude.ClaudeError as e:
+        raise HTTPException(400, str(e))
+    return {"subject": name}
+
+
+@app.post("/api/jobs/{job_id}/rebuild-recipe")
+def rebuild_recipe(job_id: str) -> dict[str, Any]:
+    with _locked(job_id) as job:
+        try:
+            pipeline.rebuild_recipe(job)
+        except (RuntimeError, ValueError) as e:
+            raise _bad(e)
+    return _view(job)
 
 
 @app.post("/api/jobs/{job_id}/printify")

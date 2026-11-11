@@ -57,7 +57,10 @@ class Bus:
         with self.lock:
             targets = list(self.subs.get(job_id, ()))
         for q in targets:
-            self.loop.call_soon_threadsafe(_put, q, event)
+            try:
+                self.loop.call_soon_threadsafe(_put, q, event)
+            except RuntimeError:  # the event loop has closed (app shutting down)
+                return
 
 
 def _put(q: asyncio.Queue, event: dict) -> None:

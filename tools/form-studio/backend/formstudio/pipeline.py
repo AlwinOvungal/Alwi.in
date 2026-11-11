@@ -135,12 +135,49 @@ def reconstruct(job: Job, ctx: EngineContext, engine_id: str, progress: Progress
     seed = int((job.manifest.get("confirmed") or {}).get("seed") or 0)
     img = job.path(CONFIRMED)
     tmp = job.path("04_raw.tmp.glb")
-    info = engine.reconstruct(ReconstructInput(img, img.with_name(img.stem + "_mask.png"), seed, tmp), ctx,
-                              lambda p, m: progress(None if p is None else p * 0.8, m))
+    style = get_style(job.manifest["style"]["id"])
+    inp = ReconstructInput(img, img.with_name(img.stem + "_mask.png"), seed, tmp, style=style, subject=job.manifest["subject"])
+    info = engine.reconstruct(inp, ctx, lambda p, m: progress(None if p is None else p * 0.8, m))
     tmp.replace(job.path(RAW_MESH))
     job.manifest["reconstruct"] = {"engine": engine_id, "seed": seed, **(info or {})}
     job.set_stage("reconstructed")
     printify(job, None, lambda p, m: progress(None if p is None else 0.8 + 0.2 * (p or 0), m))
+
+
+def rebuild_recipe(job: Job, progress: Progress | None = None) -> None:
+    """Rebuild the shape from Claude's saved recipe: free, and identical every time."""
+    from .engines.claude_sculpt import rebuild_from_recipe
+
+    if not job.path("04_recipe.json").exists():
+        raise RuntimeError("This object has no Claude recipe. Build it with Claude Sculpt first.")
+    info = rebuild_from_recipe(job.path(RAW_MESH))
+    job.manifest["reconstruct"] = {**(job.manifest.get("reconstruct") or {}), **info}
+    if not job.reached("reconstructed"):
+        job.set_stage("reconstructed")
+    printify(job, None, progress)
+
+
+def set_style(job: Job, style_id: str) -> None:
+    """Switch an object to another style. Restyled options and the 3D shape are made again."""
+    style = get_style(style_id)
+    job.reset_after("cutout")
+    job.manifest["style"] = {"id": style.id, "hash": style.hash}
+    job.manifest["print_params"] = style.print_params((job.manifest.get("print_params") or {}).get("format", "stand"))
+    job.save()
+    log.info("%s: style set to %s", job.id, style.id)
+
+
+def suggest_name(ctx: EngineContext, job: Job) -> str | None:
+    """Ask Claude what the object is (only with an Anthropic key and auto-naming on)."""
+    from . import claude
+
+    if not ctx.secrets.get("anthropic") or not (ctx.settings.get("claude") or {}).get("auto_name", True):
+        return None
+    try:
+        return claude.name_object(ctx.secrets["anthropic"], (ctx.settings.get("claude") or {}).get("model"), job.path(CUTOUT))
+    except claude.ClaudeError as e:
+        log.warning("%s: couldn't name the object: %s", job.id, e)
+        return None
 
 
 def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | None = None) -> dict[str, Any]:

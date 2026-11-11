@@ -38,6 +38,8 @@ class ReconstructInput:
     mask: Path       # L, object = white
     seed: int
     out: Path        # where to write the GLB (y-up)
+    style: StyleSpec | None = None
+    subject: str = ""
 
 
 class Engine(Protocol):
