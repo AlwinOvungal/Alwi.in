@@ -3,6 +3,7 @@ import { api, Settings } from "./api";
 import JobPage from "./JobPage";
 import Library from "./Library";
 import SettingsPage from "./SettingsPage";
+import { StyleEditor, StylesList } from "./StylesPage";
 import { ToastProvider, useRoute } from "./ui";
 
 export default function App() {
@@ -25,6 +26,9 @@ export default function App() {
             <a href="#/" className={page === "" || page === "job" ? "active" : ""}>
               Library
             </a>
+            <a href="#/styles" className={page === "styles" ? "active" : ""}>
+              Styles
+            </a>
             <a href="#/settings" className={page === "settings" ? "active" : ""}>
               Settings
             </a>
@@ -41,6 +45,10 @@ export default function App() {
         <main className="main">
           {page === "job" && route[1] ? (
             <JobPage id={route[1]} key={route[1]} />
+          ) : page === "styles" && route[1] ? (
+            <StyleEditor id={route[1]} key={route[1]} />
+          ) : page === "styles" ? (
+            <StylesList />
           ) : page === "settings" ? (
             <SettingsPage onSaved={setSettings} />
           ) : (

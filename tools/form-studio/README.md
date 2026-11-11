@@ -81,20 +81,34 @@ filament 1 and the base on filament 2. Load the matching colours in your AMS and
 
 ## Engines
 
-Pick engines in **Settings**. You can change them per object.
+Pick default engines in **Settings**, and switch them for each object as you go.
 
 | Step | Engine | Cost | Notes |
 |---|---|---|---|
-| Restyle | SDXL + style reference (local) | free | Steered by `reference.png` and the photo's depth. About 1–2 min per image on Apple Silicon. 16 GB+ of memory recommended; turn on *Fast mode* on 8 GB Macs. |
-| Restyle | FLUX Kontext (fal.ai) | about $0.025 per image | Fast. Needs a fal.ai key. |
+| Restyle | SDXL + style reference (local) | free | Steered by the style's first reference picture and the photo's depth. About 1–2 min per image on Apple Silicon. 16 GB+ of memory recommended; turn on *Fast mode* on 8 GB Macs. |
+| Restyle | Nano Banana (fal.ai) | about $0.04 per image | Sees your photo **and all the style's reference pictures**, so the look stays consistent. Needs a fal.ai key. |
+| Restyle | FLUX Kontext (fal.ai) | about $0.025 per image | Strong at keeping the shape; uses only the style's words. Needs a fal.ai key. |
 | Restyle | Palette preview (offline) | free | Instant recolour. No AI. |
 | 3D | TripoSR (local) | free | MIT licence. Under a minute. |
 | 3D | Hunyuan3D-2 mini (local) | free | Better shapes and slower. Install with `--with-hunyuan`. |
-| 3D | Hunyuan3D-2 mini (fal.ai) | about $0.10 per shape | About 30 s. Needs a fal.ai key. |
+| 3D | TRELLIS (fal.ai) | about $0.02 per shape | The cheapest cloud 3D, under a minute. Needs a fal.ai key. |
+| 3D | Hunyuan3D-2 mini (fal.ai) | about $0.10 per shape | Detailed shapes in about 30 s. Needs a fal.ai key. |
+| 3D | **Claude Sculpt** (Anthropic) | about $0.02–0.06 per object | Claude rebuilds the object from soft building blocks. Very consistent and toy-like, and the recipe is saved so a rebuild is identical and free. Needs an Anthropic key. |
 | 3D | Lathe / Extrude (offline) | free | Instant. Builds the shape from the silhouette: Lathe suits cups and vases, Extrude suits flat art. |
 
-To use the cloud engines, create a key at [fal.ai](https://fal.ai) and paste it in **Settings → fal.ai cloud key**.
-It's stored in your macOS Keychain, never in a file.
+**Keys** go in **Settings** and are stored in your macOS Keychain, never in a file:
+- **fal.ai key** (from [fal.ai](https://fal.ai) → Dashboard → Keys) for Nano Banana, FLUX Kontext, TRELLIS and cloud Hunyuan3D.
+- **Anthropic key** (from [console.anthropic.com](https://console.anthropic.com) → API Keys) for Claude Sculpt,
+  automatic object naming and "Draft with Claude" on the Styles page.
+
+### Claude Sculpt
+
+Claude can't draw images or meshes, but it can describe a shape precisely. It looks at the chosen
+image (and your style's references) and writes a **recipe**: a short list of rounded boxes,
+capsules, spheres, cylinders, cones and rings, each placed and sized. Form Studio builds the 3D
+model from that recipe ([`primitives.py`](backend/formstudio/core/primitives.py)) and saves it as
+`04_recipe.json`. **Rebuild from Claude's recipe** is free and gives exactly the same shape;
+**Ask Claude again** writes a new recipe.
 
 ## How the style stays consistent
 
@@ -114,10 +128,17 @@ Two locks keep every object looking like part of the same family:
    - add the round base, with a pocket so the body keys in
    - optionally cut a magnet pocket
 
-### Making another style
+### Making your own style
 
-Copy `styles/clay-minimal` to `~/FormStudio/styles/<your-style>`, change the `id`, prompt,
-palette and geometry, and add your own `reference.png`. Bump `version` whenever you change the style.
+Open **Styles** in the app:
+1. Type a name and click **Create style**, or **Duplicate** a built-in style.
+2. Add 1–4 **reference pictures** that show the look you want.
+3. Click **Draft with Claude**. It writes the restyle instruction, image prompt, sculpt guide,
+   print colours and softness from your pictures. Review and edit them.
+4. **Save style.** Each save bumps the style's version, and every object records the version it used.
+
+Choose the style when you add a photo, or switch an object's style in its Photo step.
+Your styles live in `~/FormStudio/styles/`; the built-in ones in this repo are read-only.
 
 ## Troubleshooting
 

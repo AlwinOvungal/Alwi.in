@@ -95,7 +95,48 @@ export interface Style {
   seeds: number[];
   formats: { id: PrintFormat; label: string }[];
   has_reference: boolean;
+  references: number;
+  editable: boolean;
 }
+
+export interface Colour {
+  name: string;
+  hex: string;
+}
+
+export interface StyleDetail extends Style {
+  prompt: string;
+  edit_prompt: string;
+  negative_prompt: string;
+  sculpt_guide: string;
+  geometry: { height_mm: number; soften_mm: number; min_feature_mm: number };
+}
+
+export interface StyleEdit {
+  name: string;
+  description: string;
+  prompt?: string;
+  edit_prompt?: string;
+  negative_prompt?: string;
+  sculpt_guide?: string;
+  palette?: { body: Colour; base: Colour };
+  geometry?: { height_mm: number; soften_mm: number; min_feature_mm: number };
+}
+
+export interface StyleDraft {
+  name: string;
+  description: string;
+  prompt: string;
+  edit_prompt: string;
+  negative_prompt: string;
+  sculpt_guide: string;
+  body: Colour;
+  base: Colour;
+  soften_mm: number;
+  min_feature_mm: number;
+}
+
+export const styleRefUrl = (s: Pick<Style, "id" | "version">, n: number) => `/api/styles/${s.id}/references/${n}?v=${s.version}`;
 
 export interface Settings {
   engines: { stylize: string; reconstruct: string };
@@ -104,7 +145,8 @@ export interface Settings {
   fast_mode: boolean;
   candidates: number;
   export_formats: string[];
-  fal: { stylize_endpoint: string; reconstruct_endpoint: string; has_key: boolean; key_hint: string };
+  fal: { endpoints: Record<string, string>; has_key: boolean; key_hint: string };
+  claude: { model: string; effort: string; auto_name: boolean; has_key: boolean; key_hint: string };
   slicer: "bambu" | "orca" | "prusa";
   keychain: boolean;
 }
@@ -134,9 +176,30 @@ export const api = {
   styles: () => req<Style[]>("GET", "/api/styles"),
   engines: () => req<Engines>("GET", "/api/engines"),
   settings: () => req<Settings>("GET", "/api/settings"),
-  saveSettings: (s: Partial<Omit<Settings, "fal">> & { fal?: Partial<Settings["fal"]>; fal_key?: string }) =>
-    req<Settings>("PUT", "/api/settings", s),
-  testKey: () => req<{ ok: boolean; message: string }>("POST", "/api/settings/test-key"),
+  saveSettings: (
+    s: Partial<Omit<Settings, "fal" | "claude">> & {
+      fal?: Partial<Settings["fal"]>;
+      claude?: Partial<Settings["claude"]>;
+      fal_key?: string;
+      anthropic_key?: string;
+    },
+  ) => req<Settings>("PUT", "/api/settings", s),
+  testKey: (service: "fal" | "anthropic") => req<{ ok: boolean; message: string }>("POST", `/api/settings/test-key?service=${service}`),
+  style: (id: string) => req<StyleDetail>("GET", `/api/styles/${id}`),
+  createStyle: (s: StyleEdit) => req<StyleDetail>("POST", "/api/styles", s),
+  updateStyle: (id: string, s: StyleEdit) => req<StyleDetail>("PUT", `/api/styles/${id}`, s),
+  deleteStyle: (id: string) => req<{ ok: boolean }>("DELETE", `/api/styles/${id}`),
+  duplicateStyle: (id: string) => req<StyleDetail>("POST", `/api/styles/${id}/duplicate`),
+  addReference: (id: string, file: File) => {
+    const f = new FormData();
+    f.append("image", file);
+    return req<StyleDetail>("POST", `/api/styles/${id}/references`, f);
+  },
+  removeReference: (id: string, n: number) => req<StyleDetail>("DELETE", `/api/styles/${id}/references/${n}`),
+  draftStyle: (id: string, notes: string) => req<StyleDraft>("POST", `/api/styles/${id}/draft`, { notes }),
+  setJobStyle: (id: string, style: string) => req<Job>("POST", `/api/jobs/${id}/style`, { style }),
+  suggestName: (id: string) => req<{ subject: string }>("POST", `/api/jobs/${id}/suggest-name`),
+  rebuildRecipe: (id: string) => req<Job>("POST", `/api/jobs/${id}/rebuild-recipe`),
   jobs: () => req<Job[]>("GET", "/api/jobs"),
   job: (id: string) => req<Job>("GET", `/api/jobs/${id}`),
   create: (photo: File, subject: string, style: string) => {

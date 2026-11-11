@@ -1,5 +1,6 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { api, Engines, fileUrl, Job, PrintFormat, PrintParams, reached, Settings, Style, useJob } from "./api";
+import { api, Engines, fileUrl, Job, PrintFormat, PrintParams, reached, Settings, Style, styleRefUrl, useJob } from "./api";
+import { StylePicker } from "./Library";
 import { EnginePicker, go, Progress, Slider, Switch, useToast } from "./ui";
 
 const Viewer = lazy(() => import("./Viewer"));
@@ -32,17 +33,17 @@ export default function JobPage({ id }: { id: string }) {
   const [step, setStep] = useState<StepId | null>(null);
   const [engines, setEngines] = useState<Engines | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null);
-  const [style, setStyle] = useState<Style | null>(null);
+  const [styles, setStyles] = useState<Style[]>([]);
   const toast = useToast();
   const lastStage = useRef<string | null>(null);
 
   useEffect(() => {
     api.engines().then(setEngines).catch(() => {});
     api.settings().then(setSettings).catch(() => {});
+    api.styles().then(setStyles).catch(() => {});
   }, []);
   useEffect(() => {
     if (!job) return;
-    if (!style) api.styles().then((all) => setStyle(all.find((s) => s.id === job.style.id) ?? all[0]));
     // move forward automatically when a step finishes
     if (lastStage.current !== job.stage) {
       if (lastStage.current === null || step === null || stepFor(job) !== step) setStep(stepFor(job));
@@ -53,6 +54,7 @@ export default function JobPage({ id }: { id: string }) {
     if (job?.task?.status === "error" && job.task.error) toast(job.task.error, true);
   }, [job?.task?.status]); // eslint-disable-line react-hooks/exhaustive-deps
 
+  const style = (job && styles.find((s) => s.id === job.style.id)) ?? styles[0] ?? null;
   if (error) return <div className="page"><p className="note bad">{error}</p><a className="btn" href="#/">Back to library</a></div>;
   if (!job || !step) return <div className="page muted">Loading…</div>;
 
@@ -122,7 +124,7 @@ export default function JobPage({ id }: { id: string }) {
         </ol>
 
         <section className="step-body" aria-live="polite">
-          {step === "photo" && <PhotoStep job={job} busy={busy} engines={engines} settings={settings} run={run} />}
+          {step === "photo" && <PhotoStep job={job} busy={busy} engines={engines} settings={settings} run={run} styles={styles} />}
           {step === "style" && <StyleStep job={job} busy={busy} style={style} settings={settings} run={run} />}
           {step === "shape" && <ShapeStep job={job} busy={busy} engines={engines} settings={settings} run={run} />}
           {step === "print" && <PrintStep job={job} busy={busy} style={style} settings={settings} run={run} />}
@@ -146,9 +148,29 @@ type StepProps = {
 };
 
 // ---------------------------------------------------------------- 1. photo ----
-function PhotoStep({ job, busy, engines, settings, run }: StepProps & { engines: Engines | null }) {
+function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { engines: Engines | null; styles: Style[] }) {
   const [engine, setEngine] = useState<string>("");
   const [subject, setSubject] = useState(job.subject);
+  const [naming, setNaming] = useState(false);
+  const toast = useToast();
+  useEffect(() => setSubject(job.subject), [job.subject]);
+  const changeStyle = (id: string) => {
+    if (id === job.style.id) return;
+    if (reached(job, "stylized") && !confirm("Switch style? The restyled options and 3D shape will be made again.")) return;
+    run(api.setJobStyle(job.id, id));
+  };
+  const askClaude = async () => {
+    setNaming(true);
+    try {
+      const { subject: s } = await api.suggestName(job.id);
+      setSubject(s);
+      run(api.rename(job.id, { subject: s }));
+    } catch (e) {
+      toast((e as Error).message, true);
+    } finally {
+      setNaming(false);
+    }
+  };
   useEffect(() => setEngine((e) => e || pickAvailable(engines?.stylize, settings?.engines.stylize)), [settings, engines]);
   const working = busy && job.task?.kind === "stylize";
 
@@ -174,11 +196,24 @@ function PhotoStep({ job, busy, engines, settings, run }: StepProps & { engines:
         <div className="card panel stack">
           <h2>Restyle it</h2>
           <p className="muted small" style={{ margin: 0 }}>
-            The style model redraws your object as a clay miniature, keeping its shape. You get several options and pick one.
+            The style model redraws your object in the chosen style, keeping its shape. You get several options and pick one.
           </p>
+          {styles.length > 1 && (
+            <div className="field">
+              <span>Style</span>
+              <StylePicker styles={styles} value={job.style.id} onChange={changeStyle} />
+            </div>
+          )}
           <label className="field">
             <span>What is the object? (e.g. coffee mug)</span>
-            <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} onBlur={() => subject !== job.subject && run(api.rename(job.id, { subject }))} />
+            <div className="row" style={{ flexWrap: "nowrap" }}>
+              <input className="input grow" value={subject} onChange={(e) => setSubject(e.target.value)} onBlur={() => subject !== job.subject && run(api.rename(job.id, { subject }))} />
+              {settings?.claude.has_key && (
+                <button className="btn sm" disabled={naming || busy} onClick={askClaude} title="Let Claude look at the photo and name the object">
+                  {naming ? "Looking…" : "Ask Claude"}
+                </button>
+              )}
+            </div>
           </label>
           <span className="small muted">Want a keychain, magnet or stand? Choose that in the Print step.</span>
           {engines && <EnginePicker engines={engines.stylize} value={engine} onChange={setEngine} />}
@@ -219,10 +254,12 @@ function StyleStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           <h2>Pick the one that feels right</h2>
           <span className="muted small">Same photo + same seeds = same options. Generate more for new seeds.</span>
         </div>
-        {style?.has_reference && (
-          <div className="ref" style={{ gridTemplateColumns: "48px auto" }}>
-            <img src={`/api/styles/${style.id}/reference`} alt="Style reference" style={{ width: 48, height: 58 }} />
-            <span className="small muted">Style<br />reference</span>
+        {style && style.references > 0 && (
+          <div className="row" style={{ gap: 6 }}>
+            {Array.from({ length: Math.min(style.references, 3) }, (_, i) => (
+              <img key={i} src={styleRefUrl(style, i)} alt={`Style reference ${i + 1}`} style={{ width: 48, height: 58, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)" }} />
+            ))}
+            <span className="small muted">{style.name}<br />references</span>
           </div>
         )}
       </div>
@@ -283,9 +320,19 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
           {working && job.task ? (
             <Progress task={job.task} />
           ) : (
-            <button className="btn olive" disabled={busy || !engine} onClick={() => run(api.reconstruct(job.id, engine))}>
-              {reached(job, "reconstructed") ? "Rebuild shape" : "Build 3D shape"}
-            </button>
+            <>
+              <button className="btn olive" disabled={busy || !engine} onClick={() => run(api.reconstruct(job.id, engine))}>
+                {reached(job, "reconstructed") ? (engine === "claude-sculpt" ? "Ask Claude again" : "Rebuild shape") : "Build 3D shape"}
+              </button>
+              {job.files.includes("04_recipe.json") && (
+                <>
+                  <button className="btn" disabled={busy} onClick={() => run(api.rebuildRecipe(job.id))}>Rebuild from Claude's recipe (free)</button>
+                  <p className="small muted" style={{ margin: 0 }}>
+                    Claude's recipe is saved with this object ({job.reconstruct && "parts" in job.reconstruct ? `${(job.reconstruct as { parts: number }).parts} parts` : "saved"}). Rebuilding from it gives exactly the same shape.
+                  </p>
+                </>
+              )}
+            </>
           )}
         </div>
       </div>
