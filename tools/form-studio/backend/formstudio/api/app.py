@@ -295,7 +295,8 @@ def printify(job_id: str, overrides: dict[str, Any]) -> dict[str, Any]:
 @app.post("/api/jobs/{job_id}/reset-print")
 def reset_print(job_id: str) -> dict[str, Any]:
     with _locked(job_id) as job:
-        job.manifest["print_params"] = get_style(job.manifest["style"]["id"]).print_params()
+        fmt = (job.manifest.get("print_params") or {}).get("format", "stand")
+        job.manifest["print_params"] = get_style(job.manifest["style"]["id"]).print_params(fmt)
         try:
             pipeline.printify(job, {})
         except (RuntimeError, ValueError) as e:

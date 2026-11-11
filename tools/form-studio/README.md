@@ -67,10 +67,15 @@ Your objects are saved in `~/FormStudio/jobs/`. Each one is a plain folder you c
    The same photo with the same seeds always gives the same options. **New options** tries new seeds.
    **Skip: use photo as is** sends the cut-out straight to 3D, which is good for logos and 2D art.
 3. **Shape.** Build the 3D shape from the chosen image.
-4. **Print.** Look at it in 3D and tune the height, softness, thinnest part, base and magnet pocket.
+4. **Print.** Choose what it becomes:
+   - **Stand:** upright on a round base in the second colour.
+   - **Magnet:** a flat back with a magnet pocket (10 × 2 mm by default).
+   - **Keychain:** a flat back with a key-ring loop on top.
+
+   Magnets and keychains print lying on their flat back, so they need no supports. Then look at it in 3D and tune the height, softness, thinnest part, base and magnet pocket.
    Each change rebuilds in a few seconds, with no AI involved. Then click **Export print files**.
 
-`model.3mf` opens in Bambu Studio and OrcaSlicer as **one object with two parts**: the body on
+For a **stand**, `model.3mf` opens in Bambu Studio and OrcaSlicer as **one object with two parts**: the body on
 filament 1 and the base on filament 2. Load the matching colours in your AMS and slice.
 `body.stl` and `base.stl` are there too if you'd rather print the parts separately and glue them.
 

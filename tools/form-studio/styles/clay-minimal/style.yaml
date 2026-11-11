@@ -57,3 +57,22 @@ magnet:
   diameter_mm: 6
   depth_mm: 2
   clearance_mm: 0.15
+
+# What the object becomes. The Print step switches between these; each one
+# starts from the settings above, with these changes on top.
+formats:
+  stand:
+    label: Stand
+  magnet:
+    label: Magnet
+    geometry: {height_mm: 35}
+    base: {enabled: false}
+    magnet: {enabled: true, diameter_mm: 10, depth_mm: 2}
+    flat_back: {enabled: true, thickness_mm: 9}
+  keychain:
+    label: Keychain
+    geometry: {height_mm: 40}
+    base: {enabled: false}
+    magnet: {enabled: false}
+    flat_back: {enabled: true, thickness_mm: 7}
+    ring: {enabled: true, outer_radius_mm: 4.5, hole_mm: 4.5, thickness_mm: 3.5}

@@ -93,3 +93,50 @@ def test_3mf_has_two_parts_on_two_filaments(printed, style):
     # the 3MF reloads as geometry
     loaded = trimesh.load(out / "model.3mf", force="mesh")
     assert len(loaded.faces) > 1000
+
+
+def test_keychain_lies_flat_with_a_ring_hole(style, mug_glb, tmp_path):
+    p = style.print_params("keychain")
+    rep = printify.run(mug_glb, tmp_path, p)
+    body = trimesh.load(tmp_path / "body.stl")
+    assert not (tmp_path / "base.stl").exists()
+    assert body.is_watertight and rep["format"] == "keychain"
+    assert body.bounds[0][2] == pytest.approx(0, abs=1e-3)  # flat back on the bed
+    # the object's height runs along y; the loop adds to it
+    assert body.extents[1] > p["geometry"]["height_mm"]
+    # the mug has two handle holes; the ring adds a third
+    plain = style.print_params("keychain")
+    plain["ring"]["enabled"] = False
+    printify.run(mug_glb, tmp_path / "plain", plain)
+    assert body.euler_number < trimesh.load(tmp_path / "plain" / "body.stl").euler_number
+    # a thin pin through the hole centre doesn't touch the part
+    import manifold3d as mf
+
+    ys = body.vertices[:, 1]
+    hole_x = float(body.vertices[ys > ys.max() - 0.5, 0].mean())
+    hole_y = float(ys.max()) - p["ring"]["outer_radius_mm"]
+    pin = mf.Manifold.cylinder(40, 1.0, 1.0, 24).translate((hole_x, hole_y, -10))
+    assert (printify.to_manifold(body) ^ pin).volume() < 0.01
+
+
+def test_magnet_format_has_a_pocket_on_the_back(style, mug_glb, tmp_path):
+    p = style.print_params("magnet")
+    with_pocket = printify.run(mug_glb, tmp_path / "a", p)
+    p["magnet"]["enabled"] = False
+    without = printify.run(mug_glb, tmp_path / "b", p)
+    body = trimesh.load(tmp_path / "a" / "body.stl")
+    assert body.is_watertight and not (tmp_path / "a" / "base.stl").exists()
+    assert body.bounds[0][2] == pytest.approx(0, abs=1e-3)
+    assert with_pocket["body_volume_cm3"] <= without["body_volume_cm3"]
+
+
+def test_switching_format_starts_from_its_defaults(style):
+    from formstudio import pipeline
+
+    stand = style.print_params("stand")
+    stand["geometry"]["height_mm"] = 80
+    switched = pipeline._deep_merge(style.print_params("keychain"), {})
+    assert switched["format"] == "keychain" and switched["geometry"]["height_mm"] == 40
+    assert switched["ring"]["enabled"] and not switched["base"]["enabled"]
+    with pytest.raises(KeyError):
+        style.print_params("bookend")

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import logging
 import shutil
 from pathlib import Path
 from typing import Any, Callable
@@ -13,6 +14,8 @@ from .core.style import get_style
 from .engines import RECONSTRUCTORS, STYLIZERS, EngineContext, ReconstructInput, StylizeInput
 
 Progress = Callable[[float | None, str], None]
+
+log = logging.getLogger("formstudio.pipeline")
 
 PHOTO_TYPES = {".jpg", ".jpeg", ".png", ".webp", ".heic", ".bmp", ".tif", ".tiff"}
 
@@ -42,14 +45,36 @@ def create(photo: Path, name: str, subject: str, style_id: str) -> Job:
     job.manifest["input"] = dest.name
     job.manifest["print_params"] = style.print_params()
     job.save()
+    log.info("%s: created from %s", job.id, photo.name)
     try:
         info = ingest.cutout(dest, job.path(CUTOUT))
+        if not _cutout_files_exist(job):
+            raise OSError("the cut-out image wasn't saved")
     except Exception:
+        log.exception("%s: background removal failed; removing the object", job.id)
         job.delete()
         raise
+    log.info("%s: cut-out saved (%s)", job.id, info.get("matting"))
     job.manifest["cutout"] = info
     job.set_stage("cutout")
     return job
+
+
+def _cutout_files_exist(job: Job) -> bool:
+    cut = job.path(CUTOUT)
+    return cut.exists() and cut.with_name(cut.stem + "_mask.png").exists()
+
+
+def ensure_cutout(job: Job) -> None:
+    """Recreate the background-removed photo from the original if it's missing."""
+    if _cutout_files_exist(job):
+        return
+    src = job.input_path()
+    if not src or not src.exists():
+        raise FileNotFoundError("This object's photo is missing. Create it again from the photo.")
+    log.warning("%s: cut-out missing; recreating it from %s", job.id, src.name)
+    job.manifest["cutout"] = ingest.cutout(src, job.path(CUTOUT))
+    job.save()
 
 
 def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], progress: Progress) -> None:
@@ -58,6 +83,8 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
     ok, why = engine.available(ctx)
     if not ok:
         raise RuntimeError(why)
+    ensure_cutout(job)
+    log.info("%s: restyling with %s, seeds %s", job.id, engine_id, seeds)
     job.reset_after("cutout")
     out_dir = job.path(CANDIDATES)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -72,6 +99,7 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
     job.manifest["candidates"] = results
     job.manifest["style"]["hash"] = style.hash
     job.set_stage("stylized")
+    log.info("%s: %d options ready", job.id, len(results))
 
 
 def confirm(job: Job, index: int) -> None:
@@ -86,6 +114,7 @@ def confirm(job: Job, index: int) -> None:
 
 def use_photo_as_is(job: Job) -> None:
     """Skip restyling: send the cutout itself to the 3D step (for things already in style, or 2D art)."""
+    ensure_cutout(job)
     job.reset_after("cutout")
     shutil.copyfile(job.path(CUTOUT), job.path(CONFIRMED))
     cut = job.path(CUTOUT)
@@ -102,6 +131,7 @@ def reconstruct(job: Job, ctx: EngineContext, engine_id: str, progress: Progress
     if not ok:
         raise RuntimeError(why)
     job.reset_after("confirmed")
+    log.info("%s: building 3D with %s", job.id, engine_id)
     seed = int((job.manifest.get("confirmed") or {}).get("seed") or 0)
     img = job.path(CONFIRMED)
     tmp = job.path("04_raw.tmp.glb")
@@ -116,7 +146,18 @@ def reconstruct(job: Job, ctx: EngineContext, engine_id: str, progress: Progress
 def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | None = None) -> dict[str, Any]:
     if not job.reached("reconstructed"):
         raise RuntimeError("Build the 3D shape first.")
-    params = _deep_merge(job.manifest.get("print_params") or get_style(job.manifest["style"]["id"]).print_params(), overrides or {})
+    style = get_style(job.manifest["style"]["id"])
+    overrides = dict(overrides or {})
+    current = job.manifest.get("print_params") or style.print_params()
+    current.setdefault("format", "stand")
+    fmt = overrides.pop("format", None)
+    if fmt and fmt not in style.formats:
+        raise ValueError(f"Unknown format '{fmt}'")
+    if fmt and fmt != current["format"]:
+        current = style.print_params(fmt)  # a new format starts from its own defaults
+    params = _deep_merge(style.print_params(current["format"]), current)  # fills keys older objects lack
+    params = _deep_merge(params, overrides)
+    log.info("%s: preparing print (%s)", job.id, params["format"])
     report = printify_mod.run(job.path(RAW_MESH), job.path(PRINT_DIR), params, progress)
     job.manifest["print_params"] = params
     job.manifest["report"] = report

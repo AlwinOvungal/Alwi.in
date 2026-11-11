@@ -46,13 +46,27 @@ class StyleSpec:
     def edit_prompt_for(self, subject: str) -> str:
         return self.edit_prompt.format(subject=subject or "object")
 
-    def print_params(self) -> dict[str, Any]:
-        """Default printify parameters (the sliders in the 3D step start here)."""
-        return {
+    @property
+    def formats(self) -> dict[str, dict[str, Any]]:
+        f = self.raw.get("formats") or {}
+        return f if "stand" in f else {"stand": {"label": "Stand"}, **f}
+
+    def print_params(self, fmt: str = "stand") -> dict[str, Any]:
+        """Default printify parameters for a format (the sliders in the Print step start here)."""
+        if fmt not in self.formats:
+            raise KeyError(f"Unknown format '{fmt}'")
+        params: dict[str, Any] = {
+            "format": fmt,
             "geometry": copy.deepcopy(self.geometry),
             "base": copy.deepcopy(self.base),
             "magnet": copy.deepcopy(self.magnet),
+            "flat_back": {"enabled": False, "thickness_mm": 8},
+            "ring": {"enabled": False, "outer_radius_mm": 4.5, "hole_mm": 4.5, "thickness_mm": 3.5},
         }
+        for key, value in self.formats[fmt].items():
+            if isinstance(value, dict) and isinstance(params.get(key), dict):
+                params[key].update(copy.deepcopy(value))
+        return params
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -65,6 +79,7 @@ class StyleSpec:
             "seeds": self.seeds,
             "has_reference": bool(self.reference and self.reference.exists()),
             "defaults": self.print_params(),
+            "formats": [{"id": k, "label": v.get("label", k.title())} for k, v in self.formats.items()],
         }
 
 

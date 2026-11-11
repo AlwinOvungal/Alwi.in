@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { api, Engines, fileUrl, Job, PrintParams, reached, Settings, Style, useJob } from "./api";
+import { api, Engines, fileUrl, Job, PrintFormat, PrintParams, reached, Settings, Style, useJob } from "./api";
 import { EnginePicker, go, Progress, Slider, Switch, useToast } from "./ui";
 
 const Viewer = lazy(() => import("./Viewer"));
@@ -160,7 +160,13 @@ function PhotoStep({ job, busy, engines, settings, run }: StepProps & { engines:
           <figcaption className="chip">Original</figcaption>
         </figure>
         <figure className="frame" style={{ margin: 0 }}>
-          <img src={fileUrl(job, "01_cutout.png")} alt="Background removed" />
+          {job.files.includes("01_cutout.png") ? (
+            <img src={fileUrl(job, "01_cutout.png")} alt="Background removed" />
+          ) : (
+            <div className="muted small" style={{ aspectRatio: "1", display: "grid", placeItems: "center", padding: 24, textAlign: "center" }}>
+              The cut-out will be prepared again from your photo when you generate options.
+            </div>
+          )}
           <figcaption className="chip">Cut out</figcaption>
         </figure>
       </div>
@@ -171,9 +177,10 @@ function PhotoStep({ job, busy, engines, settings, run }: StepProps & { engines:
             The style model redraws your object as a clay miniature, keeping its shape. You get several options and pick one.
           </p>
           <label className="field">
-            <span>What is it? (used in the prompt)</span>
+            <span>What is the object? (e.g. coffee mug)</span>
             <input className="input" value={subject} onChange={(e) => setSubject(e.target.value)} onBlur={() => subject !== job.subject && run(api.rename(job.id, { subject }))} />
           </label>
+          <span className="small muted">Want a keychain, magnet or stand? Choose that in the Print step.</span>
           {engines && <EnginePicker engines={engines.stylize} value={engine} onChange={setEngine} />}
         </div>
         <div className="card panel stack">
@@ -287,7 +294,13 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
 }
 
 // ---------------------------------------------------------------- 4. print ----
-type Overrides = { [K in keyof PrintParams]?: Partial<PrintParams[K]> };
+const FORMAT_HINT: Record<PrintFormat, string> = {
+  stand: "Stands upright on a round base in the second colour.",
+  magnet: "Flat back with a magnet pocket. Prints lying down, no supports.",
+  keychain: "Flat back with a key-ring loop on top. Prints lying down, no supports.",
+};
+
+type Overrides = { [K in keyof PrintParams]?: PrintParams[K] extends object ? Partial<PrintParams[K]> : PrintParams[K] };
 
 function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Style | null }) {
   const [view, setView] = useState<"print" | "raw">("print");
@@ -306,9 +319,14 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
     }
   };
   // sliders preview the value instantly and rebuild when released
-  const set = <K extends keyof PrintParams>(k: K, patch: Partial<PrintParams[K]>, commit = false) => {
+  type Section = Exclude<keyof PrintParams, "format">;
+  const set = <K extends Section>(k: K, patch: Partial<PrintParams[K]>, commit = false) => {
     setP((cur) => (cur ? { ...cur, [k]: { ...cur[k], ...patch } } : cur));
     if (commit) apply({ [k]: patch } as Overrides);
+  };
+  const setFormat = (f: PrintFormat) => {
+    setP((cur) => (cur ? { ...cur, format: f } : cur));
+    apply({ format: f });
   };
 
   const rep = job.report;
@@ -333,6 +351,7 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
   const fileList = useMemo(() => job.exports.map((f) => ({ f, ext: f.split(".").pop()!.toUpperCase(), name: f.split("/").pop()! })), [job.exports]);
 
   if (!p) return null;
+  const fmt: PrintFormat = p.format ?? "stand";
   return (
     <div className="split">
       <div className="stack">
@@ -345,6 +364,7 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
               rawUrl={fileUrl(job, "04_raw.glb")}
               bodyColor={body}
               baseColor={base}
+              flat={fmt !== "stand"}
             />
           </Suspense>
           <div className="overlay">
@@ -385,20 +405,43 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
             <h3>Shape</h3>
             <button className="btn sm ghost" disabled={busy} onClick={() => run(api.resetPrint(job.id))}>Reset to style</button>
           </div>
-          <Slider label="Height" unit=" mm" min={15} max={180} step={1} value={p.geometry.height_mm} onChange={(v) => set("geometry", { height_mm: v })} onCommit={(v) => set("geometry", { height_mm: v }, true)} disabled={busy} />
+          <div className="seg" role="radiogroup" aria-label="Format" style={{ alignSelf: "start" }}>
+            {(style?.formats ?? [{ id: "stand", label: "Stand" }]).map((f) => (
+              <button key={f.id} role="radio" aria-checked={fmt === f.id} className={fmt === f.id ? "on" : ""} disabled={busy} onClick={() => fmt !== f.id && setFormat(f.id)}>
+                {f.label}
+              </button>
+            ))}
+          </div>
+          <p className="small muted" style={{ margin: 0 }}>{FORMAT_HINT[fmt]}</p>
+          <Slider label={fmt === "stand" ? "Height" : "Object height"} unit=" mm" min={15} max={180} step={1} value={p.geometry.height_mm} onChange={(v) => set("geometry", { height_mm: v })} onCommit={(v) => set("geometry", { height_mm: v }, true)} disabled={busy} />
           <Slider label="Softness" unit=" mm" min={0} max={3} step={0.1} value={p.geometry.soften_mm} onChange={(v) => set("geometry", { soften_mm: v })} onCommit={(v) => set("geometry", { soften_mm: v }, true)} disabled={busy} />
           <Slider label="Thinnest part" unit=" mm" min={0.8} max={5} step={0.1} value={p.geometry.min_feature_mm} onChange={(v) => set("geometry", { min_feature_mm: v })} onCommit={(v) => set("geometry", { min_feature_mm: v }, true)} disabled={busy} />
           <Slider label="Detail (remesh)" unit=" mm" min={0.25} max={1.5} step={0.05} value={p.geometry.voxel_mm} onChange={(v) => set("geometry", { voxel_mm: v })} onCommit={(v) => set("geometry", { voxel_mm: v }, true)} disabled={busy} />
           <div className="divider" />
-          <Switch label="Base" checked={p.base.enabled} onChange={(v) => set("base", { enabled: v }, true)} disabled={busy} />
-          {p.base.enabled && (
+          {fmt !== "stand" && (
+            <Slider label="Thickness" unit=" mm" min={3} max={25} step={0.5} value={p.flat_back.thickness_mm} onChange={(v) => set("flat_back", { thickness_mm: v })} onCommit={(v) => set("flat_back", { thickness_mm: v }, true)} disabled={busy} />
+          )}
+          {fmt === "keychain" && (
             <>
-              <Slider label="Base margin" unit=" mm" min={0} max={15} step={0.5} value={p.base.margin_mm} onChange={(v) => set("base", { margin_mm: v })} onCommit={(v) => set("base", { margin_mm: v }, true)} disabled={busy} />
-              <Slider label="Base thickness" unit=" mm" min={1.2} max={10} step={0.2} value={p.base.thickness_mm} onChange={(v) => set("base", { thickness_mm: v })} onCommit={(v) => set("base", { thickness_mm: v }, true)} disabled={busy} />
+              <Slider label="Key-ring hole" unit=" mm" min={3} max={8} step={0.5} value={p.ring.hole_mm} onChange={(v) => set("ring", { hole_mm: v })} onCommit={(v) => set("ring", { hole_mm: v, outer_radius_mm: Math.max(p.ring.outer_radius_mm, v / 2 + 2) }, true)} disabled={busy} />
+              <Slider label="Loop thickness" unit=" mm" min={2} max={6} step={0.5} value={p.ring.thickness_mm} onChange={(v) => set("ring", { thickness_mm: v })} onCommit={(v) => set("ring", { thickness_mm: v }, true)} disabled={busy} />
             </>
           )}
-          <Switch label="Magnet pocket" checked={p.magnet.enabled} onChange={(v) => set("magnet", { enabled: v }, true)} disabled={busy} />
-          {p.magnet.enabled && (
+          {fmt === "stand" && (
+            <>
+              <Switch label="Base" checked={p.base.enabled} onChange={(v) => set("base", { enabled: v }, true)} disabled={busy} />
+              {p.base.enabled && (
+                <>
+                  <Slider label="Base margin" unit=" mm" min={0} max={15} step={0.5} value={p.base.margin_mm} onChange={(v) => set("base", { margin_mm: v })} onCommit={(v) => set("base", { margin_mm: v }, true)} disabled={busy} />
+                  <Slider label="Base thickness" unit=" mm" min={1.2} max={10} step={0.2} value={p.base.thickness_mm} onChange={(v) => set("base", { thickness_mm: v })} onCommit={(v) => set("base", { thickness_mm: v }, true)} disabled={busy} />
+                </>
+              )}
+            </>
+          )}
+          {fmt !== "keychain" && (
+            <Switch label="Magnet pocket" checked={p.magnet.enabled} onChange={(v) => set("magnet", { enabled: v }, true)} disabled={busy} />
+          )}
+          {fmt !== "keychain" && p.magnet.enabled && (
             <div className="pair" style={{ gap: 10 }}>
               <label className="field"><span>Ø mm</span><input className="input" type="number" step="0.5" min="2" max="30" value={p.magnet.diameter_mm} onChange={(e) => set("magnet", { diameter_mm: Number(e.target.value) })} onBlur={(e) => set("magnet", { diameter_mm: Number(e.target.value) }, true)} /></label>
               <label className="field"><span>Depth mm</span><input className="input" type="number" step="0.5" min="0.5" max="10" value={p.magnet.depth_mm} onChange={(e) => set("magnet", { depth_mm: Number(e.target.value) })} onBlur={(e) => set("magnet", { depth_mm: Number(e.target.value) }, true)} /></label>
@@ -409,7 +452,7 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
         <div className="card panel stack">
           <h3>Export</h3>
           <div className="row small">
-            {[["3mf", "3MF (two colours)"], ["step", "STEP"]].map(([f, label]) => (
+            {[["3mf", hasBase ? "3MF (two colours)" : "3MF"], ["step", "STEP"]].map(([f, label]) => (
               <label key={f} className="row" style={{ gap: 6 }}>
                 <input type="checkbox" checked={formats.includes(f)} onChange={(e) => setFormats((cur) => (e.target.checked ? [...cur, f] : cur.filter((x) => x !== f)))} />
                 {label}
@@ -435,7 +478,9 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
                 <button className="btn sm ghost" onClick={() => api.open(job.id, "finder", "05_print/body.stl").catch((e) => toast(e.message, true))}>Show in Finder</button>
               </div>
               <p className="small muted" style={{ margin: 0 }}>
-                The 3MF opens as one object with two parts: body on filament 1, base on filament 2. Load the matching colours in your AMS.
+                {hasBase
+                  ? "The 3MF opens as one object with two parts: body on filament 1, base on filament 2. Load the matching colours in your AMS."
+                  : "The 3MF opens as one part on filament 1. It lies flat on its back, so it needs no supports."}
               </p>
             </>
           )}

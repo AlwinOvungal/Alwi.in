@@ -129,6 +129,66 @@ def magnet_cutter(diameter: float, depth: float, clearance: float) -> mf.Manifol
     return mf.Manifold.cylinder(h + 0.01, d / 2, d / 2, 64).translate((0, 0, -0.01))
 
 
+# ---- magnet and keychain formats ---------------------------------------------------
+
+def _largest(m: mf.Manifold) -> mf.Manifold:
+    parts = m.decompose()
+    return max(parts, key=lambda p: p.volume()) if parts else m
+
+
+def lay_flat(body: mf.Manifold, thickness: float) -> mf.Manifold:
+    """Keep the front of a standing body and lay it on its new flat back.
+
+    Standing, the object's front faces −y. We keep the front `thickness` mm of it
+    (all of it if it's thinner), then rotate −90° about X: the cut face goes onto
+    the bed (z = 0) and the object's top points to +y.
+    """
+    bb = body.bounding_box()
+    ymin, ymax = bb[1], bb[4]
+    depth = ymax - ymin
+    kept = min(depth, max(thickness, 2.0))
+    if kept < depth - 1e-6:
+        body = _largest(body.trim_by_plane((0, -1, 0), -(ymin + kept)))
+    body = body.rotate((-90, 0, 0))
+    bb = body.bounding_box()
+    lo, hi = np.array(bb[:3]), np.array(bb[3:])
+    centre = (lo[:2] + hi[:2]) / 2
+    return body.translate((-centre[0], -centre[1], -lo[2]))
+
+
+def add_ring(body: mf.Manifold, ring: dict[str, Any], warnings: list[str]) -> mf.Manifold:
+    """A flat key-ring loop on top of a body lying on its back (top = +y)."""
+    outer = float(ring.get("outer_radius_mm", 4.5))
+    hole_r = float(ring.get("hole_mm", 4.5)) / 2
+    if outer - hole_r < 1.5:
+        outer = hole_r + 1.5
+        warnings.append("The key-ring loop was widened to keep its wall at least 1.5 mm.")
+    bb = body.bounding_box()
+    thickness = min(float(ring.get("thickness_mm", 3.5)), bb[5] - bb[2])
+    # find the top of the shape where the loop will be (a slice through the loop's height),
+    # so hollow objects like an open cup still get a solid attachment point
+    pts = np.concatenate([np.asarray(p) for p in body.slice(thickness / 2).to_polygons()] or [np.zeros((0, 2))])
+    if len(pts) == 0:
+        warnings.append("Couldn't find a place for the key-ring loop.")
+        return body
+    ytop = float(pts[:, 1].max())
+    near_top = pts[pts[:, 1] > ytop - 0.6]
+    x_top = float(near_top[np.argmin(np.abs(near_top[:, 0] - (bb[0] + bb[3]) / 2)), 0])
+    cy = ytop + hole_r + 0.6  # the hole sits just clear of the body
+    stem_w = outer * 1.2
+    stem_bottom = ytop - 3.0  # the stem reaches 3 mm into the body for a strong joint
+    shape = mf.CrossSection.circle(outer, 64) + mf.CrossSection.square((stem_w, cy - stem_bottom)).translate(
+        (-stem_w / 2, stem_bottom - cy)
+    )
+    shape = shape - mf.CrossSection.circle(hole_r, 48)
+    loop = shape.extrude(thickness).translate((x_top, cy, 0))
+    joined = body + loop
+    if len(joined.decompose()) > 1:
+        warnings.append("The key-ring loop doesn't touch the object; check it in the slicer.")
+        return body
+    return joined
+
+
 # ---- main ----------------------------------------------------------------------
 
 def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | None = None) -> PrintResult:
@@ -139,7 +199,9 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     warnings: list[str] = []
 
     height = float(geo.get("height_mm", 50))
-    use_base = bool(base_p.get("enabled", True))
+    flat = params.get("flat_back") or {}
+    ring_p = params.get("ring") or {}
+    use_base = bool(base_p.get("enabled", True)) and not flat.get("enabled")
     base_t = float(base_p.get("thickness_mm", 3)) if use_base else 0.0
     flat_cut = float(geo.get("flat_cut", 0.03))
     body_h = height - base_t + (SINK_MM if use_base else 0.0)
@@ -207,6 +269,13 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     z0 = (base_t - SINK_MM) if use_base else 0.0
     body_m = body_m.translate((-centre[0], -centre[1], z0 - lo[2]))
 
+    if flat.get("enabled"):
+        say(0.76, "Making a flat back")
+        body_m = lay_flat(body_m, float(flat.get("thickness_mm", 8)))
+        if ring_p.get("enabled"):
+            say(0.8, "Adding the key-ring loop")
+            body_m = add_ring(body_m, ring_p, warnings)
+
     base_m = None
     verts = np.asarray(body_m.to_mesh().vert_properties)[:, :3]
     if use_base:
@@ -221,6 +290,12 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
         needed = float(mag["depth_mm"]) + 0.8
         if base_m is not None and base_t >= needed:
             base_m = base_m - cutter
+        elif base_m is None:
+            # the pocket plus 0.8 mm of roof must sit inside the body
+            probe = magnet_cutter(float(mag["diameter_mm"]), needed, float(mag.get("clearance_mm", 0.15)))
+            if (body_m ^ probe).volume() < 0.97 * probe.volume():
+                warnings.append("The body is thin or narrow where the magnet goes; check the pocket in the slicer.")
+            body_m = body_m - cutter
         else:
             body_m = body_m - cutter
             if base_m is not None:
@@ -231,6 +306,7 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     body_t = to_trimesh(body_m)
     base_tm = to_trimesh(base_m) if base_m is not None else None
     report = _report(body_t, base_tm, pitch, min_feat, thin_removed, warnings)
+    report["format"] = params.get("format", "stand")
     say(1.0, "Ready to print")
     return PrintResult(body_t, base_tm, report)
 
@@ -239,7 +315,7 @@ def _overhang_pct(m: trimesh.Trimesh, floor_z: float) -> float:
     n = m.face_normals
     a = m.area_faces
     c = m.triangles_center
-    down = (n[:, 2] < -math.cos(math.radians(45))) & (c[:, 2] > floor_z + 0.3)
+    down = (n[:, 2] < -math.cos(math.radians(45))) & (c[:, 2] > floor_z + 1.5)  # edges at the bed print fine
     return float(a[down].sum() / max(a.sum(), 1e-9) * 100)
 
 

@@ -102,7 +102,7 @@ function NewObject({ styleId }: { styleId: string }) {
       <div className="card panel stack" style={{ alignContent: "start" }}>
         <img src={preview} alt="" style={{ aspectRatio: "1", objectFit: "contain", background: "#fff", borderRadius: 10, border: "1px solid var(--line)" }} />
         <label className="field">
-          <span>What is it?</span>
+          <span>What is the object?</span>
           <input
             className="input"
             autoFocus
@@ -112,6 +112,7 @@ function NewObject({ styleId }: { styleId: string }) {
             onKeyDown={(e) => e.key === "Enter" && create()}
           />
         </label>
+        <span className="small muted">Name the thing itself. You can make it a keychain, magnet or stand later.</span>
         <div className="row">
           <button className="btn primary grow" onClick={create} disabled={busy}>
             {busy ? "Removing background…" : "Start"}

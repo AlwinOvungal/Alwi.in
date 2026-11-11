@@ -18,7 +18,12 @@ export interface Candidate {
   engine: string;
 }
 
+export type PrintFormat = "stand" | "magnet" | "keychain";
+
 export interface PrintParams {
+  format: PrintFormat;
+  flat_back: { enabled: boolean; thickness_mm: number };
+  ring: { enabled: boolean; outer_radius_mm: number; hole_mm: number; thickness_mm: number };
   geometry: {
     height_mm: number;
     voxel_mm: number;
@@ -58,7 +63,7 @@ export interface Job {
   confirmed: (Candidate & { index: number | null }) | null;
   reconstruct: { engine: string; seed: number } | null;
   print_params: PrintParams | null;
-  report: Report | null;
+  report: (Report & { format?: PrintFormat }) | null;
   exports: string[];
   thumbnail: string | null;
   files: string[];
@@ -88,6 +93,7 @@ export interface Style {
   hash: string;
   palette: Record<"body" | "base", { name: string; hex: string }>;
   seeds: number[];
+  formats: { id: PrintFormat; label: string }[];
   has_reference: boolean;
 }
 
@@ -145,7 +151,7 @@ export const api = {
   stylize: (id: string, engine?: string, seed?: number) => req<Job>("POST", `/api/jobs/${id}/stylize`, { engine, seed }),
   confirm: (id: string, candidate: number | null) => req<Job>("POST", `/api/jobs/${id}/confirm`, { candidate }),
   reconstruct: (id: string, engine?: string) => req<Job>("POST", `/api/jobs/${id}/reconstruct`, { engine }),
-  printify: (id: string, overrides: Partial<{ [K in keyof PrintParams]: Partial<PrintParams[K]> }>) =>
+  printify: (id: string, overrides: Partial<{ [K in keyof PrintParams]: PrintParams[K] extends object ? Partial<PrintParams[K]> : PrintParams[K] }>) =>
     req<Job>("POST", `/api/jobs/${id}/printify`, overrides),
   resetPrint: (id: string) => req<Job>("POST", `/api/jobs/${id}/reset-print`),
   export: (id: string, formats: string[]) => req<Job>("POST", `/api/jobs/${id}/export`, { formats }),

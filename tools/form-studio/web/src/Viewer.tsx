@@ -12,6 +12,8 @@ type Props = {
   mode: "print" | "raw";
   bodyColor: string;
   baseColor: string;
+  /** magnets and keychains lie flat: look down at them */
+  flat?: boolean;
 };
 
 function Part({ url, color }: { url: string; color: string }) {
@@ -48,9 +50,15 @@ function Raw({ url, color }: { url: string; color: string }) {
   return <primitive object={scene} />;
 }
 
-export default function Viewer({ bodyUrl, baseUrl, rawUrl, mode, bodyColor, baseColor }: Props) {
+export default function Viewer({ bodyUrl, baseUrl, rawUrl, mode, bodyColor, baseColor, flat }: Props) {
+  const lookDown = flat && mode === "print";
   return (
-    <Canvas shadows camera={{ position: [70, 60, 90], fov: 35, near: 0.5, far: 4000 }} dpr={[1, 2]}>
+    <Canvas
+      key={lookDown ? "flat" : "standing"}
+      shadows
+      camera={{ position: lookDown ? [0, 160, 45] : [70, 60, 90], fov: 35, near: 0.5, far: 4000 }}
+      dpr={[1, 2]}
+    >
       <hemisphereLight args={["#ffffff", "#d9d4c5", 1.1]} />
       <directionalLight position={[60, 120, 80]} intensity={1.6} castShadow shadow-mapSize={[2048, 2048]} />
       <directionalLight position={[-80, 40, -60]} intensity={0.35} />
@@ -83,7 +91,7 @@ export default function Viewer({ bodyUrl, baseUrl, rawUrl, mode, bodyColor, base
         fadeStrength={1.5}
         infiniteGrid
       />
-      <OrbitControls makeDefault enableDamping target={[0, 20, 0]} maxPolarAngle={Math.PI * 0.495} />
+      <OrbitControls makeDefault enableDamping target={[0, lookDown ? 0 : 20, 0]} maxPolarAngle={Math.PI * 0.495} />
     </Canvas>
   );
 }

@@ -135,3 +135,48 @@ def test_parallel_edits_do_not_lose_changes(client, mug_photo):
         assert a.result().status_code == 200 and b.result().status_code == 200
     job = client.get(f"/api/jobs/{jid}").json()
     assert job["print_params"]["magnet"]["enabled"] is True
+
+
+def test_missing_cutout_is_recreated(client, mug_photo):
+    with mug_photo.open("rb") as f:
+        job = client.post("/api/jobs", files={"photo": ("k.png", f, "image/png")}).json()
+    from formstudio.core.job import Job
+
+    folder = Job.load(job["id"]).folder
+    (folder / "01_cutout.png").unlink()
+    (folder / "01_cutout_mask.png").unlink()
+    client.post(f"/api/jobs/{job['id']}/stylize", json={"engine": "preview", "n": 1})
+    job = wait(client, job["id"])
+    assert job["stage"] == "stylized" and (folder / "01_cutout.png").exists()
+
+    # without the original photo there's nothing to rebuild from: a clear message
+    (folder / "01_cutout.png").unlink()
+    next(folder.glob("00_input.*")).unlink()
+    client.post(f"/api/jobs/{job['id']}/stylize", json={"engine": "preview", "n": 1})
+    start = time.time()
+    while time.time() - start < 20:
+        t = client.get(f"/api/jobs/{job['id']}").json()["task"]
+        if t["status"] == "error":
+            assert "photo is missing" in t["error"]
+            break
+        time.sleep(0.1)
+    else:
+        raise AssertionError("expected an error")
+
+
+def test_format_switch_through_the_api(client, mug_photo):
+    with mug_photo.open("rb") as f:
+        jid = client.post("/api/jobs", files={"photo": ("m.png", f, "image/png")}).json()["id"]
+    client.post(f"/api/jobs/{jid}/confirm", json={"candidate": None})
+    client.post(f"/api/jobs/{jid}/reconstruct", json={"engine": "lathe"})
+    wait(client, jid)
+    job = client.post(f"/api/jobs/{jid}/printify", json={"format": "keychain"}).json()
+    assert job["print_params"]["format"] == "keychain" and job["report"]["format"] == "keychain"
+    assert "05_print/base.stl" not in job["files"]
+    job = client.post(f"/api/jobs/{jid}/printify", json={"ring": {"hole_mm": 6}}).json()
+    assert job["print_params"]["format"] == "keychain" and job["print_params"]["ring"]["hole_mm"] == 6
+    job = client.post(f"/api/jobs/{jid}/reset-print").json()
+    assert job["print_params"]["format"] == "keychain" and job["print_params"]["ring"]["hole_mm"] == 4.5
+    assert client.post(f"/api/jobs/{jid}/printify", json={"format": "bookend"}).status_code == 400
+    job = client.post(f"/api/jobs/{jid}/export", json={"formats": ["3mf"]}).json()
+    assert job["stage"] == "exported"
