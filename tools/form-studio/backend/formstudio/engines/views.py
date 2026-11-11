@@ -15,7 +15,7 @@ from PIL import Image
 from .. import paths
 from ..core import views as views_mod
 from . import openai_image
-from .base import VIEW_NAMES, EngineContext, Progress, ViewInput, missing
+from .base import VIEW_NAMES, EngineContext, EngineError, Progress, ViewInput, missing
 from .cloud import _data_uri, _endpoint, _FalEngine, _scaled, make_client
 
 log = logging.getLogger(__name__)
@@ -102,6 +102,56 @@ def mvadapter_dir() -> Path:
     return paths.home() / "vendor" / "MV-Adapter"
 
 
+def _mvadapter_on_path() -> None:
+    """MV-Adapter is a cloned folder (setup-mac.sh --with-views), not an installed package."""
+    if str(mvadapter_dir()) not in sys.path:
+        sys.path.insert(0, str(mvadapter_dir()))
+
+
+def _mv_geometry():
+    """MV-Adapter's geometry helpers, loaded from their file on its own.
+
+    Importing `mvadapter.utils` would also load its mesh tools, which need nvdiffrast (NVIDIA
+    graphics cards only) plus OpenCV and matplotlib, so it can never load on a Mac. The geometry
+    file itself only needs numpy and torch.
+    """
+    import importlib.util
+
+    name = "formstudio_mvadapter_geometry"
+    if name in sys.modules:
+        return sys.modules[name]
+    spec = importlib.util.spec_from_file_location(name, mvadapter_dir() / "mvadapter" / "utils" / "geometry.py")
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    sys.modules[name] = mod
+    return mod
+
+
+def camera_to_world(azimuth_deg: list[float], distance: float = 1.8, device: str = "cpu"):
+    """Camera-to-world matrices for cameras circling the object at eye level.
+
+    Adapted from MV-Adapter's get_c2w (mvadapter/utils/mesh_utils/camera.py, Apache-2.0,
+    github.com/huanngzh/MV-Adapter); that file can't be imported on a Mac (see _mv_geometry).
+    """
+    import math
+
+    import torch
+    import torch.nn.functional as F
+
+    n = len(azimuth_deg)
+    az = torch.tensor(azimuth_deg, dtype=torch.float32, device=device) * math.pi / 180
+    d = torch.full((n,), float(distance), dtype=torch.float32, device=device)
+    pos = torch.stack([d * torch.cos(az), d * torch.sin(az), torch.zeros_like(d)], dim=-1)  # elevation 0
+    up = torch.tensor([0, 0, 1], dtype=torch.float32, device=device)[None, :].repeat(n, 1)
+    lookat = F.normalize(-pos, dim=-1)
+    right = F.normalize(torch.cross(lookat, up, dim=-1), dim=-1)
+    up = F.normalize(torch.cross(right, lookat, dim=-1), dim=-1)
+    c2w3x4 = torch.cat([torch.stack([right, up, -lookat], dim=-1), pos[:, :, None]], dim=-1)
+    c2w = torch.cat([c2w3x4, torch.zeros_like(c2w3x4[:, :1])], dim=1)
+    c2w[:, 3, 3] = 1.0
+    return c2w
+
+
 class LocalViews:
     """MV-Adapter (image → multi-view) on the SDXL you already have. Experimental: needs `setup-mac.sh --with-views`."""
 
@@ -113,7 +163,7 @@ class LocalViews:
     KEEP = {"front": 0, "left": 2, "back": 3}  # 0°, 90°, 180°
 
     def available(self, ctx: EngineContext) -> tuple[bool, str]:
-        why = missing("torch", "diffusers", "transformers")
+        why = missing("torch", "diffusers", "transformers", "einops")
         if why:
             return False, why
         if not (mvadapter_dir() / "mvadapter").is_dir():
@@ -123,8 +173,7 @@ class LocalViews:
     def _pipe(self, ctx: EngineContext):
         from .local import _cached
 
-        if str(mvadapter_dir()) not in sys.path:
-            sys.path.insert(0, str(mvadapter_dir()))
+        _mvadapter_on_path()
 
         def make():
             import torch
@@ -151,21 +200,27 @@ class LocalViews:
 
         _ensure_models("sdxl", progress, 0.0, 0.1)
         _ensure_models("mvadapter", progress, 0.1, 0.3)
-        return _retry_on_oom(lambda: self._make(inp, ctx, progress))
+        try:
+            return _retry_on_oom(lambda: self._make(inp, ctx, progress))
+        except ModuleNotFoundError as e:
+            raise EngineError(
+                f"The free view maker is missing a piece it needs ({e.name}).",
+                str(e),
+                steps=["In Terminal, run ./scripts/setup-mac.sh --with-views again.",
+                       "Or use another view maker: Nano Banana (fal.ai key) or ChatGPT images."],
+            ) from e
 
     def _make(self, inp: ViewInput, ctx: EngineContext, progress: Progress) -> dict[str, Path]:
         import torch
-        from mvadapter.utils.geometry import get_plucker_embeds_from_cameras_ortho  # type: ignore
-        from mvadapter.utils.mesh_utils import get_orthogonal_camera  # type: ignore
 
+        _mvadapter_on_path()
         progress(None, "Loading the view model into memory (only the first time)")
         pipe = self._pipe(ctx)
         n, size, steps = len(self.AZIMUTHS), 768, 40
-        cameras = get_orthogonal_camera(
-            elevation_deg=[0] * n, distance=[1.8] * n, left=-0.55, right=0.55, bottom=-0.55, top=0.55,
-            azimuth_deg=[x - 90 for x in self.AZIMUTHS], device=ctx.device,
-        )
-        control = ((get_plucker_embeds_from_cameras_ortho(cameras.c2w, [1.1] * n, size) + 1.0) / 2.0).clamp(0, 1)
+        # the same cameras as MV-Adapter's own example: eye level, 1.8 away, orthographic scale 1.1
+        c2w = camera_to_world([x - 90 for x in self.AZIMUTHS], 1.8, ctx.device)
+        plucker = _mv_geometry().get_plucker_embeds_from_cameras_ortho(c2w, [1.1] * n, size)
+        control = ((plucker + 1.0) / 2.0).clamp(0, 1)
         # the reference: the object centred at 90% on mid-grey, as MV-Adapter expects
         rgba = Image.open(inp.image).convert("RGBA")
         rgba.putalpha(Image.open(inp.mask).convert("L"))

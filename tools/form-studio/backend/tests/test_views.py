@@ -285,3 +285,80 @@ def test_three_views_button_picks_the_option_and_makes_views(mug_photo, monkeypa
         assert j["task"]["status"] == "done", j["task"]["error"]
         assert j["stage"] == "confirmed" and j["confirmed"]["index"] == 1 and len(j["views"]["files"]) == 3
         c.delete(f"/api/jobs/{jid}")
+
+
+def _fake_mvadapter(root, utils_init="import nvdiffrast  # NVIDIA-only: fails on a Mac\n"):
+    """A stand-in MV-Adapter checkout laid out like the real one."""
+    pkg = root / "mvadapter"
+    for sub in ("utils", "pipelines", "schedulers", "loaders", "models"):
+        (pkg / sub).mkdir(parents=True, exist_ok=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "utils" / "__init__.py").write_text(utils_init)
+    (pkg / "utils" / "geometry.py").write_text(
+        "import torch\n"
+        "def get_plucker_embeds_from_cameras_ortho(c2w, ortho_scale, image_size):\n"
+        "    assert len(c2w) == len(ortho_scale) == 6 and c2w.shape[1:] == (4, 4)\n"
+        "    return torch.zeros(len(c2w), 6, image_size, image_size)\n")
+    (pkg / "pipelines" / "__init__.py").write_text("")
+    (pkg / "pipelines" / "pipeline_mvadapter_i2mv_sdxl.py").write_text(
+        "from types import SimpleNamespace\n"
+        "from PIL import Image\n"
+        "class _Enc:\n"
+        "    def to(self, **kw): return self\n"
+        "class MVAdapterI2MVSDXLPipeline:\n"
+        "    scheduler = None\n"
+        "    cond_encoder = _Enc()\n"
+        "    @classmethod\n"
+        "    def from_pretrained(cls, *a, **kw): return cls()\n"
+        "    def init_custom_adapter(self, num_views): self.n = num_views\n"
+        "    def load_custom_adapter(self, *a, **kw): pass\n"
+        "    def to(self, **kw): return self\n"
+        "    def enable_vae_slicing(self): pass\n"
+        "    def __call__(self, prompt, num_images_per_prompt, callback_on_step_end, control_image, **kw):\n"
+        "        assert control_image.shape[0] == num_images_per_prompt == 6\n"
+        "        callback_on_step_end(self, 0, 0, {})\n"
+        "        colours = [(200,40,30),(0,0,0),(40,160,60),(40,70,200),(0,0,0),(0,0,0)]\n"
+        "        imgs = []\n"
+        "        for c in colours:\n"
+        "            im = Image.new('RGB', (768, 768), (255, 255, 255))\n"
+        "            im.paste(Image.new('RGB', (300, 300), c), (234, 234))\n"
+        "            imgs.append(im)\n"
+        "        return SimpleNamespace(images=imgs)\n")
+    (pkg / "schedulers" / "scheduling_shift_snr.py").write_text(
+        "class ShiftSNRScheduler:\n"
+        "    @staticmethod\n"
+        "    def from_scheduler(s, **kw): return s\n")
+
+
+def test_local_view_maker_works_without_nvidia(confirmed_job, monkeypatch, tmp_path):
+    import sys
+
+    from formstudio.engines import local, views as views_engine
+
+    root = tmp_path / "MV-Adapter"
+    _fake_mvadapter(root)
+    monkeypatch.setattr(views_engine, "mvadapter_dir", lambda: root)
+    monkeypatch.setattr(local, "_ensure_models", lambda *a, **k: None)
+    import diffusers
+
+    monkeypatch.setattr(diffusers.AutoencoderKL, "from_pretrained", classmethod(lambda cls, *a, **k: None))
+    for m in [m for m in sys.modules if m == "mvadapter" or m.startswith("mvadapter.") or m == "formstudio_mvadapter_geometry"]:
+        monkeypatch.delitem(sys.modules, m)
+    local.unload_all()
+    ctx = EngineContext(settings={}, device="cpu")
+    assert VIEWERS["local-views"].available(ctx)[0]
+    pipeline.make_views(confirmed_job, ctx, "local-views", lambda p, m: None)  # utils/__init__ (nvdiffrast) never loads
+    v = pipeline._views(confirmed_job)
+    picked = [max(range(3), key=lambda k: sum(c[k] for c in Image.open(v[n][0]).convert("RGB").resize((32, 32)).getdata()
+                                              if c != (255, 255, 255))) for n in ("front", "left", "back")]
+    assert picked == [0, 1, 2]  # 0°, 90° and 180° of the six turns
+    local.unload_all()
+
+
+def test_cameras_match_mv_adapter():
+    from formstudio.engines.views import camera_to_world
+
+    c2w = camera_to_world([x - 90 for x in [0, 90, 180]])
+    assert tuple(round(float(v), 3) for v in c2w[0, :3, 3]) == (0.0, -1.8, 0.0)  # front camera in front
+    assert tuple(round(float(v), 3) for v in c2w[2, :3, 3]) == (0.0, 1.8, 0.0)  # back camera behind
+    assert float(c2w[0, 3, 3]) == 1.0
