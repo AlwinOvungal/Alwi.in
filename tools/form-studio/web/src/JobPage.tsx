@@ -333,8 +333,11 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
     run(api.stylize(job.id, engine, undefined, count, engine === "local-sdxl" ? quality : undefined));
   };
   const shapeEngine = pickAvailable(engines?.reconstruct, settings?.engines.reconstruct);
+  // "3 views": pick this option and draw its front, side and back (stops options still being made)
+  const views = (i: number) => run(api.useNow(job.id, i, undefined, true));
   // while options are still being made, "Use this" stops the rest and builds the 3D shape at once
-  const use = (i: number) => run(working ? api.useNow(job.id, i, shapeEngine || undefined) : api.confirm(job.id, i));
+  const use = (i: number) =>
+    settings?.views_auto ? views(i) : run(working ? api.useNow(job.id, i, shapeEngine || undefined) : api.confirm(job.id, i));
   const remove = (i: number) => run(api.removeCandidate(job.id, i));
   const clear = () => confirm(`Remove all ${cands.length} options?`) && run(api.clearCandidates(job.id));
 
@@ -351,12 +354,18 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
 
   return (
     <>
-      <div className="row" style={{ justifyContent: "space-between", alignItems: "end" }}>
-        <div className="stack" style={{ gap: 4 }}>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "end", flexWrap: "nowrap" }}>
+        <div className="stack" style={{ gap: 4, flex: 1, minWidth: 0 }}>
           <h2>Pick the one that feels right</h2>
           <span className="muted small">
             {cands.length ? `${cands.length} option${cands.length === 1 ? "" : "s"}. ` : ""}Make as many as you like, from any engine or style, then use one.
           </span>
+          {cands.length > 0 && (
+            <span className="small muted">
+              Next: <b>3 views</b> draws its front, side and back, so the 3D shape gets a real back. Press <b>3 views</b> on an option,
+              or <b>Use this</b> and then Make 3 views.
+            </span>
+          )}
         </div>
         {cands.length > 0 && <button className="btn sm ghost danger" disabled={busy} onClick={clear}>Clear options</button>}
       </div>
@@ -423,6 +432,9 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
                 </button>
                 <button className="btn sm ghost" disabled={busy} onClick={() => remove(i)} aria-label={`Remove option ${c.n ?? i + 1}`}>Remove</button>
               </div>
+              <button className="btn sm views-btn" disabled={busy && !working} onClick={() => views(i)} title="Use this option and draw its front, side and back">
+                3 views · front, side, back
+              </button>
             </div>
           </div>
         ))}
@@ -441,6 +453,7 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
               <span className="row" style={{ gap: 6 }}>
                 <button className="btn sm" disabled={zoom === 0} onClick={() => setZoom(zoom - 1)}>←</button>
                 <button className="btn sm" disabled={zoom === cands.length - 1} onClick={() => setZoom(zoom + 1)}>→</button>
+                <button className="btn sm" disabled={busy && !working} onClick={() => (views(zoom), setZoom(null))}>3 views</button>
                 <button className="btn sm olive" disabled={busy && !working} onClick={() => (use(zoom), setZoom(null))}>{working ? "Use this now →" : "Use this →"}</button>
                 <button className="btn sm ghost" onClick={() => setZoom(null)}>Close</button>
               </span>
@@ -501,6 +514,16 @@ function ViewsCard({ job, busy, engines, settings, run }: StepProps & { engines:
               onDismiss={dismiss}
             />
           )}
+          {engines && !engines.views.some((e) => e.available) && (
+            <div className="note info" style={{ display: "block" }}>
+              <b>No view maker is set up yet.</b> Any one of these works:
+              <ul className="setup-list">
+                {engines.views.map((e) => <li key={e.id}><b>{e.label}:</b> {e.reason}</li>)}
+              </ul>
+              <a className="btn sm" href="#/settings">Set up in Settings</a>
+            </div>
+          )}
+          {engines?.views.some((e) => e.available) && <>
           <label className="field">
             <span>Drawn by</span>
             <select className="select" value={maker} disabled={busy} onChange={(e) => setMaker(e.target.value)}>
@@ -514,6 +537,7 @@ function ViewsCard({ job, busy, engines, settings, run }: StepProps & { engines:
             <button className="btn" disabled={busy || !maker || !chosen?.available} onClick={make}>{has ? "Make again" : "Make 3 views"}</button>
             {has && <button className="btn ghost danger" disabled={busy} onClick={() => run(api.removeViews(job.id))}>Remove views</button>}
           </div>
+          </>}
         </>
       )}
       {zoom !== null && files[zoom] && (

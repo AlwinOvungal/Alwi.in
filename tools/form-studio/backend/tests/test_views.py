@@ -250,3 +250,38 @@ def test_cleanup_finds_and_removes_only_leftovers(mug_photo):
     assert len([d for d in (paths.home() / "bench").iterdir() if d.is_dir()]) == 1  # only the latest is left
     job.delete()
     shutil.rmtree(paths.home() / "bench", ignore_errors=True)
+
+
+def test_three_views_button_picks_the_option_and_makes_views(mug_photo, monkeypatch):
+    class FakeViews:
+        id, label, kind, note = "fake-views", "Fake", "offline", ""
+
+        def available(self, ctx):
+            return True, ""
+
+        def make_views(self, inp, ctx, progress):
+            p = inp.out_dir / "sheet.png"
+            _sheet(False).save(p)
+            return views_mod.split_sheet(p, inp.out_dir)
+
+    monkeypatch.setitem(VIEWERS, "fake-views", FakeViews())
+    with TestClient(app) as c:
+        assert c.put("/api/settings", json={"views_auto": True}).json()["views_auto"] is True
+        c.put("/api/settings", json={"views_auto": False})
+        with mug_photo.open("rb") as f:
+            jid = c.post("/api/jobs", files={"photo": ("m.png", f, "image/png")}, data={"subject": "mug"}).json()["id"]
+        c.post(f"/api/jobs/{jid}/stylize", json={"engine": "preview", "n": 2})
+        for _ in range(200):
+            if c.get(f"/api/jobs/{jid}").json()["task"]["status"] == "done":
+                break
+            time.sleep(0.05)
+        r = c.post(f"/api/jobs/{jid}/use-now", json={"candidate": 1, "engine": "fake-views", "views": True})
+        assert r.status_code == 200, r.text
+        for _ in range(200):
+            j = c.get(f"/api/jobs/{jid}").json()
+            if j["task"]["kind"] == "views" and j["task"]["status"] in ("done", "error"):
+                break
+            time.sleep(0.05)
+        assert j["task"]["status"] == "done", j["task"]["error"]
+        assert j["stage"] == "confirmed" and j["confirmed"]["index"] == 1 and len(j["views"]["files"]) == 3
+        c.delete(f"/api/jobs/{jid}")

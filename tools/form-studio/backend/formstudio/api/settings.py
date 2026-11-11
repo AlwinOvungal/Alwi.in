@@ -21,6 +21,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "sdxl_quality": "best",  # best | quick (SDXL-Lightning) | lightest (SDXL-Turbo, 8 GB Macs)
     "keep_loaded": "auto",  # auto: keep models in memory while they fit | one: one model at a time
     "warm_up": True,  # load the default local engines in the background (app opens, photo added, option picked)
+    "views_auto": False,  # picking an option also makes its front / side / back views
     "candidates": 4,
     "export_formats": ["3mf"],
     "fal": {"endpoints": {}},  # engine id → custom endpoint (Settings → Advanced)

@@ -306,6 +306,7 @@ class SettingsUpdate(BaseModel):
     sdxl_quality: Literal["best", "quick", "lightest"] | None = None
     keep_loaded: Literal["auto", "one"] | None = None
     warm_up: bool | None = None
+    views_auto: bool | None = None
     candidates: int | None = None
     export_formats: list[str] | None = None
     fal: dict[str, Any] | None = None
@@ -762,19 +763,34 @@ def cancel_task(job_id: str) -> dict[str, Any]:
 
 class UseNowBody(BaseModel):
     candidate: int
-    engine: str | None = None
+    engine: str | None = None  # 3D engine (or, with views=True, the view maker)
+    views: bool = False  # make front / side / back views instead of building the shape
 
 
 @app.post("/api/jobs/{job_id}/use-now")
 def use_now(job_id: str, body: UseNowBody) -> dict[str, Any]:
     """Pick an option, even while others are still being made: stop the rest and build the 3D shape at once."""
     job = _job(job_id)
-    engine = body.engine or settings_mod.load()["engines"]["reconstruct"]
-    if engine not in RECONSTRUCTORS:
-        raise HTTPException(400, "Unknown engine")
     if not 0 <= body.candidate < len(job.manifest.get("candidates") or []):
         raise HTTPException(400, "No such option")
     ctx = settings_mod.context()
+    if body.views:
+        # the chosen view maker, else the default, else any that's ready; none ready → just pick the option
+        wanted = [body.engine, ctx.settings["engines"].get("views"), *VIEWERS]
+        maker = next((e for e in wanted if e in VIEWERS and VIEWERS[e].available(ctx)[0]), None)
+
+        def run_views(progress):
+            fresh = Job.load(job_id)
+            pipeline.confirm(fresh, body.candidate)
+            _publish_state(fresh)
+            if maker:
+                pipeline.make_views(fresh, ctx, maker, progress)
+
+        return _queue(job, "views", run_views, replace=True, meta={"engine": maker or "none", "device": ctx.device},
+                      eta_s=_eta("views", maker) if maker else None)
+    engine = body.engine or settings_mod.load()["engines"]["reconstruct"]
+    if engine not in RECONSTRUCTORS:
+        raise HTTPException(400, "Unknown engine")
 
     def run(progress):
         fresh = Job.load(job_id)  # the restyle that was just stopped may have added options

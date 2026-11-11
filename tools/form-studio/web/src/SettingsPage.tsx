@@ -774,6 +774,9 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
             </Group>
             <Group title="3 views · picture → front, side, back" note="Optional, in the Shape step: lets Meshy, TRELLIS and Hunyuan3D see the whole object">
               <EngineList engines={engines.views} value={s.engines.views ?? ""} onChange={(id) => save({ engines: { ...s.engines, views: id } }, "Default view maker saved")} onUnlock={unlock} />
+              <Row title="Make 3 views automatically" desc="Picking an option (Use this) also draws its front, side and back, ready for the 3D shape.">
+                <Switch label="" checked={!!s.views_auto} onChange={(v) => save({ views_auto: v })} />
+              </Row>
             </Group>
             <Group>
               <Row title="Options per Generate" desc="How many pictures each Generate makes. You can change it on each object.">

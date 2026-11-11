@@ -212,6 +212,7 @@ export interface Settings {
   sdxl_quality: Quality;
   keep_loaded: "auto" | "one";
   warm_up: boolean;
+  views_auto?: boolean;
   memory: { ram_gb: number | null; budget_gb: number; loaded: string[] };
   candidates: number;
   export_formats: string[];
@@ -405,7 +406,8 @@ export const api = {
   removeViews: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/views`),
   cleanup: () => req<{ items: CleanupItem[]; total: number }>("GET", "/api/cleanup"),
   runCleanup: (ids: string[]) => req<{ freed: number; items: CleanupItem[]; total: number }>("POST", "/api/cleanup", { ids }),
-  useNow: (id: string, candidate: number, engine?: string) => req<Job>("POST", `/api/jobs/${id}/use-now`, { candidate, engine }),
+  useNow: (id: string, candidate: number, engine?: string, views = false) =>
+    req<Job>("POST", `/api/jobs/${id}/use-now`, { candidate, engine, views }),
   bench: () => req<{ task: Task | null; latest: BenchReport | null; photos: number }>("GET", "/api/bench"),
   startBench: (size: "quick" | "full", compare: boolean) =>
     req<{ task: Task | null; latest: BenchReport | null; photos: number }>("POST", "/api/bench", { size, compare }),
