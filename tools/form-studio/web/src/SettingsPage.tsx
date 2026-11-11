@@ -13,7 +13,7 @@ const FAL_ENGINES: [string, string, string][] = [
 
 function KeyCard(props: {
   title: string;
-  service: "fal" | "anthropic";
+  service: "fal" | "anthropic" | "openai" | "meshy";
   hasKey: boolean;
   hint: string;
   keychain: boolean;
@@ -25,7 +25,7 @@ function KeyCard(props: {
   const { title, service, hasKey, hint, keychain, where, placeholder, save, children } = props;
   const [key, setKey] = useState("");
   const [msg, setMsg] = useState<{ ok: boolean; message: string } | null>(null);
-  const field = service === "fal" ? "fal_key" : "anthropic_key";
+  const field = `${service}_key` as "fal_key" | "anthropic_key" | "openai_key" | "meshy_key";
   return (
     <div className="card panel stack">
       <h2>{title}</h2>
@@ -131,6 +131,53 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
             </select>
           </label>
           <Switch label="Name new objects automatically" checked={s.claude.auto_name} onChange={(v) => save({ claude: { auto_name: v } })} />
+        </KeyCard>
+
+        <KeyCard
+          title="OpenAI key (ChatGPT images)"
+          service="openai"
+          hasKey={s.openai.has_key}
+          hint={s.openai.key_hint}
+          keychain={s.keychain}
+          where="Powers the ChatGPT images restyle engine. Create one at platform.openai.com → API keys (billing must be set up)."
+          placeholder="Paste your OpenAI API key"
+          save={save}
+        >
+          <label className="field">
+            <span>Image model</span>
+            <select className="select" value={s.openai.model} onChange={(e) => save({ openai: { model: e.target.value } })}>
+              <option value="gpt-image-2.5-sunburst">GPT Image 2.5 Sunburst (most precise)</option>
+              <option value="gpt-image-2.5-flare">GPT Image 2.5 Flare</option>
+              <option value="gpt-image-2">GPT Image 2</option>
+            </select>
+          </label>
+          <label className="field">
+            <span>Quality (higher costs more)</span>
+            <select className="select" value={s.openai.quality} onChange={(e) => save({ openai: { quality: e.target.value } })}>
+              <option value="low">Low (cheapest, good for trying ideas)</option>
+              <option value="medium">Medium (recommended)</option>
+              <option value="high">High</option>
+            </select>
+          </label>
+        </KeyCard>
+
+        <KeyCard
+          title="Meshy key (3D)"
+          service="meshy"
+          hasKey={s.meshy.has_key}
+          hint={s.meshy.key_hint}
+          keychain={s.keychain}
+          where="Powers the Meshy image-to-3D engine. API access needs a Meshy Pro plan or higher; create a key at meshy.ai → Settings → API."
+          placeholder="Paste your Meshy API key"
+          save={save}
+        >
+          <label className="field">
+            <span>Meshy model</span>
+            <select className="select" value={s.meshy.ai_model} onChange={(e) => save({ meshy: { ai_model: e.target.value } })}>
+              <option value="latest">Meshy 7.1 (best shapes, ~20 credits)</option>
+              <option value="meshy-6-lite">Meshy 6 Lite (cheaper, ~5 credits)</option>
+            </select>
+          </label>
         </KeyCard>
 
         <KeyCard

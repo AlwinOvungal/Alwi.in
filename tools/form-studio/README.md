@@ -86,17 +86,21 @@ Pick default engines in **Settings**, and switch them for each object as you go.
 | Step | Engine | Cost | Notes |
 |---|---|---|---|
 | Restyle | SDXL + style reference (local) | free | Steered by the style's first reference picture and the photo's depth. About 1–2 min per image on Apple Silicon. 16 GB+ of memory recommended; turn on *Fast mode* on 8 GB Macs. |
+| Restyle | **ChatGPT images** (OpenAI) | a few cents to ~20¢ per image (by quality) | Redraws your object completely in the style, using the photo plus all the style's reference pictures in one call. Needs an OpenAI API key. |
 | Restyle | Nano Banana (fal.ai) | about $0.04 per image | Sees your photo **and all the style's reference pictures**, so the look stays consistent. Needs a fal.ai key. |
 | Restyle | FLUX Kontext (fal.ai) | about $0.025 per image | Strong at keeping the shape; uses only the style's words. Needs a fal.ai key. |
 | Restyle | Palette preview (offline) | free | Instant recolour. No AI. |
 | 3D | TripoSR (local) | free | MIT licence. Under a minute. |
 | 3D | Hunyuan3D-2 mini (local) | free | Better shapes and slower. Install with `--with-hunyuan`. |
+| 3D | **Meshy** (meshy.ai) | ~5–20 credits per object (≈ $0.10–0.40 on the Pro plan) | Strong, print-ready shapes in 1–3 minutes. API access needs a Meshy **Pro plan** (about $20/month); failed jobs are refunded. |
 | 3D | TRELLIS (fal.ai) | about $0.02 per shape | The cheapest cloud 3D, under a minute. Needs a fal.ai key. |
 | 3D | Hunyuan3D-2 mini (fal.ai) | about $0.10 per shape | Detailed shapes in about 30 s. Needs a fal.ai key. |
 | 3D | **Claude Sculpt** (Anthropic) | about $0.02–0.06 per object | Claude rebuilds the object from soft building blocks. Very consistent and toy-like, and the recipe is saved so a rebuild is identical and free. Needs an Anthropic key. |
 | 3D | Lathe / Extrude (offline) | free | Instant. Builds the shape from the silhouette: Lathe suits cups and vases, Extrude suits flat art. |
 
 **Keys** go in **Settings** and are stored in your macOS Keychain, never in a file:
+- **OpenAI key** (from [platform.openai.com](https://platform.openai.com) → API keys; billing must be set up) for ChatGPT images.
+- **Meshy key** (from [meshy.ai](https://www.meshy.ai) → Settings → API; Pro plan or higher) for Meshy 3D.
 - **fal.ai key** (from [fal.ai](https://fal.ai) → Dashboard → Keys) for Nano Banana, FLUX Kontext, TRELLIS and cloud Hunyuan3D.
 - **Anthropic key** (from [console.anthropic.com](https://console.anthropic.com) → API Keys) for Claude Sculpt,
   automatic object naming and "Draft with Claude" on the Styles page.
@@ -109,6 +113,20 @@ capsules, spheres, cylinders, cones and rings, each placed and sized. Form Studi
 model from that recipe ([`primitives.py`](backend/formstudio/core/primitives.py)) and saves it as
 `04_recipe.json`. **Rebuild from Claude's recipe** is free and gives exactly the same shape;
 **Ask Claude again** writes a new recipe.
+
+## Styles: the image *and* the 3D shape
+
+A style isn't a cut-out or a filter. The restyle engines redraw the object completely in the style, and
+the style's **3D finish** then makes the printed *shape* follow it too, whichever engine built the 3D model:
+
+| Built-in style | Restyle | 3D finish |
+|---|---|---|
+| Clay Minimal | matte olive clay, chunky, soft edges | **Soft**: blurred and smoothed, clay-like |
+| Soft Clay | puffy pastel clay toy, squashed cute proportions | **Soft**, extra puffy, small details dropped |
+| Pixel Voxel | 3D pixel art built from cubes, flat colours | **Pixel / voxel**: rebuilt from cubes (block size adjustable), with tiny bevels so it prints cleanly |
+| Low Poly | flat-shaded geometric facets, papercraft | **Low-poly**: reduced to a few hundred flat faces |
+
+You can change the finish for one object in the Print step, or for the whole style on the Styles page.
 
 ## How the style stays consistent
 

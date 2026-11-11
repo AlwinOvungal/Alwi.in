@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { api, Engines, fileUrl, Job, PrintFormat, PrintParams, reached, Settings, Style, styleRefUrl, useJob } from "./api";
+import { api, Engines, fileUrl, Finish, FINISHES, Job, PrintFormat, PrintParams, reached, Settings, Style, styleRefUrl, useJob } from "./api";
 import { StylePicker } from "./Library";
 import { EnginePicker, go, Progress, Slider, Switch, useToast } from "./ui";
 
@@ -274,7 +274,7 @@ function StyleStep({ job, busy, style, settings, run }: StepProps & { style: Sty
                 <img src={fileUrl(job, c.file)} alt={`Option ${i + 1}`} />
                 <span className="cap small">
                   <span>Option {i + 1}</span>
-                  <span className="label">seed {c.seed}</span>
+                  {c.seed != null && <span className="label">seed {c.seed}</span>}
                 </span>
               </button>
             ))}
@@ -399,6 +399,7 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
 
   if (!p) return null;
   const fmt: PrintFormat = p.format ?? "stand";
+  const finish: Finish = p.geometry.finish ?? "soft";
   return (
     <div className="split">
       <div className="stack">
@@ -461,7 +462,22 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           </div>
           <p className="small muted" style={{ margin: 0 }}>{FORMAT_HINT[fmt]}</p>
           <Slider label={fmt === "stand" ? "Height" : "Object height"} unit=" mm" min={15} max={180} step={1} value={p.geometry.height_mm} onChange={(v) => set("geometry", { height_mm: v })} onCommit={(v) => set("geometry", { height_mm: v }, true)} disabled={busy} />
-          <Slider label="Softness" unit=" mm" min={0} max={3} step={0.1} value={p.geometry.soften_mm} onChange={(v) => set("geometry", { soften_mm: v })} onCommit={(v) => set("geometry", { soften_mm: v }, true)} disabled={busy} />
+          <label className="field">
+            <span>3D finish</span>
+            <select className="select" value={finish} disabled={busy} onChange={(e) => set("geometry", { finish: e.target.value as Finish }, true)}>
+              {FINISHES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+            </select>
+            <small className="muted">{FINISHES.find((f) => f.id === finish)?.hint}</small>
+          </label>
+          {finish === "voxel" && (
+            <Slider label="Block size" unit=" mm" min={1} max={8} step={0.25} value={p.geometry.voxel_size_mm ?? 2.5} onChange={(v) => set("geometry", { voxel_size_mm: v })} onCommit={(v) => set("geometry", { voxel_size_mm: v }, true)} disabled={busy} />
+          )}
+          {finish === "faceted" && (
+            <Slider label="Facets" unit="" min={80} max={2000} step={20} value={p.geometry.facets ?? 400} onChange={(v) => set("geometry", { facets: v })} onCommit={(v) => set("geometry", { facets: v }, true)} disabled={busy} />
+          )}
+          {finish === "soft" && (
+            <Slider label="Softness" unit=" mm" min={0} max={3} step={0.1} value={p.geometry.soften_mm} onChange={(v) => set("geometry", { soften_mm: v })} onCommit={(v) => set("geometry", { soften_mm: v }, true)} disabled={busy} />
+          )}
           <Slider label="Thinnest part" unit=" mm" min={0.8} max={5} step={0.1} value={p.geometry.min_feature_mm} onChange={(v) => set("geometry", { min_feature_mm: v })} onCommit={(v) => set("geometry", { min_feature_mm: v }, true)} disabled={busy} />
           <Slider label="Detail (remesh)" unit=" mm" min={0.25} max={1.5} step={0.05} value={p.geometry.voxel_mm} onChange={(v) => set("geometry", { voxel_mm: v })} onCommit={(v) => set("geometry", { voxel_mm: v }, true)} disabled={busy} />
           <div className="divider" />

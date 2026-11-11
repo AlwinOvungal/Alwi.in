@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, Settings, Style, StyleDetail, StyleEdit, styleRefUrl } from "./api";
+import { api, FINISHES, Finish, Settings, Style, StyleDetail, StyleEdit, styleRefUrl } from "./api";
 import { go, Slider, useToast } from "./ui";
 
 // ---------------------------------------------------------------- list ----
@@ -103,6 +103,9 @@ const toForm = (s: StyleDetail): Form => ({
     height_mm: s.geometry.height_mm ?? 50,
     soften_mm: s.geometry.soften_mm ?? 0.9,
     min_feature_mm: s.geometry.min_feature_mm ?? 1.6,
+    finish: s.geometry.finish ?? "soft",
+    voxel_size_mm: s.geometry.voxel_size_mm ?? 2.5,
+    facets: s.geometry.facets ?? 400,
   },
 });
 
@@ -163,7 +166,7 @@ export function StyleEditor({ id }: { id: string }) {
         negative_prompt: d.negative_prompt,
         sculpt_guide: d.sculpt_guide,
         palette: { body: d.body, base: d.base },
-        geometry: { ...form.geometry, soften_mm: d.soften_mm, min_feature_mm: d.min_feature_mm },
+        geometry: { ...form.geometry, soften_mm: d.soften_mm, min_feature_mm: d.min_feature_mm, finish: d.finish },
       });
       toast("Claude drafted the style. Review it, then save.");
     } catch (e) {
@@ -294,6 +297,19 @@ export function StyleEditor({ id }: { id: string }) {
 
           <div className="card panel stack">
             <h3>Shape defaults</h3>
+            <label className="field">
+              <span>3D finish</span>
+              <select className="select" value={form.geometry.finish} disabled={ro} onChange={(e) => set({ geometry: { ...form.geometry, finish: e.target.value as Finish } })}>
+                {FINISHES.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
+              </select>
+              <small className="muted">{FINISHES.find((f) => f.id === form.geometry.finish)?.hint} Applied to every object's 3D shape, whichever engine made it.</small>
+            </label>
+            {form.geometry.finish === "voxel" && (
+              <Slider label="Block size" unit=" mm" min={1} max={8} step={0.25} value={form.geometry.voxel_size_mm} disabled={ro} onChange={(v) => set({ geometry: { ...form.geometry, voxel_size_mm: v } })} onCommit={() => {}} />
+            )}
+            {form.geometry.finish === "faceted" && (
+              <Slider label="Facets" unit="" min={80} max={2000} step={20} value={form.geometry.facets} disabled={ro} onChange={(v) => set({ geometry: { ...form.geometry, facets: v } })} onCommit={() => {}} />
+            )}
             <Slider label="Height" unit=" mm" min={15} max={180} step={1} value={form.geometry.height_mm} disabled={ro} onChange={(v) => set({ geometry: { ...form.geometry, height_mm: v } })} onCommit={() => {}} />
             <Slider label="Softness" unit=" mm" min={0} max={3} step={0.1} value={form.geometry.soften_mm} disabled={ro} onChange={(v) => set({ geometry: { ...form.geometry, soften_mm: v } })} onCommit={() => {}} />
             <Slider label="Thinnest part" unit=" mm" min={0.8} max={5} step={0.1} value={form.geometry.min_feature_mm} disabled={ro} onChange={(v) => set({ geometry: { ...form.geometry, min_feature_mm: v } })} onCommit={() => {}} />

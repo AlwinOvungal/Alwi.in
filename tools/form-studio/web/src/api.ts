@@ -18,6 +18,13 @@ export interface Candidate {
   engine: string;
 }
 
+export type Finish = "soft" | "voxel" | "faceted";
+export const FINISHES: { id: Finish; label: string; hint: string }[] = [
+  { id: "soft", label: "Soft", hint: "Smooth, rounded clay-like surfaces." },
+  { id: "voxel", label: "Pixel / voxel", hint: "Rebuilt from cubes, like 3D pixel art." },
+  { id: "faceted", label: "Low-poly", hint: "Flat geometric facets, papercraft feel." },
+];
+
 export type PrintFormat = "stand" | "magnet" | "keychain";
 
 export interface PrintParams {
@@ -25,6 +32,9 @@ export interface PrintParams {
   flat_back: { enabled: boolean; thickness_mm: number };
   ring: { enabled: boolean; outer_radius_mm: number; hole_mm: number; thickness_mm: number };
   geometry: {
+    finish?: Finish;
+    voxel_size_mm?: number;
+    facets?: number;
     height_mm: number;
     voxel_mm: number;
     soften_mm: number;
@@ -95,6 +105,7 @@ export interface Style {
   seeds: number[];
   formats: { id: PrintFormat; label: string }[];
   has_reference: boolean;
+  finish: Finish;
   references: number;
   editable: boolean;
 }
@@ -109,7 +120,16 @@ export interface StyleDetail extends Style {
   edit_prompt: string;
   negative_prompt: string;
   sculpt_guide: string;
-  geometry: { height_mm: number; soften_mm: number; min_feature_mm: number };
+  geometry: StyleGeometry;
+}
+
+export interface StyleGeometry {
+  height_mm: number;
+  soften_mm: number;
+  min_feature_mm: number;
+  finish: Finish;
+  voxel_size_mm: number;
+  facets: number;
 }
 
 export interface StyleEdit {
@@ -120,7 +140,7 @@ export interface StyleEdit {
   negative_prompt?: string;
   sculpt_guide?: string;
   palette?: { body: Colour; base: Colour };
-  geometry?: { height_mm: number; soften_mm: number; min_feature_mm: number };
+  geometry?: StyleGeometry;
 }
 
 export interface StyleDraft {
@@ -134,6 +154,7 @@ export interface StyleDraft {
   base: Colour;
   soften_mm: number;
   min_feature_mm: number;
+  finish: Finish;
 }
 
 export const styleRefUrl = (s: Pick<Style, "id" | "version">, n: number) => `/api/styles/${s.id}/references/${n}?v=${s.version}`;
@@ -147,6 +168,8 @@ export interface Settings {
   export_formats: string[];
   fal: { endpoints: Record<string, string>; has_key: boolean; key_hint: string };
   claude: { model: string; effort: string; auto_name: boolean; has_key: boolean; key_hint: string };
+  openai: { model: string; quality: string; has_key: boolean; key_hint: string };
+  meshy: { ai_model: string; has_key: boolean; key_hint: string };
   slicer: "bambu" | "orca" | "prusa";
   keychain: boolean;
 }
@@ -177,14 +200,18 @@ export const api = {
   engines: () => req<Engines>("GET", "/api/engines"),
   settings: () => req<Settings>("GET", "/api/settings"),
   saveSettings: (
-    s: Partial<Omit<Settings, "fal" | "claude">> & {
+    s: Partial<Omit<Settings, "fal" | "claude" | "openai" | "meshy">> & {
       fal?: Partial<Settings["fal"]>;
       claude?: Partial<Settings["claude"]>;
+      openai?: Partial<Settings["openai"]>;
+      meshy?: Partial<Settings["meshy"]>;
       fal_key?: string;
       anthropic_key?: string;
+      openai_key?: string;
+      meshy_key?: string;
     },
   ) => req<Settings>("PUT", "/api/settings", s),
-  testKey: (service: "fal" | "anthropic") => req<{ ok: boolean; message: string }>("POST", `/api/settings/test-key?service=${service}`),
+  testKey: (service: "fal" | "anthropic" | "openai" | "meshy") => req<{ ok: boolean; message: string }>("POST", `/api/settings/test-key?service=${service}`),
   style: (id: string) => req<StyleDetail>("GET", `/api/styles/${id}`),
   createStyle: (s: StyleEdit) => req<StyleDetail>("POST", "/api/styles", s),
   updateStyle: (id: string, s: StyleEdit) => req<StyleDetail>("PUT", `/api/styles/${id}`, s),

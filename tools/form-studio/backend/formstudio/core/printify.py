@@ -50,11 +50,13 @@ def to_manifold(m: trimesh.Trimesh) -> mf.Manifold:
 
 
 def to_trimesh(m: mf.Manifold) -> trimesh.Trimesh:
+    # keep manifold's topology as is: merging vertices that merely touch (as trimesh's
+    # processing does) would turn a valid solid with a pinch point into a "broken" one
     mesh = m.to_mesh()
     return trimesh.Trimesh(
         vertices=np.asarray(mesh.vert_properties)[:, :3].astype(np.float64),
         faces=np.asarray(mesh.tri_verts).astype(np.int64),
-        process=True,
+        process=False,
     )
 
 
@@ -132,10 +134,14 @@ def facet(mesh: trimesh.Trimesh, faces: int, warnings: list[str]) -> trimesh.Tri
     for _ in range(6):
         try:
             low = mesh.simplify_quadric_decimation(face_count=target)
-            to_manifold(low)  # must stay a printable solid
-            return low
+            low.merge_vertices()
+            # must stay a clean printable solid (no pinched edges or vertices)
+            if low.is_watertight and low.is_winding_consistent and len(low.split(only_watertight=False)) == 1:
+                to_manifold(low)
+                return low
         except Exception:
-            target *= 2
+            pass
+        target *= 2
     warnings.append("Couldn't facet this shape cleanly; kept it smooth.")
     return mesh
 
