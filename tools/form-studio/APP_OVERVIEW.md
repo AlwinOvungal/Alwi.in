@@ -86,10 +86,12 @@ Web UI (React + TypeScript + three.js)  web/src/  → built into backend/formstu
    - an engine picker for restyling
    - **Generate N options** or **Skip: use photo as is** (for 2D art, logos, things already in style)
 2. **Style**
-   - a grid of restyled options with seed labels and the style's reference thumbnails
-   - pick one → **Use option N**
-   - **New options** (random seeds) and **Back to style seeds**
-   - *Today each Generate replaces the earlier options; see §9, in progress.*
+   - a generate bar: style · engine · how many (1–4) · **Generate N more**
+   - options **accumulate** across runs (numbered 1, 2, 3…, fresh seeds each run) and appear one by one as each
+     finishes; you can mix engines and styles; each card is labelled with style, engine and seed
+   - each option: **Use this →** (goes to Shape), **Remove**, click to view large (lightbox with ←/→, Esc,
+     Use this); the picked one shows a **Chosen** badge
+   - **Clear options** (with a confirm); going back to pick another option keeps them all and only redoes the shape
 3. **Shape**
    - the chosen image and a 3D engine picker
    - **Build 3D shape** / **Rebuild shape**
@@ -110,17 +112,21 @@ Web UI (React + TypeScript + three.js)  web/src/  → built into backend/formstu
    - every slider rebuilds in seconds (no AI)
 
 ### 4.3 Styles (`#/styles`, `#/styles/<id>`)
-- **Cards** for built-in and your styles. *Layout is broken today (cut-off text and buttons); being fixed, see §9.*
-- **Create:** type a name → a style based on Clay Minimal → opens the editor. *Being replaced by a full "New style"
-  page with pictures, see §9.*
-- **Editor:**
-  - **reference pictures:** up to 4
-  - **Draft with Claude:** writes the words, colours, softness and finish from the pictures
-  - **words:** restyle instruction, image prompt, avoid, sculpt guide
-  - **print colours:** two colour pickers with names
-  - **shape defaults:** 3D finish, block size or facets, height, softness, thinnest part
-  - **Save** bumps the version; Duplicate; Delete
-- Built-in styles are read-only (Duplicate to customise).
+- **Cards:** equal heights, nothing cut off; thumbnail is a collage of the reference pictures or a two-colour block
+  with the finish; colour dots; Built-in / Yours tag. **Customize** on built-ins (makes your copy), **Edit** /
+  **Delete** on yours. A dashed **+ New style** card and a **New style** button.
+- **New style (`#/styles/new`):**
+  - name and a one-line "what should it feel like"
+  - reference pictures (up to 4; drop, click or paste) **before** creating; **make first** / remove
+  - **Start from** any existing style (copies its words, 3D finish and shape settings)
+  - print colours, auto-suggested from the pictures (free, no AI), with **Suggest from pictures** to redo
+  - 3D finish (Soft / Pixel-voxel / Low-poly) with its sliders
+  - optional **Let Claude write the style words** (with an Anthropic key)
+  - **Create style** shows progress (creating → uploading pictures → Claude) and opens the editor
+- **Editor:** sections Look (pictures) · Words · Preview · Draft with Claude · Print colours · 3D shape; pictures
+  save immediately; a sticky **Discard / Save** bar while there are changes (Save bumps the version); a warning if
+  you leave with unsaved changes.
+- Built-in styles open read-only with **Customize this style**.
 
 ### 4.4 Settings (`#/settings`)
 - **Default engines** for restyle and 3D, with cost notes; options per run; Fast mode (SDXL-Turbo).
@@ -195,42 +201,28 @@ The new built-ins have no reference pictures; their words alone set the look.
 
 ## 8. Known rough edges (honest list)
 
-1. **Styles page cards overflow.** Names, dots and buttons get cut off. *Being fixed now.*
-2. **Creating a style** can't take pictures until after creation, and it starts from the olive-clay default. *Being
-   fixed.*
-3. **The Style step replaces the earlier options** on every Generate; you can't build up a set and compare.
-   *Being fixed.*
-4. **Restyle quality depends on the engine.** Local SDXL at the Mac's default 1024 px / 30 steps is decent but slow.
+1. **Restyle quality depends on the engine.** Local SDXL at the Mac's default 1024 px / 30 steps is decent but slow.
    Cloud engines are faster and usually closer to the style.
-5. **Built-in styles other than Clay Minimal have no reference pictures,** so SDXL and Nano Banana match them by
+2. **Built-in styles other than Clay Minimal have no reference pictures,** so SDXL and Nano Banana match them by
    words only.
-6. **TripoSR guesses the back of an object from one image.** Thin parts such as a tree's layered fins get thickened
+3. **TripoSR guesses the back of an object from one image.** Thin parts such as a tree's layered fins get thickened
    or merged by printify's minimum feature size.
-7. **First-run waits:** loading the models into memory takes a while even after download, with no detailed progress
+4. **First-run waits:** loading the models into memory takes a while even after download, with no detailed progress
    for that part.
-8. **No undo / history** for print settings; "Reset to style" is the only way back.
-9. **No batch mode in the UI.** The CLI (`formstudio-cli run`) can batch.
-10. **The 3MF hasn't been checked in Bambu Studio / OrcaSlicer yet.**
-11. **Error messages are better but still technical** for library errors; they point to the log.
-12. **Setup needs Terminal** (git, setup script). There's no packaged installer or auto-update.
+5. **No undo / history** for print settings; "Reset to style" is the only way back.
+6. **No batch mode in the UI.** The CLI (`formstudio-cli run`) can batch.
+7. **The 3MF hasn't been checked in Bambu Studio / OrcaSlicer yet.**
+8. **Error messages are better but still technical** for library errors; they point to the log.
+9. **Setup needs Terminal** (git, setup script). There's no packaged installer or auto-update.
 
 ---
 
-## 9. In progress right now
+## 9. Recently finished
 
-- **Styles page cleanup:** equal, tidy cards that never cut off; a picture collage or colour block thumbnail;
-  Customize for built-in styles; a "+ New style" card.
-- **New style page:**
-  - name, description and reference pictures (up to 4) **before** creating
-  - **Start from** any existing style (copies its words and 3D finish)
-  - **Suggest colours from pictures** (free, no AI; already implemented in the backend)
-  - an optional Claude draft
-  - **Create**, then review in the editor
-- **Editor cleanup:** sections (Look · Colours · 3D shape · Words), a sticky Save/Discard bar, a warning when
-  leaving with unsaved changes, multi-picture upload / paste, and "make first" for pictures.
-- **Style step:** generate more options **one after another**; options **accumulate** (mixing engines and styles)
-  and appear as each finishes; **Use this**, **Remove** and **Clear options**; going back to pick a different
-  option keeps them all.
+- **Styles page cleanup**, the **New style** page with pictures at creation, **Start from**, colour suggestions,
+  and the cleaned-up **editor** (save bar, unsaved-changes warning, multi-picture upload / paste, make first).
+- **Style step:** options accumulate across runs and engines, appear one by one, and can be removed, cleared,
+  viewed large and re-picked later.
 
 ---
 

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { api, Engines, fileUrl, Finish, FINISHES, Job, PrintFormat, PrintParams, reached, Settings, Style, styleRefUrl, useJob } from "./api";
+import { api, Candidate, Engines, fileUrl, Finish, FINISHES, Job, PrintFormat, PrintParams, reached, Settings, Style, useJob } from "./api";
 import { StylePicker } from "./Library";
 import { EnginePicker, go, Progress, Slider, Switch, useToast } from "./ui";
 
@@ -125,7 +125,7 @@ export default function JobPage({ id }: { id: string }) {
 
         <section className="step-body" aria-live="polite">
           {step === "photo" && <PhotoStep job={job} busy={busy} engines={engines} settings={settings} run={run} styles={styles} />}
-          {step === "style" && <StyleStep job={job} busy={busy} style={style} settings={settings} run={run} />}
+          {step === "style" && <StyleStep job={job} busy={busy} styles={styles} engines={engines} settings={settings} run={run} />}
           {step === "shape" && <ShapeStep job={job} busy={busy} engines={engines} settings={settings} run={run} />}
           {step === "print" && <PrintStep job={job} busy={busy} style={style} settings={settings} run={run} />}
         </section>
@@ -242,55 +242,120 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
 }
 
 // ---------------------------------------------------------------- 2. style ----
-function StyleStep({ job, busy, style, settings, run }: StepProps & { style: Style | null }) {
-  const [sel, setSel] = useState<number | null>(job.confirmed?.index ?? null);
+function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { styles: Style[]; engines: Engines | null }) {
   const working = busy && job.task?.kind === "stylize";
-  const n = settings?.candidates ?? 4;
+  const [engine, setEngine] = useState("");
+  const [count, setCount] = useState(settings?.candidates ?? 4);
+  const [asked, setAsked] = useState<{ before: number; n: number } | null>(null);
+  const [zoom, setZoom] = useState<number | null>(null);
+  useEffect(() => setEngine((e) => e || pickAvailable(engines?.stylize, job.candidates[job.candidates.length - 1]?.engine ?? settings?.engines.stylize)), [engines, settings]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!working) setAsked(null);
+  }, [working]);
+  const engineLabel = (id: string) => engines?.stylize.find((e) => e.id === id)?.label.replace(/ \(.*\)$/, "") ?? id;
+  const cands = job.candidates;
+  const pending = working && asked ? Math.max(0, asked.n - (cands.length - asked.before)) : 0;
+  const chosen = (c: Candidate) => job.confirmed?.file === c.file;
+
+  const generate = () => {
+    setAsked({ before: cands.length, n: count });
+    run(api.stylize(job.id, engine, undefined, count));
+  };
+  const use = (i: number) => run(api.confirm(job.id, i));
+  const remove = (i: number) => run(api.removeCandidate(job.id, i));
+  const clear = () => confirm(`Remove all ${cands.length} options?`) && run(api.clearCandidates(job.id));
+
+  useEffect(() => {
+    if (zoom === null) return;
+    const key = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setZoom(null);
+      if (e.key === "ArrowRight") setZoom((z) => (z === null ? z : Math.min(cands.length - 1, z + 1)));
+      if (e.key === "ArrowLeft") setZoom((z) => (z === null ? z : Math.max(0, z - 1)));
+    };
+    window.addEventListener("keydown", key);
+    return () => window.removeEventListener("keydown", key);
+  }, [zoom, cands.length]);
 
   return (
     <>
-      <div className="row" style={{ justifyContent: "space-between" }}>
+      <div className="row" style={{ justifyContent: "space-between", alignItems: "end" }}>
         <div className="stack" style={{ gap: 4 }}>
           <h2>Pick the one that feels right</h2>
-          <span className="muted small">Same photo + same seeds = same options. Generate more for new seeds.</span>
+          <span className="muted small">
+            {cands.length ? `${cands.length} option${cands.length === 1 ? "" : "s"}. ` : ""}Make as many as you like, from any engine or style, then use one.
+          </span>
         </div>
-        {style && style.references > 0 && (
-          <div className="row" style={{ gap: 6 }}>
-            {Array.from({ length: Math.min(style.references, 3) }, (_, i) => (
-              <img key={i} src={styleRefUrl(style, i)} alt={`Style reference ${i + 1}`} style={{ width: 48, height: 58, objectFit: "cover", borderRadius: 8, border: "1px solid var(--line)" }} />
-            ))}
-            <span className="small muted">{style.name}<br />references</span>
-          </div>
-        )}
+        {cands.length > 0 && <button className="btn sm ghost danger" disabled={busy} onClick={clear}>Clear options</button>}
+      </div>
+
+      <div className="card panel generate-bar">
+        <label className="field">
+          <span>Style</span>
+          <select className="select" value={job.style.id} disabled={busy} onChange={(e) => run(api.setJobStyle(job.id, e.target.value))}>
+            {styles.map((st) => <option key={st.id} value={st.id}>{st.name}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span>Engine</span>
+          <select className="select" value={engine} disabled={busy} onChange={(e) => setEngine(e.target.value)}>
+            {engines?.stylize.map((e) => <option key={e.id} value={e.id} disabled={!e.available}>{e.label}{e.available ? "" : " (not set up)"}</option>)}
+          </select>
+        </label>
+        <label className="field">
+          <span>How many</span>
+          <select className="select" value={count} disabled={busy} onChange={(e) => setCount(Number(e.target.value))}>
+            {[1, 2, 3, 4].map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+        </label>
+        <button className="btn olive" disabled={busy || !engine} onClick={generate}>
+          {cands.length ? `Generate ${count} more` : `Generate ${count} option${count === 1 ? "" : "s"}`}
+        </button>
       </div>
 
       {working && job.task && <div className="card panel"><Progress task={job.task} /></div>}
 
       <div className="cands">
-        {working && job.candidates.length === 0
-          ? Array.from({ length: n }, (_, i) => <div key={i} className="skeleton" />)
-          : job.candidates.map((c, i) => (
-              <button key={c.file} className={`card cand ${sel === i ? "sel" : ""}`} onClick={() => setSel(i)} disabled={working}>
-                <img src={fileUrl(job, c.file)} alt={`Option ${i + 1}`} />
-                <span className="cap small">
-                  <span>Option {i + 1}</span>
-                  {c.seed != null && <span className="label">seed {c.seed}</span>}
-                </span>
-              </button>
-            ))}
+        {cands.map((c, i) => (
+          <div key={c.file} className={`card cand ${chosen(c) ? "sel" : ""}`}>
+            <button className="cand-img" onClick={() => setZoom(i)} aria-label={`View option ${c.n ?? i + 1} large`}>
+              <img src={fileUrl(job, c.file)} alt={`Option ${c.n ?? i + 1}`} loading="lazy" />
+              {chosen(c) && <span className="chip chosen">Chosen</span>}
+            </button>
+            <div className="cand-meta">
+              <div className="row" style={{ justifyContent: "space-between", gap: 6 }}>
+                <strong>Option {c.n ?? i + 1}</strong>
+                {c.seed != null && <span className="label">seed {c.seed}</span>}
+              </div>
+              <span className="small muted cand-sub">{c.style_name ?? ""}{c.style_name ? " · " : ""}{engineLabel(c.engine)}</span>
+              <div className="row" style={{ gap: 6 }}>
+                <button className="btn sm olive grow" disabled={busy} onClick={() => use(i)}>{chosen(c) ? "Use again" : "Use this →"}</button>
+                <button className="btn sm ghost" disabled={busy} onClick={() => remove(i)} aria-label={`Remove option ${c.n ?? i + 1}`}>Remove</button>
+              </div>
+            </div>
+          </div>
+        ))}
+        {Array.from({ length: pending }, (_, i) => <div key={`p${i}`} className="skeleton" />)}
       </div>
+      {!cands.length && !working && <p className="empty">No options yet. Pick a style and engine, then Generate.</p>}
 
-      <div className="row">
-        <button className="btn olive" disabled={busy || sel === null} onClick={() => sel !== null && run(api.confirm(job.id, sel))}>
-          Use option {sel !== null ? sel + 1 : ""} →
-        </button>
-        <button className="btn" disabled={busy} onClick={() => run(api.stylize(job.id, job.candidates[0]?.engine, Math.floor(Math.random() * 1e6)))}>
-          New options
-        </button>
-        <button className="btn ghost" disabled={busy} onClick={() => run(api.stylize(job.id, job.candidates[0]?.engine))}>
-          Back to style seeds
-        </button>
-      </div>
+      {zoom !== null && cands[zoom] && (
+        <div className="lightbox" role="dialog" aria-modal="true" onClick={() => setZoom(null)}>
+          <div className="lightbox-inner" onClick={(e) => e.stopPropagation()}>
+            <img src={fileUrl(job, cands[zoom].file)} alt={`Option ${cands[zoom].n ?? zoom + 1}`} />
+            <div className="row" style={{ justifyContent: "space-between" }}>
+              <span className="small">
+                <b>Option {cands[zoom].n ?? zoom + 1}</b> · {cands[zoom].style_name} · {engineLabel(cands[zoom].engine)}
+              </span>
+              <span className="row" style={{ gap: 6 }}>
+                <button className="btn sm" disabled={zoom === 0} onClick={() => setZoom(zoom - 1)}>←</button>
+                <button className="btn sm" disabled={zoom === cands.length - 1} onClick={() => setZoom(zoom + 1)}>→</button>
+                <button className="btn sm olive" disabled={busy} onClick={() => (use(zoom), setZoom(null))}>Use this →</button>
+                <button className="btn sm ghost" onClick={() => setZoom(null)}>Close</button>
+              </span>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

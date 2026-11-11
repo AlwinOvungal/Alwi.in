@@ -16,6 +16,9 @@ export interface Candidate {
   file: string;
   seed: number | null;
   engine: string;
+  n?: number;
+  style_id?: string;
+  style_name?: string;
 }
 
 export type Finish = "soft" | "voxel" | "faceted";
@@ -141,6 +144,7 @@ export interface StyleEdit {
   sculpt_guide?: string;
   palette?: { body: Colour; base: Colour };
   geometry?: StyleGeometry;
+  based_on?: string;
 }
 
 export interface StyleDraft {
@@ -277,11 +281,19 @@ export const api = {
   updateStyle: (id: string, s: StyleEdit) => req<StyleDetail>("PUT", `/api/styles/${id}`, s),
   deleteStyle: (id: string) => req<{ ok: boolean }>("DELETE", `/api/styles/${id}`),
   duplicateStyle: (id: string) => req<StyleDetail>("POST", `/api/styles/${id}/duplicate`),
-  addReference: (id: string, file: File) => {
+  addReferences: (id: string, files: File[]) => {
     const f = new FormData();
-    f.append("image", file);
+    files.forEach((file) => f.append("image", file));
     return req<StyleDetail>("POST", `/api/styles/${id}/references`, f);
   },
+  makeReferenceFirst: (id: string, n: number) => req<StyleDetail>("POST", `/api/styles/${id}/references/${n}/first`),
+  suggestColours: (opts: { files?: File[]; style?: string }) => {
+    const f = new FormData();
+    (opts.files ?? []).forEach((file) => f.append("image", file));
+    return req<{ body: Colour; base: Colour }>("POST", `/api/styles/suggest-colours${opts.style ? `?style=${opts.style}` : ""}`, f);
+  },
+  removeCandidate: (id: string, index: number) => req<Job>("DELETE", `/api/jobs/${id}/candidates/${index}`),
+  clearCandidates: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/candidates`),
   removeReference: (id: string, n: number) => req<StyleDetail>("DELETE", `/api/styles/${id}/references/${n}`),
   draftStyle: (id: string, notes: string) => req<StyleDraft>("POST", `/api/styles/${id}/draft`, { notes }),
   setJobStyle: (id: string, style: string) => req<Job>("POST", `/api/jobs/${id}/style`, { style }),
@@ -298,7 +310,7 @@ export const api = {
   },
   rename: (id: string, patch: { name?: string; subject?: string }) => req<Job>("PATCH", `/api/jobs/${id}`, patch),
   remove: (id: string) => req<{ ok: boolean }>("DELETE", `/api/jobs/${id}`),
-  stylize: (id: string, engine?: string, seed?: number) => req<Job>("POST", `/api/jobs/${id}/stylize`, { engine, seed }),
+  stylize: (id: string, engine?: string, seed?: number, n?: number) => req<Job>("POST", `/api/jobs/${id}/stylize`, { engine, seed, n }),
   confirm: (id: string, candidate: number | null) => req<Job>("POST", `/api/jobs/${id}/confirm`, { candidate }),
   reconstruct: (id: string, engine?: string) => req<Job>("POST", `/api/jobs/${id}/reconstruct`, { engine }),
   printify: (id: string, overrides: Partial<{ [K in keyof PrintParams]: PrintParams[K] extends object ? Partial<PrintParams[K]> : PrintParams[K] }>) =>

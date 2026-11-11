@@ -222,7 +222,7 @@ def _slug(name: str) -> str:
 
 def _unique_id(name: str) -> str:
     base = _slug(name)
-    taken = {s.id for s in list_styles()}
+    taken = {s.id for s in list_styles()} | {"new"}  # "new" is the New style page's address
     if base not in taken:
         return base
     n = 2
