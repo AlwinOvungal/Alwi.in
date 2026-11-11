@@ -129,19 +129,25 @@ Web UI (React + TypeScript + three.js)  web/src/  → built into backend/formstu
 - Built-in styles open read-only with **Customize this style**.
 
 ### 4.4 Settings (`#/settings`)
-- **Default engines** for restyle and 3D, with cost notes; options per run; Fast mode (SDXL-Turbo).
-- **Keys (Keychain), each with Test / Remove:**
-  - **Anthropic:** Claude model and effort, auto-naming
-  - **OpenAI:** image model and quality
-  - **Meshy:** model
-  - **fal.ai:** advanced endpoint overrides
-- **This Mac:** compute device, slicer, default export formats.
-- **Local AI models & engines:**
-  - **Start over:** delete everything, then download in turn ("Step x of y")
-  - **Delete everything**
-  - **Reinstall AI libraries…** (opens Terminal)
-  - **one row per pack:** Download / Resume / Stop / Download fresh / Delete, with GB done, speed and time left
-- **Storage:** every folder with its size and **Show in Finder**.
+- **Summary at the top:** the default restyle engine, the default 3D engine, and how many cloud accounts are connected.
+  Click any of them to jump to its section.
+- **Side list of sections** (it turns into a scrolling tab strip on narrow windows) that highlights where you are:
+  - **Engines**
+    - two radio lists, Restyle and 3D shape, showing the engines that are ready
+    - the rest fold into "N more need setting up"; each has a **Connect …** button that opens the right account
+      and focuses its key field
+    - options per Generate
+  - **Cloud accounts**
+    - one row each for OpenAI, Meshy, Anthropic and fal.ai, showing what it powers and Connected / Not connected
+    - click a row to expand it: key field (or Test key / Remove), then that service's options (model, quality,
+      effort, auto-naming, endpoints)
+  - **Local AI**
+    - compute device and Fast mode
+    - models and engines (x of y ready, size on disk); each row has its status and one main action
+      (Download / Resume / Stop), with Download fresh and Delete under a "•••" menu
+    - a folded **Troubleshooting** group: Start over, Delete all, Reinstall AI libraries
+  - **Printing:** slicer, files to export
+  - **Storage:** total use, a colour bar by folder, and every folder with its size, path and **Show in Finder**
 
 ---
 
