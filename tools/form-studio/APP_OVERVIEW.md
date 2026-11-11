@@ -91,6 +91,12 @@ Web UI (React + TypeScript + three.js)  web/src/  → built into backend/formstu
      finishes; you can mix engines and styles; each card is labelled with style, engine and seed
    - each option: **Use this →** (goes to Shape), **Remove**, click to view large (lightbox with ←/→, Esc,
      Use this); the picked one shows a **Chosen** badge
+   - while options are still being made: **Use this now →** stops the rest and builds the 3D shape straight away,
+     and **Stop** ends the run (the options made so far stay)
+   - with the local SDXL engine, a **Quality** choice: Best · Quick · Lightest
+   - the progress bar shows the time so far and "about N left", based on past runs on this Mac
+   - each finished step in the left rail shows how long it took ("took 48 s", or "reused" for a 3D shape made
+     earlier from the same picture)
    - **Clear options** (with a confirm); going back to pick another option keeps them all and only redoes the shape
 3. **Shape**
    - the chosen image and a 3D engine picker
@@ -142,10 +148,15 @@ Web UI (React + TypeScript + three.js)  web/src/  → built into backend/formstu
     - click a row to expand it: key field (or Test key / Remove), then that service's options (model, quality,
       effort, auto-naming, endpoints)
   - **Local AI**
-    - compute device and Fast mode
+    - compute device; **Restyle quality** (Best · Quick · Lightest); **Keep models loaded** (Automatic · One at a
+      time, showing the Mac's memory and what's loaded); **Get engines ready in the background**
     - models and engines (x of y ready, size on disk); each row has its status and one main action
       (Download / Resume / Stop), with Download fresh and Delete under a "•••" menu
     - a folded **Troubleshooting** group: Start over, Delete all, Reinstall AI libraries
+  - **Speed test**
+    - Quick check (1 photo × 2 runs) or Full (3 × 3), with **Compare** to also run the old way and Quick quality
+    - the results table shows medians with speed-ups, a print-check line and a sheet of the options each way made,
+      plus the full report
   - **Printing:** slicer, files to export
   - **Storage:** total use, a colour bar by folder, and every folder with its size, path and **Show in Finder**
 
@@ -224,6 +235,18 @@ The new built-ins have no reference pictures; their words alone set the look.
 ---
 
 ## 9. Recently finished
+
+- **Speed:**
+  - models stay loaded while they fit, and get ready in the background
+  - **Use this now** while options are generating, and Cancel / Stop everywhere
+  - Quick quality (SDXL-Lightning)
+  - print sliders reuse the voxel work
+  - the same picture reuses its 3D shape
+  - ChatGPT images makes all options in one request; fal runs them in parallel
+  - a built-in **Speed test**
+  - Details in HANDOFF.md, under "Speed machinery".
+- **OpenAI errors** now quote OpenAI's own reason (no credit, rate limit or verification), and short rate limits are
+  waited out. **Test key** also checks that the key can use the chosen image model.
 
 - **Styles page cleanup**, the **New style** page with pictures at creation, **Start from**, colour suggestions,
   and the cleaned-up **editor** (save bar, unsaved-changes warning, multi-picture upload / paste, make first).

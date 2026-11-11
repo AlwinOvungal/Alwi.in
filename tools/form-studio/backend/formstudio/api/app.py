@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import platform
+import re
 import time
 import os
 import subprocess
@@ -14,7 +15,7 @@ import threading
 from collections import defaultdict
 from contextlib import asynccontextmanager, contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, Request, UploadFile
@@ -29,7 +30,9 @@ from ..core.style import get_style, list_styles
 from ..engines import RECONSTRUCTORS, STYLIZERS, describe
 from ..engines.cloud import FalClient
 from . import settings as settings_mod
-from .worker import Bus, Worker
+from ..core import timing
+from ..engines.base import quality_of
+from .worker import BACKGROUND, Bus, Worker
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +43,10 @@ worker = Worker(bus)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     bus.bind(asyncio.get_running_loop())
+    try:
+        _warm_soon()  # get the default local engines ready while you pick a photo
+    except Exception as e:  # never stop the app from opening
+        log.warning("warm-up skipped: %s", e)
     yield
 
 
@@ -78,7 +85,8 @@ def _publish_state(job: Job) -> None:
     bus.publish(job.id, {"type": "job", "job": _view(Job.load(job.id))})
 
 
-def _queue(job: Job, kind: str, fn) -> dict[str, Any]:
+def _queue(job: Job, kind: str, fn, *, meta: dict[str, Any] | None = None, eta_s: float | None = None,
+           replace: bool = False) -> dict[str, Any]:
     def run(progress):
         try:
             with _job_locks[job.id]:
@@ -87,10 +95,39 @@ def _queue(job: Job, kind: str, fn) -> dict[str, Any]:
             _publish_state(job)
 
     try:
-        worker.submit(job.id, kind, run)
+        worker.submit(job.id, kind, run, meta=meta, eta_s=eta_s, replace=replace)
     except RuntimeError as e:
         raise HTTPException(409, str(e))
     return _view(job)
+
+
+WARM = "_warm"
+
+
+def _warm_soon(stylize: bool = True, reconstruct: bool = True) -> None:
+    """Load the default local engines in the background (low priority, only what's downloaded and fits)."""
+    s = settings_mod.load()
+    if not s.get("warm_up", True):
+        return
+    st = s["engines"]["stylize"] if stylize else None
+    rc = s["engines"]["reconstruct"] if reconstruct else None
+    if st != "local-sdxl" and rc != "triposr":
+        return
+    if worker.busy(WARM):
+        return
+    from ..engines import local
+
+    ctx = settings_mod.context()
+    try:
+        worker.submit(WARM, "warm", lambda p: local.warm(ctx, st, rc), priority=BACKGROUND)
+    except RuntimeError:
+        pass
+
+
+def _eta(kind: str, engine: str, n: int = 1, quality: str | None = None) -> float | None:
+    """Expected seconds for a task, from past runs on this Mac (None until there's history)."""
+    per = timing.estimate(f"task.{kind}", per="n" if kind == "stylize" else None, engine=engine, quality=quality)
+    return per * n if per else None
 
 
 def _bad(e: Exception) -> HTTPException:
@@ -243,7 +280,9 @@ def engines() -> dict[str, Any]:
 class SettingsUpdate(BaseModel):
     engines: dict[str, str] | None = None
     device: str | None = None
-    fast_mode: bool | None = None
+    sdxl_quality: Literal["best", "quick", "lightest"] | None = None
+    keep_loaded: Literal["auto", "one"] | None = None
+    warm_up: bool | None = None
     candidates: int | None = None
     export_formats: list[str] | None = None
     fal: dict[str, Any] | None = None
@@ -279,7 +318,14 @@ def put_settings(body: SettingsUpdate) -> dict[str, Any]:
                 raise HTTPException(400, f"Unknown engine {eid} for {step}")
     if "candidates" in update:
         update["candidates"] = max(1, min(8, update["candidates"]))
-    return settings_mod.public(settings_mod.save(update))
+    saved = settings_mod.save(update)
+    if update.get("keep_loaded") == "one":
+        from ..engines import local
+
+        local.configure(saved)
+    if {"engines", "sdxl_quality", "warm_up", "keep_loaded"} & update.keys():
+        _warm_soon()
+    return settings_mod.public(saved)
 
 
 @app.post("/api/settings/test-key")
@@ -299,6 +345,19 @@ def test_key(service: str = "fal") -> dict[str, Any]:
         except anthropic.APIError as e:
             return {"ok": False, "message": f"Couldn't check the key: {e.__class__.__name__}"}
         return {"ok": True, "message": "Key works."}
+    if service == "openai":
+        model = (settings_mod.load().get("openai") or {}).get("model") or "gpt-image-2.5-sunburst"
+        try:
+            r = httpx.get(f"https://api.openai.com/v1/models/{model}", headers={"Authorization": f"Bearer {key}"}, timeout=20)
+        except httpx.HTTPError as e:
+            return {"ok": False, "message": f"Couldn't reach OpenAI: {e.__class__.__name__}"}
+        if r.status_code == 401:
+            return {"ok": False, "message": "OpenAI rejected this key."}
+        if r.status_code in (403, 404):
+            return {"ok": False, "message": f"The key works, but it can't use {model}. Pick another image model below, or check the key's project permissions."}
+        if r.status_code >= 400:
+            return {"ok": False, "message": f"Unexpected answer from OpenAI ({r.status_code})."}
+        return {"ok": True, "message": f"Key works and can use {model}. Credit and per-minute limits are only checked when you generate; if that fails, the message shows OpenAI's reason."}
     if service in ("openai", "meshy"):
         url, auth = {
             "openai": ("https://api.openai.com/v1/models", f"Bearer {key}"),
@@ -318,6 +377,71 @@ def test_key(service: str = "fal") -> dict[str, Any]:
     except Exception as e:
         return {"ok": False, "message": f"Couldn't reach fal.ai: {e}"}
     return {"ok": ok, "message": "Key works." if ok else "fal.ai rejected this key."}
+
+
+# ---- speed test --------------------------------------------------------------------
+
+BENCH = "_bench"
+
+
+class BenchBody(BaseModel):
+    size: Literal["quick", "full"] = "quick"  # quick: 1 photo × 2 runs; full: 3 photos × 3 runs
+    compare: bool = True  # also run "before" and Quick quality
+
+
+def _bench_state() -> dict[str, Any]:
+    from ..core import bench
+
+    t = worker.tasks.get(BENCH)
+    return {"task": t.public() if t else None, "latest": bench.latest(), "photos": len(bench.pick_photos(3))}
+
+
+@app.get("/api/bench")
+def bench_state() -> dict[str, Any]:
+    return _bench_state()
+
+
+@app.post("/api/bench")
+def start_bench(body: BenchBody) -> dict[str, Any]:
+    from ..core import bench
+
+    photos = bench.pick_photos(1 if body.size == "quick" else 3)
+    if not photos:
+        raise HTTPException(400, "Add at least one object first: the speed test uses your photos.")
+    s = settings_mod.load()
+    ctx = settings_mod.context()
+    variants = ["before", "best", "quick"] if body.compare else ["best"]
+    runs = 2 if body.size == "quick" else 3
+
+    def run(progress):
+        bench.run(ctx, photos, style_id="clay-minimal", stylize_engine=s["engines"]["stylize"],
+                  reconstruct_engine=s["engines"]["reconstruct"], variants=variants, runs=runs,
+                  options=4, progress=progress)
+
+    try:
+        worker.submit(BENCH, "bench", run, meta={"kind": body.size})
+    except RuntimeError:
+        raise HTTPException(409, "A speed test is already running.")
+    return _bench_state()
+
+
+@app.post("/api/bench/cancel")
+def cancel_bench() -> dict[str, Any]:
+    worker.cancel(BENCH)
+    return _bench_state()
+
+
+@app.get("/api/bench/files/{name}")
+def bench_file(name: str):
+    from ..core import bench
+
+    report = bench.latest()
+    if not report or not re.fullmatch(r"[a-z0-9_]+\.(png|md|json)", name):
+        raise HTTPException(404, "Not found")
+    f = Path(report["folder"]) / name
+    if not f.exists():
+        raise HTTPException(404, "Not found")
+    return FileResponse(f)
 
 
 # ---- local AI models and engines ---------------------------------------------------
@@ -492,7 +616,7 @@ def open_storage(body: StorageOpen) -> dict[str, bool]:
 
 @app.get("/api/jobs")
 def list_jobs() -> list[dict[str, Any]]:
-    return [_view(j) for j in Job.all()]
+    return [_view(j) for j in Job.all() if not j.manifest.get("bench")]
 
 
 @app.post("/api/jobs")
@@ -518,6 +642,7 @@ def create_job(
         suggested = pipeline.suggest_name(settings_mod.context(), job)
         if suggested:
             job.update(subject=suggested, name=suggested if not name.strip() else job.manifest["name"])
+    _warm_soon()
     return _view(job)
 
 
@@ -551,6 +676,7 @@ class StylizeBody(BaseModel):
     engine: str | None = None
     n: int | None = None
     seed: int | None = None  # start seed; default uses the style's fixed seeds
+    quality: Literal["best", "quick", "lightest"] | None = None  # local SDXL only; default from Settings
 
 
 @app.post("/api/jobs/{job_id}/stylize")
@@ -569,8 +695,46 @@ def stylize(job_id: str, body: StylizeBody) -> dict[str, Any]:
     else:
         seeds = [body.seed + i for i in range(n)]
     ctx = settings_mod.context()
+    if body.quality:
+        ctx.settings = {**ctx.settings, "sdxl_quality": body.quality}
+    q = quality_of(ctx.settings) if engine == "local-sdxl" else None
     return _queue(job, "stylize", lambda p: pipeline.stylize(job, ctx, engine, seeds, p,
-                                                             on_candidate=lambda: _publish_state(job)))
+                                                             on_candidate=lambda: _publish_state(job)),
+                  meta={"engine": engine, "n": n, "quality": q, "device": ctx.device}, eta_s=_eta("stylize", engine, n, q))
+
+
+@app.post("/api/jobs/{job_id}/cancel")
+def cancel_task(job_id: str) -> dict[str, Any]:
+    """Stop the running step. Options already made are kept."""
+    job = _job(job_id)
+    worker.cancel(job_id)
+    return _view(job)
+
+
+class UseNowBody(BaseModel):
+    candidate: int
+    engine: str | None = None
+
+
+@app.post("/api/jobs/{job_id}/use-now")
+def use_now(job_id: str, body: UseNowBody) -> dict[str, Any]:
+    """Pick an option, even while others are still being made: stop the rest and build the 3D shape at once."""
+    job = _job(job_id)
+    engine = body.engine or settings_mod.load()["engines"]["reconstruct"]
+    if engine not in RECONSTRUCTORS:
+        raise HTTPException(400, "Unknown engine")
+    if not 0 <= body.candidate < len(job.manifest.get("candidates") or []):
+        raise HTTPException(400, "No such option")
+    ctx = settings_mod.context()
+
+    def run(progress):
+        fresh = Job.load(job_id)  # the restyle that was just stopped may have added options
+        pipeline.confirm(fresh, body.candidate)
+        _publish_state(fresh)
+        pipeline.reconstruct(fresh, ctx, engine, progress)
+
+    return _queue(job, "reconstruct", run, replace=True, meta={"engine": engine, "device": ctx.device},
+                  eta_s=_eta("reconstruct", engine))
 
 
 class ConfirmBody(BaseModel):
@@ -604,6 +768,7 @@ def confirm(job_id: str, body: ConfirmBody) -> dict[str, Any]:
                 pipeline.confirm(job, body.candidate)
         except ValueError as e:
             raise _bad(e)
+    _warm_soon(stylize=False)  # the 3D engine is next
     return _view(job)
 
 
@@ -620,7 +785,8 @@ def reconstruct(job_id: str, body: EngineBody) -> dict[str, Any]:
     if not job.reached("confirmed"):
         raise HTTPException(400, "Pick a style candidate first.")
     ctx = settings_mod.context()
-    return _queue(job, "reconstruct", lambda p: pipeline.reconstruct(job, ctx, engine, p))
+    return _queue(job, "reconstruct", lambda p: pipeline.reconstruct(job, ctx, engine, p),
+                  meta={"engine": engine, "device": ctx.device}, eta_s=_eta("reconstruct", engine))
 
 
 class StyleBody(BaseModel):

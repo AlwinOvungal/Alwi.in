@@ -74,7 +74,7 @@ if [ "$REINSTALL_AI" = 1 ]; then
   osascript -e 'tell application id "in.alwi.formstudio" to quit' >/dev/null 2>&1 || true
   pkill -f "formstudio.desktop" >/dev/null 2>&1 || true
   "$VENV/bin/pip" install --force-reinstall --no-cache-dir --no-deps \
-    torch torchvision diffusers transformers accelerate safetensors huggingface-hub rembg onnxruntime
+    torch torchvision diffusers transformers accelerate safetensors huggingface-hub peft rembg onnxruntime
   "$VENV/bin/pip" install --quiet -e "backend[$EXTRAS]"   # put back anything those need
   rm -rf "$FS_HOME/vendor/TripoSR"
 fi
@@ -87,6 +87,9 @@ if ! (cd "$ROOT/backend" && "$VENV/bin/python" -P -c "import formstudio, sys; sy
   exit 1
 fi
 echo "  import check passed"
+if [ "$LOCAL_AI" = 1 ] && ! "$VENV/bin/python" -c "import peft" >/dev/null 2>&1; then
+  echo "  note: peft didn't install, so Quick restyle quality won't be available (Best still works)"
+fi
 
 if [ "$LOCAL_AI" = 1 ]; then
   say "TripoSR (local image → 3D)"
@@ -112,8 +115,8 @@ say "Done"
 cat <<MSG
 Open Form Studio from Launchpad, Spotlight, or ~/Applications, and drag it to your Dock.
 
-Local engines need AI models (SDXL 12 GB, TripoSR 1.9 GB), downloaded once. In the app, open
-Settings → Local AI models to download them with progress and time left, or press Start over
-to delete every model download and fetch fresh copies.
+Local engines need AI models (SDXL 12 GB, TripoSR 1.9 GB, Quick quality add-on 0.4 GB), downloaded
+once. In the app, open Settings → Local AI to download them with progress and time left.
+To see how fast it runs on this Mac, use Settings → Speed test.
 Your objects are saved in $FS_HOME/jobs.
 MSG

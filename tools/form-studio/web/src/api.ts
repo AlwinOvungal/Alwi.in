@@ -6,10 +6,30 @@ export const STAGES: Stage[] = ["new", "cutout", "stylized", "confirmed", "recon
 
 export interface Task {
   kind: string;
-  status: "queued" | "running" | "done" | "error";
+  status: "queued" | "running" | "done" | "error" | "cancelled";
   progress: number;
   message: string;
   error: string | null;
+  /** seconds since it started */
+  elapsed: number;
+  /** expected total seconds, from past runs on this Mac (null until there's history) */
+  eta_s: number | null;
+  cancelling: boolean;
+}
+
+export type Quality = "best" | "quick" | "lightest";
+export const QUALITIES: { id: Quality; label: string; hint: string }[] = [
+  { id: "best", label: "Best", hint: "30 steps. Most faithful to your style pictures; ~1–2 min per option." },
+  { id: "quick", label: "Quick", hint: "SDXL-Lightning, 8 steps. About 3–4× faster; slightly less detail. ~400 MB download once." },
+  { id: "lightest", label: "Lightest", hint: "SDXL-Turbo at 512 px. For 8 GB Macs; loosest match to the style." },
+];
+
+export interface StepTime {
+  seconds: number;
+  engine?: string;
+  cached?: boolean;
+  n?: number;
+  first_option?: number | null;
 }
 
 export interface Candidate {
@@ -19,6 +39,7 @@ export interface Candidate {
   n?: number;
   style_id?: string;
   style_name?: string;
+  quality?: Quality;
 }
 
 export type Finish = "soft" | "voxel" | "faceted";
@@ -74,13 +95,14 @@ export interface Job {
   input: string | null;
   candidates: Candidate[];
   confirmed: (Candidate & { index: number | null }) | null;
-  reconstruct: { engine: string; seed: number } | null;
+  reconstruct: { engine: string; seed: number; cached?: boolean } | null;
   print_params: PrintParams | null;
   report: (Report & { format?: PrintFormat }) | null;
   exports: string[];
   thumbnail: string | null;
   files: string[];
   task: Task | null;
+  timings?: Partial<Record<"cutout" | "stylize" | "reconstruct" | "printify" | "export", StepTime>>;
 }
 
 export interface Engine {
@@ -167,7 +189,10 @@ export interface Settings {
   engines: { stylize: string; reconstruct: string };
   device: string;
   resolved_device: string;
-  fast_mode: boolean;
+  sdxl_quality: Quality;
+  keep_loaded: "auto" | "one";
+  warm_up: boolean;
+  memory: { ram_gb: number | null; budget_gb: number; loaded: string[] };
   candidates: number;
   export_formats: string[];
   fal: { endpoints: Record<string, string>; has_key: boolean; key_hint: string };
@@ -236,6 +261,36 @@ export interface ModelPack {
     message: string;
     error: string | null;
   } | null;
+}
+
+export interface BenchSummary {
+  median: number | null;
+  p90: number | null;
+  n: number;
+}
+export interface BenchVariant {
+  label: string;
+  settings: { keep_loaded: string; quality: string; caches: boolean };
+  warm: Record<string, BenchSummary>;
+  cold: Record<string, number> | null;
+  stages: Record<string, BenchSummary>;
+  checks_ok: boolean;
+}
+export interface BenchReport {
+  when: string;
+  mac: { ram_gb: number; device: string };
+  setup: { style: string; restyle: string; shape: string; photos: number; runs: number; options: number };
+  variants: Record<string, BenchVariant>;
+  skipped: string[];
+  sheet?: string | null;
+}
+
+/** "48 s", "2 min 05 s" */
+export function formatSeconds(s: number | null | undefined) {
+  if (s == null) return "—";
+  if (s < 10) return `${s.toFixed(1)} s`;
+  if (s < 90) return `${Math.round(s)} s`;
+  return `${Math.floor(s / 60)} min ${String(Math.round(s % 60)).padStart(2, "0")} s`;
 }
 
 export function formatBytes(n: number) {
@@ -310,7 +365,14 @@ export const api = {
   },
   rename: (id: string, patch: { name?: string; subject?: string }) => req<Job>("PATCH", `/api/jobs/${id}`, patch),
   remove: (id: string) => req<{ ok: boolean }>("DELETE", `/api/jobs/${id}`),
-  stylize: (id: string, engine?: string, seed?: number, n?: number) => req<Job>("POST", `/api/jobs/${id}/stylize`, { engine, seed, n }),
+  stylize: (id: string, engine?: string, seed?: number, n?: number, quality?: Quality) =>
+    req<Job>("POST", `/api/jobs/${id}/stylize`, { engine, seed, n, quality }),
+  cancel: (id: string) => req<Job>("POST", `/api/jobs/${id}/cancel`),
+  useNow: (id: string, candidate: number, engine?: string) => req<Job>("POST", `/api/jobs/${id}/use-now`, { candidate, engine }),
+  bench: () => req<{ task: Task | null; latest: BenchReport | null; photos: number }>("GET", "/api/bench"),
+  startBench: (size: "quick" | "full", compare: boolean) =>
+    req<{ task: Task | null; latest: BenchReport | null; photos: number }>("POST", "/api/bench", { size, compare }),
+  cancelBench: () => req<unknown>("POST", "/api/bench/cancel"),
   confirm: (id: string, candidate: number | null) => req<Job>("POST", `/api/jobs/${id}/confirm`, { candidate }),
   reconstruct: (id: string, engine?: string) => req<Job>("POST", `/api/jobs/${id}/reconstruct`, { engine }),
   printify: (id: string, overrides: Partial<{ [K in keyof PrintParams]: PrintParams[K] extends object ? Partial<PrintParams[K]> : PrintParams[K] }>) =>

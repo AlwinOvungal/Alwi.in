@@ -1,5 +1,5 @@
 import { createContext, ReactNode, useCallback, useContext, useEffect, useState } from "react";
-import type { Engine, Task } from "./api";
+import { formatSeconds, type Engine, type Task } from "./api";
 
 // ---- routing (hash based: works in the app window and any browser) ----
 export function useRoute(): string[] {
@@ -39,13 +39,51 @@ export function ToastProvider({ children }: { children: ReactNode }) {
 export const useToast = () => useContext(ToastCtx);
 
 // ---- small pieces ----
-export function Progress({ task }: { task: Task }) {
+/** Time left: from the steps done once there's enough progress, else from past runs on this Mac. */
+function timeLeft(task: Task, elapsed: number): number | null {
+  const p = task.progress;
+  if (p > 0.12 && elapsed > 3) return Math.max(0, (elapsed * (1 - p)) / p);
+  if (task.eta_s) return Math.max(0, task.eta_s - elapsed);
+  return null;
+}
+
+function roughly(s: number) {
+  if (s < 10) return "a few seconds left";
+  if (s < 60) return `about ${Math.round(s / 5) * 5} s left`;
+  const m = Math.round(s / 60);
+  return `about ${m} min left`;
+}
+
+export function Progress({ task, onCancel, cancelLabel = "Cancel" }: { task: Task; onCancel?: () => void; cancelLabel?: string }) {
   const indet = task.status === "queued" || task.progress <= 0.01;
+  // the server sends elapsed with each update; keep the clock ticking in between
+  const [base, setBase] = useState({ elapsed: task.elapsed ?? 0, at: Date.now() });
+  const [, tick] = useState(0);
+  useEffect(() => setBase({ elapsed: task.elapsed ?? 0, at: Date.now() }), [task.elapsed, task.status]);
+  const running = task.status === "running";
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(() => tick((n) => n + 1), 1000);
+    return () => clearInterval(t);
+  }, [running]);
+  const elapsed = running ? base.elapsed + (Date.now() - base.at) / 1000 : base.elapsed;
+  const left = running ? timeLeft(task, elapsed) : null;
   return (
     <div className="progress" aria-live="polite">
       <div className="row small">
-        <span className="grow">{task.message}</span>
+        <span className="grow">{task.cancelling ? "Stopping after this step…" : task.message}</span>
+        {running && (
+          <span className="label" title="Time so far">
+            {formatSeconds(elapsed)}
+            {left != null ? ` · ${roughly(left)}` : ""}
+          </span>
+        )}
         {!indet && <span className="label">{Math.round(task.progress * 100)}%</span>}
+        {onCancel && (task.status === "running" || task.status === "queued") && (
+          <button className="btn sm ghost" onClick={onCancel} disabled={task.cancelling}>
+            {task.cancelling ? "Stopping…" : cancelLabel}
+          </button>
+        )}
       </div>
       <div className={`bar ${indet ? "indet" : ""}`}>
         <i style={{ width: `${task.progress * 100}%` }} />

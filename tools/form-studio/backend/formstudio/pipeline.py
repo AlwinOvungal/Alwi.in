@@ -2,13 +2,19 @@
 from __future__ import annotations
 
 import copy
+import hashlib
+import json
 import logging
+import os
 import shutil
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
+from . import paths
 from .core import export as export_mod
+from .core import timing
 from .core import ingest, printify as printify_mod
 from .core.job import CANDIDATES, CONFIRMED, CUTOUT, PRINT_DIR, RAW_MESH, Job
 from .core.style import get_style
@@ -48,7 +54,10 @@ def create(photo: Path, name: str, subject: str, style_id: str) -> Job:
     job.save()
     log.info("%s: created from %s", job.id, photo.name)
     try:
-        info = ingest.cutout(dest, job.path(CUTOUT))
+        t0 = time.perf_counter()
+        with timing.stage("cutout"):
+            info = ingest.cutout(dest, job.path(CUTOUT))
+        _note_time(job, "cutout", time.perf_counter() - t0)
         if not _cutout_files_exist(job):
             raise OSError("the cut-out image wasn't saved")
     except Exception:
@@ -84,9 +93,19 @@ def _next_candidate_number(job: Job) -> int:
     return max(nums + files + [0]) + 1
 
 
+def _note_time(job: Job, step: str, seconds: float, **facts: Any) -> None:
+    """Remember how long a step took on this object, so the app can say "took 48 s"."""
+    job.manifest.setdefault("timings", {})[step] = {"seconds": round(seconds, 1), **facts}
+
+
 def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], progress: Progress,
             on_candidate: Callable[[], None] | None = None) -> None:
-    """Make more options. They're added to the ones already there, one at a time as each finishes."""
+    """Make more options. They're added to the ones already there, and each appears as soon as it's ready.
+
+    Engines that make several pictures in one request (batch) get all seeds at once; cloud engines that
+    take one picture per request (parallel) run side by side; local engines go one at a time on the GPU.
+    Cancelling keeps every option already made.
+    """
     style = get_style(job.manifest["style"]["id"])
     engine = STYLIZERS[engine_id]
     ok, why = engine.available(ctx)
@@ -98,26 +117,30 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
     out_dir.mkdir(parents=True, exist_ok=True)
     cut = job.path(CUTOUT)
     n = len(seeds)
-    made = 0
-    for i, seed in enumerate(seeds):
-        tmp = out_dir / ".run"
+    t0 = time.perf_counter()
+    made = [0]
+    first: list[float] = []
+
+    def inp(seed_list: list[int], tmp: Path) -> StylizeInput:
+        return StylizeInput(cut, cut.with_name(cut.stem + "_mask.png"), style, job.manifest["subject"], seed_list, tmp)
+
+    def fresh(tmp: Path) -> Path:
         shutil.rmtree(tmp, ignore_errors=True)
         tmp.mkdir()
-        results = engine.stylize(
-            StylizeInput(cut, cut.with_name(cut.stem + "_mask.png"), style, job.manifest["subject"], [seed], tmp),
-            ctx, lambda p, m, i=i: progress(None if p is None else (i + p) / n, f"Option {i + 1} of {n}: {m}"),
-        )
-        for r in results:
-            num = _next_candidate_number(job)
-            name = f"candidate_{num}.png"
-            (tmp / r["file"]).replace(out_dir / name)
-            job.manifest.setdefault("candidates", []).append({
-                **r, "n": num, "file": f"{CANDIDATES}/{name}", "engine": engine_id,
-                "style_id": style.id, "style_name": style.name,
-                "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
-            })
-            made += 1
-        shutil.rmtree(tmp, ignore_errors=True)
+        return tmp
+
+    def add(tmp: Path, r: dict) -> None:
+        num = _next_candidate_number(job)
+        name = f"candidate_{num}.png"
+        (tmp / r["file"]).replace(out_dir / name)
+        job.manifest.setdefault("candidates", []).append({
+            **r, "n": num, "file": f"{CANDIDATES}/{name}", "engine": engine_id,
+            "style_id": style.id, "style_name": style.name,
+            "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        })
+        made[0] += 1
+        if not first:
+            first.append(time.perf_counter() - t0)
         job.manifest["style"]["hash"] = style.hash
         if not job.reached("stylized"):
             job.set_stage("stylized")
@@ -125,7 +148,53 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
             job.save()
         if on_candidate:
             on_candidate()  # show it in the app straight away
-    log.info("%s: %d new options (%d in total)", job.id, made, len(job.manifest["candidates"]))
+
+    try:
+        if getattr(engine, "batch", False):
+            tmp = fresh(out_dir / ".run")
+            for r in engine.stylize(inp(seeds, tmp), ctx, progress):
+                add(tmp, r)
+        elif getattr(engine, "parallel", 0) > 1 and n > 1:
+            fracs = [0.0] * n
+
+            def one(i: int, seed: int):
+                tmp = fresh(out_dir / f".run{i}")
+
+                def prog(p: float | None, m: str) -> None:
+                    if p is not None:
+                        fracs[i] = p
+                    progress(sum(fracs) / n, f"{made[0]} of {n} ready · {m}")
+
+                return tmp, engine.stylize(inp([seed], tmp), ctx, prog)
+
+            with ThreadPoolExecutor(max_workers=min(n, int(engine.parallel))) as pool:
+                futures = [pool.submit(one, i, seed) for i, seed in enumerate(seeds)]
+                try:
+                    for f in as_completed(futures):
+                        tmp, results = f.result()
+                        for r in results:
+                            add(tmp, r)
+                except BaseException:
+                    for f in futures:
+                        f.cancel()
+                    raise
+        else:
+            for i, seed in enumerate(seeds):
+                tmp = fresh(out_dir / ".run")
+                results = engine.stylize(
+                    inp([seed], tmp), ctx,
+                    lambda p, m, i=i: progress(None if p is None else (i + p) / n, f"Option {i + 1} of {n}: {m}"),
+                )
+                for r in results:
+                    add(tmp, r)
+    finally:
+        for tmp in out_dir.glob(".run*"):
+            shutil.rmtree(tmp, ignore_errors=True)
+        if made[0]:
+            _note_time(job, "stylize", time.perf_counter() - t0, n=made[0], engine=engine_id,
+                       first_option=round(first[0], 1) if first else None)
+            job.save()
+    log.info("%s: %d new options (%d in total)", job.id, made[0], len(job.manifest["candidates"]))
 
 
 def _reset_keeping_options(job: Job) -> None:
@@ -174,6 +243,46 @@ def use_photo_as_is(job: Job) -> None:
     job.set_stage("confirmed")
 
 
+SHAPE_CACHE = {"enabled": True, "max_bytes": 2 * 1024**3}
+
+
+def _shape_key(job: Job, engine_id: str, ctx: EngineContext, seed: int) -> str | None:
+    """Everything that decides the AI mesh. Offline engines are instant and Claude Sculpt keeps its own recipe,
+    so they aren't cached."""
+    engine = RECONSTRUCTORS[engine_id]
+    if not SHAPE_CACHE["enabled"] or engine.kind == "offline" or engine_id == "claude-sculpt":
+        return None
+    h = hashlib.sha256()
+    for f in (CONFIRMED, "03_confirmed_mask.png"):
+        p = job.path(f)
+        if not p.exists():
+            return None
+        h.update(p.read_bytes())
+    s = ctx.settings
+    facts = {
+        "engine": engine_id, "seed": seed, "version": getattr(engine, "version", 1),
+        "device": ctx.device if engine.kind == "local" else None,
+        "meshy": s.get("meshy") if engine_id == "meshy" else None,
+        "endpoint": ((s.get("fal") or {}).get("endpoints") or {}).get(engine_id),
+    }
+    h.update(json.dumps(facts, sort_keys=True, default=str).encode())
+    return h.hexdigest()[:32]
+
+
+def _shape_dir() -> Path:
+    return paths.home() / "cache" / "shape"
+
+
+def _prune_shapes() -> None:
+    files = sorted(_shape_dir().glob("*.glb"), key=lambda f: f.stat().st_mtime)
+    total = sum(f.stat().st_size for f in files)
+    while files and total > SHAPE_CACHE["max_bytes"]:
+        f = files.pop(0)
+        total -= f.stat().st_size
+        f.unlink(missing_ok=True)
+        f.with_suffix(".json").unlink(missing_ok=True)
+
+
 def reconstruct(job: Job, ctx: EngineContext, engine_id: str, progress: Progress) -> None:
     if not job.reached("confirmed"):
         raise RuntimeError("Pick a style candidate first.")
@@ -187,10 +296,34 @@ def reconstruct(job: Job, ctx: EngineContext, engine_id: str, progress: Progress
     img = job.path(CONFIRMED)
     tmp = job.path("04_raw.tmp.glb")
     style = get_style(job.manifest["style"]["id"])
-    inp = ReconstructInput(img, img.with_name(img.stem + "_mask.png"), seed, tmp, style=style, subject=job.manifest["subject"])
-    info = engine.reconstruct(inp, ctx, lambda p, m: progress(None if p is None else p * 0.8, m))
-    tmp.replace(job.path(RAW_MESH))
-    job.manifest["reconstruct"] = {"engine": engine_id, "seed": seed, **(info or {})}
+    key = _shape_key(job, engine_id, ctx, seed)
+    hit = _shape_dir() / f"{key}.glb" if key else None
+    t0 = time.perf_counter()
+    if hit and hit.exists():
+        progress(0.75, "Using the shape made earlier from this picture")
+        shutil.copyfile(hit, job.path(RAW_MESH))
+        os.utime(hit)
+        try:
+            info = json.loads(hit.with_suffix(".json").read_text())
+        except (OSError, json.JSONDecodeError):
+            info = {}
+        info["cached"] = True
+        timing.record("reconstruct", time.perf_counter() - t0, engine=engine_id, cached=True)
+    else:
+        inp = ReconstructInput(img, img.with_name(img.stem + "_mask.png"), seed, tmp, style=style, subject=job.manifest["subject"])
+        with timing.stage("reconstruct", engine=engine_id, device=ctx.device, cached=False):
+            info = engine.reconstruct(inp, ctx, lambda p, m: progress(None if p is None else p * 0.8, m)) or {}
+        tmp.replace(job.path(RAW_MESH))
+        if hit:
+            try:
+                hit.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copyfile(job.path(RAW_MESH), hit)
+                hit.with_suffix(".json").write_text(json.dumps(info, default=str))
+                _prune_shapes()
+            except OSError as e:
+                log.warning("couldn't keep the shape for later: %s", e)
+    job.manifest["reconstruct"] = {"engine": engine_id, "seed": seed, **info}
+    _note_time(job, "reconstruct", time.perf_counter() - t0, engine=engine_id, cached=bool(info.get("cached")))
     job.set_stage("reconstructed")
     printify(job, None, lambda p, m: progress(None if p is None else 0.8 + 0.2 * (p or 0), m))
 
@@ -246,7 +379,10 @@ def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | No
     params = _deep_merge(style.print_params(current["format"]), current)  # fills keys older objects lack
     params = _deep_merge(params, overrides)
     log.info("%s: preparing print (%s)", job.id, params["format"])
-    report = printify_mod.run(job.path(RAW_MESH), job.path(PRINT_DIR), params, progress)
+    t0 = time.perf_counter()
+    with timing.stage("printify", format=params["format"], finish=params["geometry"].get("finish")):
+        report = printify_mod.run(job.path(RAW_MESH), job.path(PRINT_DIR), params, progress)
+    _note_time(job, "printify", time.perf_counter() - t0)
     job.manifest["print_params"] = params
     job.manifest["report"] = report
     job.manifest["exports"] = []
@@ -262,7 +398,10 @@ def export(job: Job, formats: list[str]) -> list[str]:
     if not job.reached("printified"):
         raise RuntimeError("Prepare the print first.")
     style = get_style(job.manifest["style"]["id"])
-    written = export_mod.export(job.path(PRINT_DIR), job.manifest["name"], style.palette, formats)
+    t0 = time.perf_counter()
+    with timing.stage("export"):
+        written = export_mod.export(job.path(PRINT_DIR), job.manifest["name"], style.palette, formats)
+    _note_time(job, "export", time.perf_counter() - t0)
     job.manifest["exports"] = [f"{PRINT_DIR}/{w}" for w in written]
     job.set_stage("exported")
     return job.manifest["exports"]

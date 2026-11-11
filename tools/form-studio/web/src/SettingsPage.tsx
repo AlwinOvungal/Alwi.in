@@ -1,6 +1,6 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
-import { api, Engine, Engines, formatBytes, ModelPack, ModelQueue, Settings, StorageItem } from "./api";
-import { KindChip, Switch, useToast } from "./ui";
+import { api, BenchReport, Engine, Engines, formatBytes, formatSeconds, ModelPack, ModelQueue, QUALITIES, Settings, StorageItem, Task } from "./api";
+import { KindChip, Progress, Switch, useToast } from "./ui";
 
 type Save = (patch: Parameters<typeof api.saveSettings>[0], msg?: string) => Promise<void>;
 type Service = "anthropic" | "openai" | "meshy" | "fal";
@@ -9,6 +9,7 @@ const SECTIONS = [
   ["engines", "Engines"],
   ["accounts", "Cloud accounts"],
   ["local", "Local AI"],
+  ["speed", "Speed test"],
   ["printing", "Printing"],
   ["storage", "Storage"],
 ] as const;
@@ -260,8 +261,30 @@ function LocalModels({ s, save }: { s: Settings; save: Save }) {
             <option value="cuda">NVIDIA GPU (CUDA)</option>
           </select>
         </Row>
-        <Row title="Fast mode" desc="Uses SDXL-Turbo for restyling: quicker and lighter, for 8 GB Macs. Slightly less faithful to the style.">
-          <Switch label="" checked={s.fast_mode} onChange={(v) => save({ fast_mode: v })} />
+        <Row title="Restyle quality" desc={QUALITIES.find((q) => q.id === s.sdxl_quality)?.hint}>
+          <div className="seg" role="radiogroup" aria-label="Restyle quality">
+            {QUALITIES.map((q) => (
+              <button key={q.id} type="button" role="radio" aria-checked={s.sdxl_quality === q.id} className={s.sdxl_quality === q.id ? "on" : ""} onClick={() => save({ sdxl_quality: q.id }, `${q.label} quality`)}>
+                {q.label}
+              </button>
+            ))}
+          </div>
+        </Row>
+        <Row
+          title="Keep models loaded"
+          desc={
+            s.keep_loaded === "auto"
+              ? `${s.memory.ram_gb ? `Your Mac has ${s.memory.ram_gb} GB. ` : ""}Up to ${s.memory.budget_gb} GB of models stay in memory, so SDXL and TripoSR don't reload for every object.${s.memory.loaded.length ? ` In memory now: ${s.memory.loaded.join(", ")}.` : ""}`
+              : "Only one model in memory at a time: uses the least memory, but each step reloads its model."
+          }
+        >
+          <select className="select" value={s.keep_loaded} onChange={(e) => save({ keep_loaded: e.target.value as Settings["keep_loaded"] })}>
+            <option value="auto">Automatic</option>
+            <option value="one">One at a time</option>
+          </select>
+        </Row>
+        <Row title="Get engines ready in the background" desc="Loads your default local engines when the app opens and when you add a photo, so the first option starts sooner.">
+          <Switch label="" checked={s.warm_up} onChange={(v) => save({ warm_up: v })} />
         </Row>
       </Group>
 
@@ -376,6 +399,146 @@ function LocalModels({ s, save }: { s: Settings; save: Save }) {
         </div>
       </details>
     </>
+  );
+}
+
+// ---------- speed test ----------
+
+const MEASURES: [string, string][] = [
+  ["first_option", "Photo → first option"],
+  ["first_to_3mf", "Photo → 3MF, using the first option right away"],
+  ["all_to_3mf", "Photo → 3MF after all options"],
+  ["slider", "One print-slider change"],
+];
+
+function BenchResult({ r }: { r: BenchReport }) {
+  const ids = Object.keys(r.variants);
+  const med = (v: string, m: string) => r.variants[v].warm[m]?.median ?? r.variants[v].cold?.[m] ?? null;
+  const allOk = ids.every((v) => r.variants[v].checks_ok);
+  return (
+    <Group
+      title={`Latest result · ${r.when.replace("_", " ").replace(/-(\d\d)-(\d\d)$/, ":$1")}`}
+      note={`${r.mac.ram_gb} GB Mac · ${r.setup.restyle} → ${r.setup.shape} · ${r.setup.photos} photo${r.setup.photos === 1 ? "" : "s"} × ${r.setup.runs} runs`}
+    >
+      <div className="set-row wide">
+        <div className="bench-scroll">
+          <table className="bench-table">
+            <thead>
+              <tr>
+                <th>Median, models in memory</th>
+                {ids.map((v) => <th key={v}>{r.variants[v].label}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {MEASURES.map(([m, label]) => (
+                <tr key={m}>
+                  <td>{label}</td>
+                  {ids.map((v, i) => {
+                    const a = med(ids[0], m);
+                    const b = med(v, m);
+                    // only for times long enough that the difference isn't noise
+                    const x = i > 0 && a && b && a >= 2 ? a / b : null;
+                    return (
+                      <td key={v}>
+                        {formatSeconds(b)}
+                        {x && x >= 1.1 ? <span className="fast"> · {x.toFixed(1)}×</span> : null}
+                      </td>
+                    );
+                  })}
+                </tr>
+              ))}
+              <tr>
+                <td>First run of the session (photo → first option)</td>
+                {ids.map((v) => <td key={v}>{formatSeconds(r.variants[v].cold?.first_option)}</td>)}
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div className="set-row wide">
+        {allOk ? (
+          <div className="note ok">Every print file passed: watertight, the right height, and parts on the right filaments.</div>
+        ) : (
+          <div className="note bad">Some print files didn't pass the checks. Open the full report for details.</div>
+        )}
+      </div>
+      {r.sheet && (
+        <div className="set-row wide">
+          <div className="stack" style={{ gap: 6 }}>
+            <span className="small muted">The options each way made, so you can check the look as well as the speed:</span>
+            <img className="bench-sheet" src={`/api/bench/files/options.png?v=${r.when}`} alt="Options made by each variant" />
+          </div>
+        </div>
+      )}
+      <div className="set-row">
+        <div className="set-text">
+          <span className="t">Full report</span>
+          <span className="d">Every step's median and p90 times, in a file you can share.</span>
+        </div>
+        <div className="set-ctrl">
+          <a className="btn sm" href="/api/bench/files/report.md" target="_blank" rel="noreferrer">Open report</a>
+        </div>
+      </div>
+    </Group>
+  );
+}
+
+function SpeedTest() {
+  const [st, setSt] = useState<{ task: Task | null; latest: BenchReport | null; photos: number } | null>(null);
+  const [size, setSize] = useState<"quick" | "full">("quick");
+  const [compare, setCompare] = useState(true);
+  const toast = useToast();
+  const load = () => api.bench().then(setSt).catch(() => {});
+  useEffect(() => {
+    load();
+  }, []);
+  const running = !!st?.task && (st.task.status === "running" || st.task.status === "queued");
+  useEffect(() => {
+    if (!running) return;
+    const t = setInterval(load, 1500);
+    return () => clearInterval(t);
+  }, [running]);
+  const start = async () => {
+    try {
+      setSt(await api.startBench(size, compare));
+    } catch (e) {
+      toast((e as Error).message, true);
+    }
+  };
+  return (
+    <Section
+      id="speed"
+      title="Speed test"
+      intro="Times the whole flow on this Mac (photo → options → 3D shape → 3MF) with copies of your most recent photos. Your objects aren't changed."
+    >
+      <Group>
+        <Row title="How thorough" desc={size === "quick" ? "1 photo, 2 runs. Roughly 10–20 minutes with local SDXL." : "3 photos, 3 runs each. Roughly an hour with local SDXL; most reliable."}>
+          <div className="seg" role="radiogroup" aria-label="How thorough">
+            <button type="button" className={size === "quick" ? "on" : ""} onClick={() => setSize("quick")}>Quick check</button>
+            <button type="button" className={size === "full" ? "on" : ""} onClick={() => setSize("full")}>Full</button>
+          </div>
+        </Row>
+        <Row title="Compare" desc="Also runs the old way (one model at a time, Best) and Quick quality, so you see the difference in time and in the pictures. Quick downloads ~400 MB once.">
+          <Switch label="" checked={compare} onChange={setCompare} />
+        </Row>
+        {running && st?.task ? (
+          <div className="set-row wide">
+            <Progress task={st.task} onCancel={() => api.cancelBench().then(load)} />
+          </div>
+        ) : (
+          <Row
+            title={st && st.photos === 0 ? "Add an object first" : "Run the speed test"}
+            desc={st && st.photos === 0 ? "The test uses your photos. Create an object in the Library, then come back." : "Uses your default engines. Other work waits while it runs."}
+          >
+            <button className="btn sm primary" disabled={!st || st.photos === 0} onClick={start}>Run speed test</button>
+          </Row>
+        )}
+        {st?.task?.status === "error" && (
+          <div className="set-row wide"><div className="note bad">{st.task.error}</div></div>
+        )}
+      </Group>
+      {st?.latest && <BenchResult r={st.latest} />}
+    </Section>
   );
 }
 
@@ -665,6 +828,8 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
           <Section id="local" title="Local AI" intro="Free engines that run on this Mac need these downloads. An interrupted download continues where it stopped. Cloud engines need none of this.">
             <LocalModels s={s} save={save} />
           </Section>
+
+          <SpeedTest />
 
           <Section id="printing" title="Printing" intro="Where your print files go and what's made by default.">
             <Group>

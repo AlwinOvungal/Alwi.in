@@ -14,6 +14,21 @@ from ..core.style import StyleSpec
 Progress = Callable[[float, str], None]
 
 
+QUALITIES = ("best", "quick", "lightest")
+
+
+def quality_of(settings: dict[str, Any]) -> str:
+    """Local restyle quality: best (30 steps), quick (SDXL-Lightning, 8 steps) or lightest (SDXL-Turbo)."""
+    q = settings.get("sdxl_quality")
+    if q in QUALITIES:
+        return q
+    return "lightest" if settings.get("fast_mode") else "best"
+
+
+class Cancelled(Exception):
+    """The person pressed Cancel (or picked an option, which stops the rest). Raised from progress callbacks."""
+
+
 @dataclass
 class EngineContext:
     """What every engine call gets: user settings and helpers."""

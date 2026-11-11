@@ -7,9 +7,11 @@ from __future__ import annotations
 
 import gc
 import logging
+import os
 import sys
 import threading
 import types
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any
 
@@ -17,14 +19,11 @@ import numpy as np
 from PIL import Image
 
 from .. import paths
+from ..core import timing
 from ..core.ingest import remove_background
-from .base import EngineContext, Progress, ReconstructInput, StylizeInput, missing
+from .base import EngineContext, Progress, ReconstructInput, StylizeInput, missing, quality_of
 
 log = logging.getLogger(__name__)
-
-_models: dict[str, Any] = {}
-_models_lock = threading.Lock()
-
 
 def pick_device(pref: str = "auto") -> str:
     if pref and pref != "auto":
@@ -40,14 +39,76 @@ def pick_device(pref: str = "auto") -> str:
     return "cpu"
 
 
+# Loaded models, least recently used first. Keys are "<family>:<detail>:<device>".
+_models: "OrderedDict[str, Any]" = OrderedDict()
+_models_lock = threading.RLock()
+# roughly what each family takes in memory (GB, fp16 on Apple Silicon)
+FAMILY_GB = {"sdxl": 9.0, "sdxl-turbo": 7.0, "triposr": 2.0, "hunyuan": 6.0}
+_policy = {"keep_loaded": "auto"}
+
+
+def configure(settings: dict[str, Any]) -> None:
+    _policy["keep_loaded"] = settings.get("keep_loaded") or "auto"
+
+
+def ram_gb() -> float | None:
+    try:
+        return os.sysconf("SC_PAGE_SIZE") * os.sysconf("SC_PHYS_PAGES") / 1024**3
+    except (ValueError, OSError, AttributeError):
+        return None
+
+
+def budget_gb(keep_loaded: str | None = None) -> float:
+    """How much memory loaded models may use. Macs share memory between the CPU and GPU, so half of it."""
+    if (keep_loaded or _policy["keep_loaded"]) == "one":
+        return 0.0
+    return 0.5 * (ram_gb() or 16.0)
+
+
+def _family(key: str) -> str:
+    return key.split(":")[0]
+
+
+def is_loaded(family: str) -> bool:
+    with _models_lock:
+        return any(_family(k) == family for k in _models)
+
+
+def loaded_families() -> list[str]:
+    with _models_lock:
+        return list(dict.fromkeys(_family(k) for k in _models))
+
+
+def would_fit(family: str) -> bool:
+    """True if loading this family wouldn't push anything else out."""
+    with _models_lock:
+        others = {_family(k) for k in _models} - {family}
+        used = sum(FAMILY_GB.get(f, 1.0) for f in others)
+        return not others or used + FAMILY_GB.get(family, 1.0) <= budget_gb()
+
+
 def _cached(key: str, factory):
     with _models_lock:
-        if key not in _models:
-            # one big model at a time keeps memory sane on a laptop
-            for k in [k for k in _models if k.split(":")[0] != key.split(":")[0]]:
+        if key in _models:
+            _models.move_to_end(key)
+            return _models[key]
+        fam = _family(key)
+        need = FAMILY_GB.get(fam, 1.0)
+        freed = False
+        while True:  # unload the least recently used other families until this one fits
+            others = [k for k in _models if _family(k) != fam]
+            used = sum(FAMILY_GB.get(f, 1.0) for f in {_family(k) for k in others})
+            if not others or used + need <= budget_gb():
+                break
+            victim = _family(others[0])
+            for k in [k for k in _models if _family(k) == victim]:
                 del _models[k]
+            log.info("unloaded %s to make room for %s", victim, fam)
+            freed = True
+        if freed:
             gc.collect()
             _empty_cache()
+        with timing.stage("model_load", engine=fam, device=key.split(":")[-1]):
             _models[key] = factory()
         return _models[key]
 
@@ -69,6 +130,22 @@ def unload_all() -> None:
         _models.clear()
     gc.collect()
     _empty_cache()
+
+
+def _out_of_memory(e: BaseException) -> bool:
+    return "out of memory" in str(e).lower()
+
+
+def _retry_on_oom(fn):
+    """Run; if memory runs out, unload every model and try once more."""
+    try:
+        return fn()
+    except RuntimeError as e:
+        if not _out_of_memory(e):
+            raise
+        log.warning("out of memory; unloading all models and trying again")
+        unload_all()
+        return fn()
 
 
 def _speedups(pipe, attention_slicing: bool = True) -> None:
@@ -116,14 +193,59 @@ def _on_white(img: Image.Image) -> Image.Image:
 
 # ---------------------------------------------------------------- stylize ----
 
+LIGHTNING = ("ByteDance/SDXL-Lightning", "sdxl_lightning_8step_lora.safetensors")
+_pipe_state: dict[int, dict[str, Any]] = {}  # per loaded pipeline: its own scheduler, whether Lightning is in
+
+
+def _set_quick(pipe, quick: bool) -> None:
+    """Switch the loaded SDXL pipeline between Best (30 steps) and Quick (SDXL-Lightning, 8 steps).
+
+    The Lightning LoRA goes in as a named adapter once and is switched on and off, so changing
+    quality never reloads SDXL. The IP-Adapter and ControlNet stay as they are.
+    """
+    st = _pipe_state.setdefault(id(pipe), {"scheduler": pipe.scheduler, "lightning": False})
+    if quick:
+        if not st["lightning"]:
+            from huggingface_hub import hf_hub_download
+
+            with timing.stage("model_load", engine="sdxl-lightning"):
+                pipe.load_lora_weights(hf_hub_download(*LIGHTNING), adapter_name="lightning")
+            st["lightning"] = True
+        if hasattr(pipe, "enable_lora"):
+            pipe.enable_lora()
+        pipe.set_adapters(["lightning"], adapter_weights=[1.0])
+        from diffusers import EulerDiscreteScheduler
+
+        pipe.scheduler = EulerDiscreteScheduler.from_config(st["scheduler"].config, timestep_spacing="trailing")
+    else:
+        if st["lightning"]:
+            if hasattr(pipe, "disable_lora"):
+                pipe.disable_lora()
+            else:
+                pipe.set_adapters(["lightning"], adapter_weights=[0.0])
+        pipe.scheduler = st["scheduler"]
+
+
+def sdxl_packs(settings: dict[str, Any]) -> list[str]:
+    q = quality_of(settings)
+    return ["sdxl-turbo"] if q == "lightest" else ["sdxl"] + (["sdxl-lightning"] if q == "quick" else [])
+
+
 class LocalSDXL:
     id = "local-sdxl"
     label = "SDXL + style reference (local)"
     kind = "local"
-    note = "Free. SDXL guided by the style's reference image and your photo's depth. ~1–2 min per image on Apple Silicon."
+    note = "Free. SDXL guided by the style's reference image and your photo's depth. Quick: ~20 s per image; Best: ~1–2 min."
+
+    def __init__(self) -> None:
+        self._depth_cache: "OrderedDict[tuple, Image.Image]" = OrderedDict()
 
     def available(self, ctx: EngineContext) -> tuple[bool, str]:
         why = missing("torch", "diffusers", "transformers")
+        if not why and quality_of(ctx.settings) == "quick":
+            why = missing("peft")
+            if why:
+                why += " (needed for Quick quality)"
         return (why is None, why or "")
 
     def _pipe(self, ctx: EngineContext, fast: bool):
@@ -159,58 +281,93 @@ class LocalSDXL:
 
         return _cached(f"sdxl:{device}", make)
 
-    def _depth(self, ctx: EngineContext, img: Image.Image) -> Image.Image:
+    def _depth_model(self, ctx: EngineContext):
         def make():
             from transformers import pipeline
 
             return pipeline("depth-estimation", model="depth-anything/Depth-Anything-V2-Small-hf", device=ctx.device)
 
-        est = _cached(f"sdxl:depth:{ctx.device}", make)
-        d = est(img)["depth"].convert("L").resize(img.size)
-        return Image.merge("RGB", (d, d, d))
+        return _cached(f"sdxl:depth:{ctx.device}", make)
+
+    def _depth(self, ctx: EngineContext, img: Image.Image, key: tuple) -> Image.Image:
+        """The photo's depth map, worked out once per photo and size (every option reuses it)."""
+        if key in self._depth_cache:
+            self._depth_cache.move_to_end(key)
+            return self._depth_cache[key]
+        with timing.stage("depth", device=ctx.device, size=img.width):
+            d = self._depth_model(ctx)(img)["depth"].convert("L").resize(img.size)
+        out = Image.merge("RGB", (d, d, d))
+        self._depth_cache[key] = out
+        while len(self._depth_cache) > 4:
+            self._depth_cache.popitem(last=False)
+        return out
+
+    def warm(self, ctx: EngineContext) -> None:
+        """Load everything a Generate needs, so the first option starts straight away."""
+        q = quality_of(ctx.settings)
+        pipe = self._pipe(ctx, q == "lightest")
+        if q != "lightest":
+            self._depth_model(ctx)
+            _set_quick(pipe, q == "quick")
 
     def stylize(self, inp: StylizeInput, ctx: EngineContext, progress: Progress) -> list[dict]:
+        return _retry_on_oom(lambda: self._stylize(inp, ctx, progress))
+
+    def _stylize(self, inp: StylizeInput, ctx: EngineContext, progress: Progress) -> list[dict]:
         import torch
 
-        fast = bool(ctx.settings.get("fast_mode"))
+        q = quality_of(ctx.settings)
+        fast, quick = q == "lightest", q == "quick"
         cfg = inp.style.stylize
         size = 512 if fast else int(cfg.get("size", 1024))
         photo = Image.open(inp.cutout).convert("RGB").resize((size, size), Image.LANCZOS)
-        _ensure_models("sdxl-turbo" if fast else "sdxl", progress, 0.0, 0.5)
-        progress(None, "Loading the models into memory")
+        for pack in sdxl_packs(ctx.settings):
+            _ensure_models(pack, progress, 0.0, 0.5)
+        warm = is_loaded("sdxl-turbo" if fast else "sdxl")
+        if not warm:
+            progress(None, "Loading the models into memory (only the first time)")
         pipe = self._pipe(ctx, fast)
-        depth = None if fast else self._depth(ctx, photo)
+        if not fast:
+            _set_quick(pipe, quick)
+        st = inp.cutout.stat()
+        depth = None if fast else self._depth(ctx, photo, (str(inp.cutout), st.st_mtime_ns, size))
         ref, ip_scale = (None, 0.0) if fast else style_reference(inp.style)
         if ref is not None and ip_scale == 0.0:
             progress(None, "Style from words only. Add reference pictures in Styles for a closer match.")
 
+        steps = 4 if fast else 8 if quick else int(cfg.get("steps", 30))
         out = []
         n = len(inp.seeds)
         for i, seed in enumerate(inp.seeds):
-            steps = 4 if fast else int(cfg.get("steps", 30))
-
-            def cb(p, step, t, kw, i=i, steps=steps):
-                progress((i + (step + 1) / steps) / n, f"Candidate {i + 1} of {n}: step {step + 1}/{steps}")
+            def cb(p, step, t, kw, i=i):
+                progress((i + (step + 1) / steps) / n, f"Option {i + 1} of {n}: step {step + 1} of {steps}")
                 return kw
 
             gen = torch.Generator("cpu").manual_seed(int(seed))
             if not fast and hasattr(pipe, "set_ip_adapter_scale"):
                 pipe.set_ip_adapter_scale(ip_scale)  # every run: one style's strength must not carry over
             prompt = inp.style.prompt_for(inp.subject)
-            if fast:
-                img = pipe(prompt=prompt, image=photo, strength=0.6, num_inference_steps=steps, guidance_scale=0.0,
-                           generator=gen, callback_on_step_end=cb).images[0]
-            else:
-                img = pipe(
-                    prompt=prompt, negative_prompt=inp.style.negative_prompt, image=depth, ip_adapter_image=ref,
-                    controlnet_conditioning_scale=float(cfg.get("controlnet_scale", 0.55)),
-                    num_inference_steps=steps, guidance_scale=float(cfg.get("guidance", 6.0)),
-                    width=size, height=size, generator=gen, callback_on_step_end=cb,
-                ).images[0]
-            img = _on_white(img).resize((1024, 1024), Image.LANCZOS)
+            with timing.stage("restyle_image", engine=self.id, device=ctx.device, quality=q, size=size,
+                              steps=steps, warm=warm):
+                if fast:
+                    img = pipe(prompt=prompt, image=photo, strength=0.6, num_inference_steps=steps, guidance_scale=0.0,
+                               generator=gen, callback_on_step_end=cb).images[0]
+                else:
+                    img = pipe(
+                        prompt=prompt,
+                        # Lightning runs without guidance, so there's nothing to steer away from
+                        negative_prompt=None if quick else inp.style.negative_prompt,
+                        image=depth, ip_adapter_image=ref,
+                        controlnet_conditioning_scale=float(cfg.get("controlnet_scale", 0.55)),
+                        num_inference_steps=steps, guidance_scale=0.0 if quick else float(cfg.get("guidance", 6.0)),
+                        width=size, height=size, generator=gen, callback_on_step_end=cb,
+                    ).images[0]
+            warm = True
+            with timing.stage("clean_output", device=ctx.device):
+                img = _on_white(img).resize((1024, 1024), Image.LANCZOS)
             name = f"candidate_{i + 1}.png"
             img.save(inp.out_dir / name)
-            out.append({"file": name, "seed": seed})
+            out.append({"file": name, "seed": seed, "quality": q})
         progress(1.0, "Done")
         return out
 
@@ -256,15 +413,11 @@ class LocalTripoSR:
             return False, why
         return True, ""  # the code and model download on first use (Settings → Local AI models)
 
-    def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
-        import torch
-        import trimesh
-
-        _ensure_models("triposr-code", progress, 0.0, 0.02)
-        sys.path.insert(0, str(triposr_dir()))
+    def _model(self, ctx: EngineContext):
+        if str(triposr_dir()) not in sys.path:
+            sys.path.insert(0, str(triposr_dir()))
         _install_torchmcubes_shim()
         from tsr.system import TSR  # type: ignore
-        from tsr.utils import resize_foreground  # type: ignore
 
         device = ctx.device
 
@@ -274,16 +427,34 @@ class LocalTripoSR:
             m.to(device)
             return m
 
+        return _cached(f"triposr:{device}", make)
+
+    def warm(self, ctx: EngineContext) -> None:
+        self._model(ctx)
+
+    def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        _ensure_models("triposr-code", progress, 0.0, 0.02)
         _ensure_models("triposr", progress, 0.0, 0.25)
-        progress(None, "Loading TripoSR into memory")
-        model = _cached(f"triposr:{device}", make)
+        return _retry_on_oom(lambda: self._reconstruct(inp, ctx, progress))
+
+    def _reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        import torch
+        import trimesh
+
+        device = ctx.device
+        warm = is_loaded("triposr")
+        if not warm:
+            progress(None, "Loading TripoSR into memory (only the first time)")
+        model = self._model(ctx)
+        from tsr.utils import resize_foreground  # type: ignore
+
         img = resize_foreground(_rgba(inp), 0.85)
         arr = np.asarray(img).astype(np.float32) / 255.0
         arr = arr[:, :, :3] * arr[:, :, 3:4] + (1 - arr[:, :, 3:4]) * 0.5
         image = Image.fromarray((arr * 255.0).astype(np.uint8))
         progress(0.3, "Building the shape")
         torch.manual_seed(inp.seed)
-        with torch.no_grad():
+        with timing.stage("reconstruct_infer", engine=self.id, device=device, warm=warm), torch.no_grad():
             codes = model([image], device=device)
             progress(0.7, "Extracting the surface")
             try:
@@ -335,3 +506,36 @@ class LocalHunyuanMini:
         mesh.export(inp.out)  # Hunyuan already uses glTF y-up
         progress(1.0, "Done")
         return {"model": "tencent/Hunyuan3D-2mini", "device": device}
+
+
+# ---------------------------------------------------------------- warm-up ----
+
+def warm(ctx: EngineContext, stylize_engine: str | None, reconstruct_engine: str | None) -> list[str]:
+    """Load the default local engines in the background, so the next step starts at once.
+
+    Only models that are already downloaded, and only what fits without unloading something
+    else. Returns the families that are now in memory because of this call.
+    """
+    from ..models import status
+    from . import RECONSTRUCTORS, STYLIZERS
+
+    done: list[str] = []
+
+    def ready(packs: list[str]) -> bool:
+        try:
+            return all(status(p)["status"] == "ready" for p in packs)
+        except Exception:  # can't tell offline: don't guess
+            return False
+
+    if stylize_engine == "local-sdxl":
+        eng = STYLIZERS["local-sdxl"]
+        fam = "sdxl-turbo" if quality_of(ctx.settings) == "lightest" else "sdxl"
+        if eng.available(ctx)[0] and ready(sdxl_packs(ctx.settings)) and (is_loaded(fam) or would_fit(fam)):
+            eng.warm(ctx)
+            done.append(fam)
+    if reconstruct_engine == "triposr":
+        eng = RECONSTRUCTORS["triposr"]
+        if eng.available(ctx)[0] and ready(["triposr-code", "triposr"]) and (is_loaded("triposr") or would_fit("triposr")):
+            eng.warm(ctx)
+            done.append("triposr")
+    return done

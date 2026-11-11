@@ -18,7 +18,9 @@ KEYRING_SERVICE = "Form Studio"
 DEFAULT_SETTINGS: dict[str, Any] = {
     "engines": dict(DEFAULTS),
     "device": "auto",
-    "fast_mode": False,
+    "sdxl_quality": "best",  # best | quick (SDXL-Lightning) | lightest (SDXL-Turbo, 8 GB Macs)
+    "keep_loaded": "auto",  # auto: keep models in memory while they fit | one: one model at a time
+    "warm_up": True,  # load the default local engines in the background (app opens, photo added, option picked)
     "candidates": 4,
     "export_formats": ["3mf"],
     "fal": {"endpoints": {}},  # engine id → custom endpoint (Settings → Advanced)
@@ -44,11 +46,19 @@ def _merge(base: dict, over: dict) -> dict:
     return out
 
 
+def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
+    """Older settings files: "fast_mode" became the "lightest" restyle quality."""
+    if "sdxl_quality" not in raw and raw.get("fast_mode"):
+        raw["sdxl_quality"] = "lightest"
+    raw.pop("fast_mode", None)
+    return raw
+
+
 def load() -> dict[str, Any]:
     f = paths.settings_file()
     if f.exists():
         try:
-            return _merge(DEFAULT_SETTINGS, json.loads(f.read_text()))
+            return _merge(DEFAULT_SETTINGS, _migrate(json.loads(f.read_text())))
         except json.JSONDecodeError:
             log.warning("settings.json is unreadable; using defaults")
     return copy.deepcopy(DEFAULT_SETTINGS)
@@ -111,7 +121,10 @@ def set_secret(name: str, value: str | None) -> str:
 
 
 def context() -> EngineContext:
+    from ..engines import local
+
     s = load()
+    local.configure(s)
     secrets = {k: v for k in SECRETS if (v := get_secret(k))}
     return EngineContext(settings=s, device=pick_device(s.get("device", "auto")), secrets=secrets)
 
@@ -125,4 +138,12 @@ def public(s: dict[str, Any]) -> dict[str, Any]:
         section["key_hint"] = f"…{key[-4:]}" if key else ""
     out["keychain"] = _keyring() is not None
     out["resolved_device"] = pick_device(s.get("device", "auto"))
+    from ..engines import local
+
+    ram = local.ram_gb()
+    out["memory"] = {
+        "ram_gb": round(ram) if ram else None,
+        "budget_gb": round(local.budget_gb(s.get("keep_loaded")), 1),
+        "loaded": local.loaded_families(),
+    }
     return out

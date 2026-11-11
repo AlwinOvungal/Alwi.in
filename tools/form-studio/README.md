@@ -56,7 +56,7 @@ Spotlight and drag it to your Dock.
 | `--with-step` | Adds STEP export. |
 
 Local engines need AI models, downloaded once into `~/.cache/huggingface`: SDXL restyle 12 GB,
-TripoSR 3D 1.9 GB (fast mode 6.5 GB and Hunyuan3D 4 GB only if you use them). Download them in
+TripoSR 3D 1.9 GB (Quick quality 0.4 GB, Lightest quality 6.5 GB and Hunyuan3D 4 GB only if you use them). Download them in
 **Settings → Local AI models** to see GB done, speed and time left. A stopped or interrupted download
 continues where it left off.
 
@@ -93,7 +93,7 @@ Pick default engines in **Settings**, and switch them for each object as you go.
 
 | Step | Engine | Cost | Notes |
 |---|---|---|---|
-| Restyle | SDXL + style reference (local) | free | Steered by the style's first reference picture and the photo's depth. About 1–2 min per image on Apple Silicon. 16 GB+ of memory recommended; turn on *Fast mode* on 8 GB Macs. |
+| Restyle | SDXL + style reference (local) | free | Steered by the style's first reference picture and the photo's depth. Best: about 1–2 min per image on Apple Silicon; Quick (SDXL-Lightning): about 3–4× faster. 16 GB+ of memory recommended; use *Lightest* quality on 8 GB Macs. Settings → Speed test measures it on your Mac. |
 | Restyle | **ChatGPT images** (OpenAI) | a few cents to ~20¢ per image (by quality) | Redraws your object completely in the style, using the photo plus all the style's reference pictures in one call. Needs an OpenAI API key. |
 | Restyle | Nano Banana (fal.ai) | about $0.04 per image | Sees your photo **and all the style's reference pictures**, so the look stays consistent. Needs a fal.ai key. |
 | Restyle | FLUX Kontext (fal.ai) | about $0.025 per image | Strong at keeping the shape; uses only the style's words. Needs a fal.ai key. |

@@ -35,7 +35,7 @@ def cutout(tmp_path):
 # ---- OpenAI ---------------------------------------------------------------------
 
 def openai_ctx(handler, **settings):
-    return EngineContext(settings={"_openai_transport": httpx.MockTransport(handler), "openai": settings},
+    return EngineContext(settings={"_openai_transport": httpx.MockTransport(handler), "_sleep": lambda s: None, "openai": settings},
                          secrets={"openai": "sk-test"})
 
 

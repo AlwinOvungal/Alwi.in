@@ -13,6 +13,7 @@ steps give every object the same soft, chunky, printable character.
 from __future__ import annotations
 
 import math
+from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable
@@ -22,6 +23,8 @@ import numpy as np
 import trimesh
 from scipy import ndimage
 from skimage import measure
+
+from . import timing
 
 Progress = Callable[[float, str], None]
 
@@ -232,7 +235,41 @@ def add_ring(body: mf.Manifold, ring: dict[str, Any], warnings: list[str]) -> mf
 
 # ---- main ----------------------------------------------------------------------
 
-def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | None = None) -> PrintResult:
+# Recent in-between results, so a slider that only changes the base, magnet, ring or format
+# doesn't redo the expensive voxel work. Keyed by the AI mesh file and every setting that step uses.
+CACHE: dict[str, Any] = {"enabled": True, "max": 12, "items": OrderedDict(), "hits": 0}
+
+
+def _get(key):
+    if not key:
+        return None
+    items = CACHE["items"]
+    if key in items:
+        items.move_to_end(key)
+        CACHE["hits"] += 1
+        return items[key]
+    return None
+
+
+def _put(key, value) -> None:
+    if not key:
+        return
+    for v in value:  # shared between runs: nobody may change them in place
+        if isinstance(v, np.ndarray):
+            v.flags.writeable = False
+    items = CACHE["items"]
+    items[key] = value
+    while len(items) > CACHE["max"]:
+        items.popitem(last=False)
+
+
+def clear_cache() -> None:
+    CACHE["items"].clear()
+    CACHE["hits"] = 0
+
+
+def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | None = None,
+             cache_key: str | None = None) -> PrintResult:
     say = progress or (lambda p, m: None)
     geo = params["geometry"]
     base_p = params["base"]
@@ -247,63 +284,96 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     flat_cut = 0.0 if geo.get("finish") == "voxel" else float(geo.get("flat_cut", 0.03))
     body_h = height - base_t + (SINK_MM if use_base else 0.0)
 
-    say(0.05, "Standing the mesh up")
-    mesh = raw.copy()
-    mesh.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 2, [1, 0, 0]))  # y-up → z-up
-    ext = mesh.extents
-    if ext[2] <= 1e-9:
-        raise ValueError("the AI mesh is flat")
-    # scale so that after the flat cut the body is exactly body_h tall
-    s = body_h / (ext[2] * (1 - flat_cut))
-    mesh.apply_scale(s)
-    mesh.apply_translation(-mesh.bounds[0])
-
-    pitch = float(geo.get("voxel_mm", 0.5))
-    longest = float(mesh.extents.max())
-    if longest / pitch > MAX_VOXELS:
-        pitch = longest / MAX_VOXELS
-        warnings.append(f"Large object: remesh resolution relaxed to {pitch:.2f} mm.")
-
-    say(0.2, "Making it solid")
-    vol, origin = solid_volume(mesh, pitch)
-    solid_vox = int(vol.sum())
-    if solid_vox == 0:
-        raise ValueError("the AI mesh has no volume")
-
-    say(0.35, "Removing parts too thin to print")
+    pitch_req = float(geo.get("voxel_mm", 0.5))
     min_feat = float(geo.get("min_feature_mm", 1.6))
-    r_vox = int(round(min_feat / 2 / pitch))
-    opened = ndimage.binary_opening(np.pad(vol, r_vox + 1), structure=_ball(r_vox))
-    opened = opened[r_vox + 1 : -(r_vox + 1), r_vox + 1 : -(r_vox + 1), r_vox + 1 : -(r_vox + 1)]
-    opened = _largest_component(opened)
-    if opened.sum() < 0.2 * solid_vox:
-        warnings.append("Most of the shape was thinner than the minimum feature size; kept the original.")
-        opened = _largest_component(vol)
-    thin_removed = 1.0 - opened.sum() / solid_vox
-    if thin_removed > 0.08:
-        warnings.append(f"{thin_removed:.0%} of the volume was too thin to print and was removed.")
-
     finish = str(geo.get("finish", "soft"))
-    if finish == "voxel":
-        say(0.5, "Rebuilding from blocks")
-        body = voxel_surface(opened, origin, pitch, float(geo.get("voxel_size_mm", 2.5)))
-    elif finish == "faceted":
-        say(0.5, "Cutting facets")
-        body = surface_from_volume(opened, origin, pitch, min(float(geo.get("soften_mm", 0.9)), 0.5) / pitch)
-        body = facet(body, int(geo.get("facets", 400)), warnings)
+    k1 = (cache_key, round(body_h, 4), round(flat_cut, 4), round(pitch_req, 4)) if cache_key and CACHE["enabled"] else None
+    k2 = k1 and (*k1, round(min_feat, 4))
+    k3 = k2 and (*k2, finish, *(geo.get(k) for k in ("voxel_size_mm", "facets", "soften_mm", "smooth_iters", "target_faces")))
+
+    hit3 = _get(k3)
+    if hit3:
+        body, pitch, thin_removed, w = hit3
+        warnings += w
+        say(0.6, "Reusing the shape (only the parts you changed are rebuilt)")
     else:
-        say(0.5, "Softening into clay")
-        soften = float(geo.get("soften_mm", 0.9)) / pitch
-        body = surface_from_volume(opened, origin, pitch, soften)
-        iters = int(geo.get("smooth_iters", 8))
-        if iters > 0:
-            trimesh.smoothing.filter_taubin(body, lamb=0.5, nu=-0.53, iterations=iters)
-        target = int(geo.get("target_faces", 60000))
-        if len(body.faces) > target:
-            try:
-                body = body.simplify_quadric_decimation(face_count=target)
-            except Exception as e:  # fast-simplification missing → keep full resolution
-                warnings.append(f"Decimation skipped ({e.__class__.__name__}).")
+        hit2 = _get(k2)
+        if hit2:
+            opened, origin, pitch, thin_removed, w = hit2
+            warnings += w
+        else:
+            hit1 = _get(k1)
+            if hit1:
+                vol, origin, pitch, solid_vox, w = hit1
+                warnings += w
+            else:
+                w: list[str] = []
+                say(0.05, "Standing the mesh up")
+                mesh = raw.copy()
+                mesh.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 2, [1, 0, 0]))  # y-up → z-up
+                ext = mesh.extents
+                if ext[2] <= 1e-9:
+                    raise ValueError("the AI mesh is flat")
+                # scale so that after the flat cut the body is exactly body_h tall
+                s = body_h / (ext[2] * (1 - flat_cut))
+                mesh.apply_scale(s)
+                mesh.apply_translation(-mesh.bounds[0])
+
+                pitch = pitch_req
+                longest = float(mesh.extents.max())
+                if longest / pitch > MAX_VOXELS:
+                    pitch = longest / MAX_VOXELS
+                    w.append(f"Large object: remesh resolution relaxed to {pitch:.2f} mm.")
+
+                say(0.2, "Making it solid")
+                with timing.stage("printify.voxelize"):
+                    vol, origin = solid_volume(mesh, pitch)
+                solid_vox = int(vol.sum())
+                if solid_vox == 0:
+                    raise ValueError("the AI mesh has no volume")
+                warnings += w
+                _put(k1, (vol, origin, pitch, solid_vox, list(warnings)))
+
+            w = []
+            say(0.35, "Removing parts too thin to print")
+            with timing.stage("printify.thin_parts"):
+                r_vox = int(round(min_feat / 2 / pitch))
+                opened = ndimage.binary_opening(np.pad(vol, r_vox + 1), structure=_ball(r_vox))
+                opened = opened[r_vox + 1 : -(r_vox + 1), r_vox + 1 : -(r_vox + 1), r_vox + 1 : -(r_vox + 1)]
+                opened = _largest_component(opened)
+            if opened.sum() < 0.2 * solid_vox:
+                w.append("Most of the shape was thinner than the minimum feature size; kept the original.")
+                opened = _largest_component(vol)
+            thin_removed = 1.0 - opened.sum() / solid_vox
+            if thin_removed > 0.08:
+                w.append(f"{thin_removed:.0%} of the volume was too thin to print and was removed.")
+            warnings += w
+            _put(k2, (opened, origin, pitch, thin_removed, list(warnings)))
+
+        w = []
+        with timing.stage("printify.finish", finish=finish):
+            if finish == "voxel":
+                say(0.5, "Rebuilding from blocks")
+                body = voxel_surface(opened, origin, pitch, float(geo.get("voxel_size_mm", 2.5)))
+            elif finish == "faceted":
+                say(0.5, "Cutting facets")
+                body = surface_from_volume(opened, origin, pitch, min(float(geo.get("soften_mm", 0.9)), 0.5) / pitch)
+                body = facet(body, int(geo.get("facets", 400)), w)
+            else:
+                say(0.5, "Softening into clay")
+                soften = float(geo.get("soften_mm", 0.9)) / pitch
+                body = surface_from_volume(opened, origin, pitch, soften)
+                iters = int(geo.get("smooth_iters", 8))
+                if iters > 0:
+                    trimesh.smoothing.filter_taubin(body, lamb=0.5, nu=-0.53, iterations=iters)
+                target = int(geo.get("target_faces", 60000))
+                if len(body.faces) > target:
+                    try:
+                        body = body.simplify_quadric_decimation(face_count=target)
+                    except Exception as e:  # fast-simplification missing → keep full resolution
+                        w.append(f"Decimation skipped ({e.__class__.__name__}).")
+        warnings += w
+        _put(k3, (body, pitch, thin_removed, list(warnings)))
 
     say(0.7, "Cutting a flat bottom")
     body_m = to_manifold(body)
@@ -394,7 +464,8 @@ def _report(body, base, pitch, min_feat, thin_removed, warnings) -> dict[str, An
 
 def run(raw_path: Path, out_dir: Path, params: dict[str, Any], progress: Progress | None = None) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
-    res = printify(load_mesh(raw_path), params, progress)
+    st = raw_path.stat()
+    res = printify(load_mesh(raw_path), params, progress, cache_key=f"{raw_path.resolve()}:{st.st_mtime_ns}:{st.st_size}")
     res.body.export(out_dir / "body.stl")
     if res.base is not None:
         res.base.export(out_dir / "base.stl")

@@ -38,6 +38,7 @@ local-ai = [
   "transformers>=4.44",
   "accelerate>=0.33",
   "safetensors>=0.4",
+  "peft>=0.13",  # Quick quality: the SDXL-Lightning add-on
   "huggingface-hub>=0.24",
   # TripoSR's own requirements (its code is cloned by scripts/setup-mac.sh)
   "omegaconf>=2.3",

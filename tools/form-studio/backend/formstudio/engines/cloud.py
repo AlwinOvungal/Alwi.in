@@ -129,6 +129,7 @@ def _transparent_upload(inp: ReconstructInput) -> Path:
 
 class _FalEngine:
     kind = "cloud"
+    parallel = 4  # one picture per request: run options side by side
 
     def available(self, ctx: EngineContext) -> tuple[bool, str]:
         ok = bool(ctx.secrets.get("fal"))

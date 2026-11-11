@@ -38,7 +38,7 @@ export default function App() {
             <span className="chip" title="Where local models run">
               <span className="dot" />
               {settings.resolved_device === "mps" ? "Apple GPU" : settings.resolved_device.toUpperCase()}
-              {settings.fast_mode ? " · fast" : ""}
+              {settings.sdxl_quality === "quick" ? " · quick" : settings.sdxl_quality === "lightest" ? " · lightest" : ""}
             </span>
           )}
         </header>

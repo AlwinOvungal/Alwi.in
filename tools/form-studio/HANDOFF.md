@@ -156,7 +156,9 @@ POST /api/models/{pack}/download[?fresh=1]   POST /api/models/{pack}/stop
 DELETE /api/models/{pack}             DELETE /api/models        POST /api/models/reinstall-libraries
 GET  /api/storage[?refresh=1]         POST /api/storage/open {id}
 GET|POST /api/jobs                    GET|PATCH|DELETE /api/jobs/{id}
-POST /api/jobs/{id}/stylize {engine?, seed?, n?}     (adds options; publishes state after each image)
+POST /api/jobs/{id}/stylize {engine?, seed?, n?, quality?}   (adds options; publishes state after each image)
+POST /api/jobs/{id}/cancel            (stops the running step; finished options are kept)
+POST /api/jobs/{id}/use-now {candidate, engine?}   (stops the rest, picks this option, builds the 3D shape)
 DELETE /api/jobs/{id}/candidates/{i}  DELETE /api/jobs/{id}/candidates
 POST /api/jobs/{id}/confirm {index}   POST /api/jobs/{id}/reconstruct {engine}
 POST /api/jobs/{id}/style {style_id}  POST /api/jobs/{id}/suggest-name
@@ -164,7 +166,47 @@ POST /api/jobs/{id}/rebuild-recipe    POST /api/jobs/{id}/printify {overrides}
 POST /api/jobs/{id}/reset-print       POST /api/jobs/{id}/export {formats}
 GET  /api/jobs/{id}/files/{path}      POST /api/jobs/{id}/open   (Finder / slicer)
 GET  /api/jobs/{id}/events            (SSE: {"type":"task",...} progress and {"type":"job", job} state)
+GET|POST /api/bench {size, compare}   POST /api/bench/cancel     GET /api/bench/files/{report.md|options.png}
 ```
+A task's public form: `{kind, status: queued|running|done|error|cancelled, progress, message, error, elapsed, eta_s,
+cancelling}`.
+
+### Speed machinery (Nov 2026)
+- **Timings:** `core/timing.py` writes one JSON line per stage to `~/FormStudio/timings.jsonl`. Only the keys in
+  `SAFE_KEYS` are kept, so there are never paths, names or keys.
+  - Each object's manifest gets `timings` (cutout, stylize with `first_option`, reconstruct, printify, export).
+  - `timing.estimate()` (median of recent runs) gives each task its `eta_s`.
+- **Worker:** a priority queue, with background warm-ups at `BACKGROUND`. `cancel(job)` sets a flag that the next
+  progress call turns into `Cancelled`; the SDXL step callback calls progress every step. `submit(..., replace=True)`
+  stops the running task for that object and runs right after it ("Use this now").
+- **Memory budget (`engines/local.py`):** models stay loaded while they fit in half the Mac's RAM (`FAMILY_GB` sizes);
+  the least recently used are unloaded only when needed.
+  - Setting `keep_loaded`: `auto` (the default) or `one` (the old way).
+  - Out of memory → unload everything and retry once.
+- **Warm-up:** `local.warm()` loads the default local engines (only if downloaded and they fit) when the app opens, a
+  photo is added, or an option is picked. It runs as low-priority worker work; setting `warm_up`.
+- **Quality (`sdxl_quality`):**
+  - `best`: 30 steps
+  - `quick`: SDXL-Lightning 8-step LoRA loaded as a named adapter on the same pipeline; Euler "trailing", guidance 0,
+    no negative prompt; switched on and off without reloading
+  - `lightest`: SDXL-Turbo, which replaced the old `fast_mode` (migrated in `settings._migrate`)
+  - Each option records its quality.
+- **Printify cache:** keyed on the AI mesh file (path, mtime, size) and every setting each level uses: voxelize →
+  thin parts → finish. Base, magnet, ring and format changes only redo the booleans. Cached arrays are read-only.
+- **Shape cache:** `~/FormStudio/cache/shape/<sha>.glb`, keyed on the confirmed picture + mask + engine + seed +
+  device/model settings, with a 2 GB cap. Not used for offline engines or Claude Sculpt.
+- **Cloud:**
+  - engines with `batch = True` (ChatGPT images) get all seeds in one request
+  - engines with `parallel = N` (fal) run N requests side by side
+  - OpenAI 429s: short rate limits are waited out (Retry-After); "no credit" is reported with OpenAI's own words and
+    never retried
+- **Speed test (`core/bench.py`):** variants `before` (one model at a time, Best, no print cache), `best`, `quick`.
+  - Each run: cut-out → first option → the rest → pick → 3D → print parts → 3MF → one slider change.
+  - The first run of each variant is cold; median and p90 come from the warm runs.
+  - Checks: watertight, height ±0.3 mm, 3MF parts on extruders 1 and 2.
+  - Output: `report.md`, `report.json` and `options.png` in `~/FormStudio/bench/<date>/`. The test objects are
+    flagged `bench` and deleted afterwards.
+  - Run it from Settings → Speed test or with `formstudio-cli bench`.
 
 ---
 
@@ -203,7 +245,7 @@ cd ~/Alwi.in && git pull && cd tools/form-studio && ./scripts/setup-mac.sh   # r
 
 | Step | id | Kind | Notes |
 |---|---|---|---|
-| Restyle | `local-sdxl` | local | SDXL + IP-Adapter (style's first reference picture) + depth ControlNet. ~1–2 min/image on M-series. 12 GB. Fast mode = SDXL-Turbo |
+| Restyle | `local-sdxl` | local | SDXL + IP-Adapter (style's first reference picture) + depth ControlNet. 12 GB. Quality: Best (30 steps, ~1–2 min/image on M-series), Quick (SDXL-Lightning 8 steps, +0.4 GB), Lightest (SDXL-Turbo) |
 | Restyle | `openai-image` | cloud | OpenAI Images *edits*; default model `gpt-image-2.5-sunburst`; photo + style refs; transparent bg |
 | Restyle | `fal-nano-banana` | cloud | fal.ai; photo + all refs |
 | Restyle | `fal-kontext` | cloud | fal.ai FLUX Kontext; words only |
@@ -278,7 +320,7 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
    - a summary strip (default restyle engine, default 3D engine, accounts connected) and a sticky side nav
    - **Engines:** radio lists; engines that need setting up fold away, with Connect buttons
    - **Cloud accounts:** expandable rows with status, key and options
-   - **Local AI:** device, Fast mode, model rows (one main action, "•••" for Download fresh / Delete), and a folded
+   - **Local AI:** device, restyle quality, keep models loaded, background warm-up, model rows (one main action, "•••" for Download fresh / Delete), and a folded
      Troubleshooting group (Start over, Delete all, Reinstall libraries)
    - **Printing:** slicer, export formats
    - **Storage:** usage bar + folders with Show in Finder
@@ -326,7 +368,12 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
     - destructive actions confirm
     - errors say what to do next
 14. **Don't recreate existing apps' branding.** Model and service names are fine as plain text.
-15. **Git:**
+15. **Speed changes must keep output identical or be opt-in:**
+    - The printify cache is tested against an uncached run (same vertices).
+    - Quick quality is a choice, never silently swapped in.
+    - Measure with the speed test before and after, and keep `timings.jsonl` free of private data
+      (`SAFE_KEYS` only).
+16. **Git:**
     - work on the feature branch
     - don't commit `web_dist`, `.venv` or models
     - keep commits descriptive
@@ -337,7 +384,9 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
 
 | Area | Status |
 |---|---|
-| Backend logic (printify, formats, finishes, 3MF, styles, candidates, models, storage, engine request shapes) | ✅ 77 pytest tests |
+| Backend logic (printify, formats, finishes, 3MF, styles, candidates, models, storage, engine request shapes, timings, cancel / use-now, memory budget, caches, cloud batching, speed test) | ✅ 95 pytest tests |
+| SDXL Best and **Quick (Lightning + IP-Adapter + ControlNet)**, switching both ways on one loaded pipeline | ✅ real models on CPU here (`FORMSTUDIO_SMOKE=1`) |
+| Actual speed-up on the user's Mac | ⚠️ not measured yet: run Settings → Speed test (Compare on) |
 | UI flows (object flow with offline engines, styles, new style, editor, options gallery, settings) | ✅ Playwright, desktop + phone |
 | Local SDXL (Clay Minimal and Pixel Voxel) | ✅ real models on CPU here; reached generation on the user's Mac |
 | Full SDXL → TripoSR → 3MF on the Mac | ⚠️ not yet confirmed end to end by the user |
@@ -353,7 +402,8 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
 1. Restyle quality varies by engine. Local SDXL is slow (1–2 min per image) and less faithful than cloud.
 2. Built-in styles other than Clay Minimal have **no reference pictures**, so they're matched by words only.
 3. TripoSR guesses the back from one image, and thin layered parts get merged by the minimum feature size.
-4. Loading models into memory (after download) has no detailed progress.
+4. Loading models into memory (after download) shows a message and elapsed time, but no percentage. Warm-up and
+   keep-loaded mostly hide it after the first object.
 5. No undo/history for print settings ("Reset to style" only).
 6. No batch mode in the UI (the CLI has it).
 7. Some library errors are still technical; they point to the log.
@@ -380,12 +430,9 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
    - Every failed task card offers **Try again**, **Use another engine** (prefilled with a working one) and **Show
      details** (log excerpt).
    - *Done when:* no error leaves the user on a dead end.
-4. **Real progress for every long task:**
-   - load into memory
-   - each diffusion step
-   - 3D build
-   - printify
-   - Show time estimates from past runs on this Mac (store durations per engine). Every long task gets **Cancel**.
+4. **Real progress for every long task:** *mostly done.*
+   - Done: elapsed time, "about N left" (from past runs or steps done), and Cancel / Stop on Photo, Style and Shape.
+   - Left: a percentage while models load into memory.
 5. **Validate the 3MF in Bambu Studio and OrcaSlicer.**
    - *Done when:* it opens as one object with two parts assigned to filaments 1 and 2, at the right size, with no
      repair prompt.

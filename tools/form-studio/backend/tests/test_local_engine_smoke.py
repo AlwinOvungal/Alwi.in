@@ -13,8 +13,13 @@ import pytest
 pytestmark = pytest.mark.skipif(os.environ.get("FORMSTUDIO_SMOKE") != "1", reason="set FORMSTUDIO_SMOKE=1 to run")
 
 
-@pytest.mark.parametrize("style_id", ["clay-minimal", "pixel-voxel"])  # with and without reference pictures
-def test_sdxl_restyle_runs_end_to_end(tmp_path, monkeypatch, style_id):
+@pytest.mark.parametrize("style_id,quality", [
+    ("clay-minimal", "best"),   # with reference pictures
+    ("pixel-voxel", "best"),    # without
+    ("clay-minimal", "quick"),  # SDXL-Lightning on the same loaded pipeline, IP-Adapter + ControlNet still on
+    ("clay-minimal", "best"),   # and back again: Lightning switched off cleanly
+])
+def test_sdxl_restyle_runs_end_to_end(tmp_path, monkeypatch, style_id, quality):
     pytest.importorskip("diffusers")
     monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)
     from huggingface_hub import constants
@@ -27,6 +32,8 @@ def test_sdxl_restyle_runs_end_to_end(tmp_path, monkeypatch, style_id):
 
     if models.status("sdxl")["status"] != "ready":
         pytest.skip("SDXL models aren't downloaded")
+    if quality == "quick" and models.status("sdxl-lightning")["status"] != "ready":
+        pytest.skip("SDXL-Lightning isn't downloaded")
     from PIL import Image, ImageDraw
 
     photo = tmp_path / "tree.png"
@@ -38,7 +45,12 @@ def test_sdxl_restyle_runs_end_to_end(tmp_path, monkeypatch, style_id):
     style.stylize.update(size=256, steps=2)
     out = tmp_path / "c"
     out.mkdir()
+    steps: list[str] = []
     res = STYLIZERS["local-sdxl"].stylize(
         StylizeInput(tmp_path / "01_cutout.png", tmp_path / "01_cutout_mask.png", style, "christmas tree", [11], out),
-        EngineContext(settings={}, device=pick_device("auto"), secrets={}), lambda p, m: None)
-    assert res and Image.open(out / res[0]["file"]).size == (1024, 1024)
+        EngineContext(settings={"sdxl_quality": quality}, device=pick_device("auto"), secrets={}), lambda p, m: steps.append(m))
+    assert res and Image.open(out / res[0]["file"]).size == (1024, 1024) and res[0]["quality"] == quality
+    want = 8 if quality == "quick" else 2
+    assert any(f"of {want}" in m for m in steps), steps[-3:]
+    pixels = Image.open(out / res[0]["file"]).convert("L").getextrema()
+    assert pixels[0] < pixels[1]  # not a blank image

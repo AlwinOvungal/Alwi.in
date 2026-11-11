@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { api, Candidate, Engines, fileUrl, Finish, FINISHES, Job, PrintFormat, PrintParams, reached, Settings, Style, useJob } from "./api";
+import { api, Candidate, Engines, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, Settings, Style, useJob } from "./api";
 import { StylePicker } from "./Library";
 import { EnginePicker, go, Progress, Slider, Switch, useToast } from "./ui";
 
@@ -22,6 +22,33 @@ function stepFor(job: Job): StepId {
 
 function stepDone(job: Job, s: StepId) {
   return s === "photo" ? reached(job, "cutout") : s === "style" ? reached(job, "confirmed") : s === "shape" ? reached(job, "reconstructed") : job.stage === "exported";
+}
+
+/** How long a finished step took on this object ("took 48 s"). */
+function stepTime(job: Job, s: StepId): string | null {
+  const t = job.timings;
+  if (!t) return null;
+  const secs =
+    s === "photo" ? t.cutout?.seconds : s === "style" ? t.stylize?.seconds : s === "shape" ? t.reconstruct?.seconds
+      : t.printify || t.export ? (t.printify?.seconds ?? 0) + (t.export?.seconds ?? 0) : undefined;
+  if (secs == null || !stepDone(job, s)) return null;
+  return s === "shape" && t.reconstruct?.cached ? "reused" : formatSeconds(secs);
+}
+
+/** Best / Quick / Lightest, for the local SDXL engine. */
+function QualityPicker({ value, onChange, disabled }: { value: Quality; onChange: (q: Quality) => void; disabled?: boolean }) {
+  return (
+    <div className="field">
+      <span>Quality</span>
+      <div className="seg wide" role="radiogroup" aria-label="Local restyle quality">
+        {QUALITIES.map((q) => (
+          <button key={q.id} type="button" role="radio" aria-checked={value === q.id} className={value === q.id ? "on" : ""} disabled={disabled} title={q.hint} onClick={() => onChange(q.id)}>
+            {q.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function stepEnabled(job: Job, s: StepId) {
@@ -116,7 +143,7 @@ export default function JobPage({ id }: { id: string }) {
                 <span className="num">{stepDone(job, s.id) ? "✓" : i + 1}</span>
                 <span className="t">
                   {s.title}
-                  <small>{s.hint}</small>
+                  <small>{s.hint}{stepTime(job, s.id) ? ` · ${stepTime(job, s.id) === "reused" ? "reused" : `took ${stepTime(job, s.id)}`}` : ""}</small>
                 </span>
               </button>
             </li>
@@ -150,6 +177,10 @@ type StepProps = {
 // ---------------------------------------------------------------- 1. photo ----
 function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { engines: Engines | null; styles: Style[] }) {
   const [engine, setEngine] = useState<string>("");
+  const [quality, setQuality] = useState<Quality>(settings?.sdxl_quality ?? "best");
+  useEffect(() => {
+    if (settings) setQuality(settings.sdxl_quality);
+  }, [settings]);
   const [subject, setSubject] = useState(job.subject);
   const [naming, setNaming] = useState(false);
   const toast = useToast();
@@ -217,15 +248,16 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
           </label>
           <span className="small muted">Want a keychain, magnet or stand? Choose that in the Print step.</span>
           {engines && <EnginePicker engines={engines.stylize} value={engine} onChange={setEngine} />}
+          {engine === "local-sdxl" && <QualityPicker value={quality} onChange={setQuality} disabled={busy} />}
         </div>
         <div className="card panel stack">
           {working && job.task ? (
-            <Progress task={job.task} />
+            <Progress task={job.task} onCancel={() => run(api.cancel(job.id))} />
           ) : (
             <>
               <button className="btn olive" disabled={busy || !engine} onClick={async () => {
                 if (subject !== job.subject) await api.rename(job.id, { subject });
-                run(api.stylize(job.id, engine));
+                run(api.stylize(job.id, engine, undefined, undefined, engine === "local-sdxl" ? quality : undefined));
               }}>
                 Generate {settings?.candidates ?? 4} option{(settings?.candidates ?? 4) === 1 ? "" : "s"}
               </button>
@@ -248,6 +280,10 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
   const [count, setCount] = useState(settings?.candidates ?? 4);
   const [asked, setAsked] = useState<{ before: number; n: number } | null>(null);
   const [zoom, setZoom] = useState<number | null>(null);
+  const [quality, setQuality] = useState<Quality>(settings?.sdxl_quality ?? "best");
+  useEffect(() => {
+    if (settings) setQuality(settings.sdxl_quality);
+  }, [settings]);
   useEffect(() => setEngine((e) => e || pickAvailable(engines?.stylize, job.candidates[job.candidates.length - 1]?.engine ?? settings?.engines.stylize)), [engines, settings]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!working) setAsked(null);
@@ -259,9 +295,11 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
 
   const generate = () => {
     setAsked({ before: cands.length, n: count });
-    run(api.stylize(job.id, engine, undefined, count));
+    run(api.stylize(job.id, engine, undefined, count, engine === "local-sdxl" ? quality : undefined));
   };
-  const use = (i: number) => run(api.confirm(job.id, i));
+  const shapeEngine = pickAvailable(engines?.reconstruct, settings?.engines.reconstruct);
+  // while options are still being made, "Use this" stops the rest and builds the 3D shape at once
+  const use = (i: number) => run(working ? api.useNow(job.id, i, shapeEngine || undefined) : api.confirm(job.id, i));
   const remove = (i: number) => run(api.removeCandidate(job.id, i));
   const clear = () => confirm(`Remove all ${cands.length} options?`) && run(api.clearCandidates(job.id));
 
@@ -288,7 +326,7 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
         {cands.length > 0 && <button className="btn sm ghost danger" disabled={busy} onClick={clear}>Clear options</button>}
       </div>
 
-      <div className="card panel generate-bar">
+      <div className={`card panel generate-bar ${engine === "local-sdxl" ? "with-quality" : ""}`}>
         <label className="field">
           <span>Style</span>
           <select className="select" value={job.style.id} disabled={busy} onChange={(e) => run(api.setJobStyle(job.id, e.target.value))}>
@@ -307,12 +345,18 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
             {[1, 2, 3, 4].map((k) => <option key={k} value={k}>{k}</option>)}
           </select>
         </label>
+        {engine === "local-sdxl" && <QualityPicker value={quality} onChange={setQuality} disabled={busy} />}
         <button className="btn olive" disabled={busy || !engine} onClick={generate}>
           {cands.length ? `Generate ${count} more` : `Generate ${count} option${count === 1 ? "" : "s"}`}
         </button>
       </div>
 
-      {working && job.task && <div className="card panel"><Progress task={job.task} /></div>}
+      {working && job.task && (
+        <div className="card panel stack" style={{ gap: 8 }}>
+          <Progress task={job.task} onCancel={() => run(api.cancel(job.id))} cancelLabel="Stop" />
+          {cands.length > 0 && <span className="small muted">Like one already? Press <b>Use this now</b> on it: the rest stop and the 3D shape starts straight away.</span>}
+        </div>
+      )}
 
       <div className="cands">
         {cands.map((c, i) => (
@@ -326,9 +370,13 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
                 <strong>Option {c.n ?? i + 1}</strong>
                 {c.seed != null && <span className="label">seed {c.seed}</span>}
               </div>
-              <span className="small muted cand-sub">{c.style_name ?? ""}{c.style_name ? " · " : ""}{engineLabel(c.engine)}</span>
+              <span className="small muted cand-sub">
+                {c.style_name ?? ""}{c.style_name ? " · " : ""}{engineLabel(c.engine)}{c.quality && c.quality !== "best" ? ` · ${c.quality}` : ""}
+              </span>
               <div className="row" style={{ gap: 6 }}>
-                <button className="btn sm olive grow" disabled={busy} onClick={() => use(i)}>{chosen(c) ? "Use again" : "Use this →"}</button>
+                <button className="btn sm olive grow" disabled={busy && !working} onClick={() => use(i)} title={working ? "Stops the other options and builds the 3D shape now" : undefined}>
+                  {working ? "Use this now →" : chosen(c) ? "Use again" : "Use this →"}
+                </button>
                 <button className="btn sm ghost" disabled={busy} onClick={() => remove(i)} aria-label={`Remove option ${c.n ?? i + 1}`}>Remove</button>
               </div>
             </div>
@@ -349,7 +397,7 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
               <span className="row" style={{ gap: 6 }}>
                 <button className="btn sm" disabled={zoom === 0} onClick={() => setZoom(zoom - 1)}>←</button>
                 <button className="btn sm" disabled={zoom === cands.length - 1} onClick={() => setZoom(zoom + 1)}>→</button>
-                <button className="btn sm olive" disabled={busy} onClick={() => (use(zoom), setZoom(null))}>Use this →</button>
+                <button className="btn sm olive" disabled={busy && !working} onClick={() => (use(zoom), setZoom(null))}>{working ? "Use this now →" : "Use this →"}</button>
                 <button className="btn sm ghost" onClick={() => setZoom(null)}>Close</button>
               </span>
             </div>
@@ -383,7 +431,7 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
         </div>
         <div className="card panel stack">
           {working && job.task ? (
-            <Progress task={job.task} />
+            <Progress task={job.task} onCancel={() => run(api.cancel(job.id))} />
           ) : (
             <>
               <button className="btn olive" disabled={busy || !engine} onClick={() => run(api.reconstruct(job.id, engine))}>

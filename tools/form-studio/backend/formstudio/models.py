@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from . import paths
+from .engines.base import quality_of
 
 log = logging.getLogger("formstudio.models")
 
@@ -47,14 +48,21 @@ PACKS: dict[str, dict[str, Any]] = {
         },
     },
     "sdxl-turbo": {
-        "label": "Fast mode · SDXL-Turbo",
-        "used_by": "SDXL fast mode (8 GB Macs)",
+        "label": "Lightest restyle · SDXL-Turbo",
+        "used_by": "Lightest quality for the local restyle (8 GB Macs)",
         "repos": {
             "stabilityai/sdxl-turbo": [
                 "model_index.json", "scheduler/*", "tokenizer/*", "tokenizer_2/*", "*/config.json",
                 "text_encoder/model.fp16.safetensors", "text_encoder_2/model.fp16.safetensors",
                 "unet/diffusion_pytorch_model.fp16.safetensors", "vae/diffusion_pytorch_model.fp16.safetensors",
             ],
+        },
+    },
+    "sdxl-lightning": {
+        "label": "Quick restyle · SDXL-Lightning",
+        "used_by": "Quick quality for the local restyle (8 steps instead of 30)",
+        "repos": {
+            "ByteDance/SDXL-Lightning": ["sdxl_lightning_8step_lora.safetensors"],
         },
     },
     "triposr": {
@@ -539,7 +547,8 @@ def packs_needed(settings: dict[str, Any]) -> list[str]:
     engines = settings.get("engines") or {}
     need = ["matting"]
     if engines.get("stylize") == "local-sdxl":
-        need.append("sdxl-turbo" if settings.get("fast_mode") else "sdxl")
+        q = quality_of(settings)
+        need += ["sdxl-turbo"] if q == "lightest" else ["sdxl"] + (["sdxl-lightning"] if q == "quick" else [])
     if engines.get("reconstruct") == "triposr":
         need += ["triposr-code", "triposr"]
     elif engines.get("reconstruct") == "hunyuan-mini":
