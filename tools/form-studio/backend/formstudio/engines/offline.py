@@ -16,6 +16,7 @@ from scipy import ndimage
 from skimage import measure
 
 from .base import EngineContext, Progress, ReconstructInput, StylizeInput
+from ..core import logo as logo_mod
 
 
 def _hex(h: str) -> tuple[int, int, int]:
@@ -131,3 +132,53 @@ class Extrude:
         _volume_to_glb(vol, inp.out)
         progress(1.0, "Done")
         return {"method": "extrude"}
+
+
+def _logo_source(inp) -> Path:
+    src = inp.source if inp.source and Path(inp.source).exists() else None
+    if src is None:
+        raise RuntimeError("This object's original picture is missing. Create it again from the logo file.")
+    return Path(src)
+
+
+class LogoPreview:
+    """Logos and text: a picture of the exact artwork as raised clay on a plaque. No AI, so no misspelt letters."""
+    id = "logo"
+    label = "Exact logo (from your artwork)"
+    kind = "offline"
+    logo_only = True
+    note = "Instant and free. Keeps every letter and shape exactly; the logo's own colours on a plaque."
+
+    def available(self, ctx: EngineContext) -> tuple[bool, str]:
+        return True, ""
+
+    def stylize(self, inp: StylizeInput, ctx: EngineContext, progress: Progress) -> list[dict]:
+        progress(0.2, "Reading the logo's colours and shapes")
+        data = logo_mod.layers_cached(_logo_source(inp))
+        progress(0.6, "Drawing it in clay")
+        plaque = (inp.style.palette.get("base") or {}).get("hex", "#F2F0EA")
+        img = logo_mod.preview(data, logo_mod.palette(data), plaque)
+        name = "candidate_1.png"
+        img.save(inp.out_dir / name)
+        progress(1.0, "Done")
+        return [{"file": name, "seed": inp.seeds[0] if inp.seeds else 0}]
+
+
+class LogoShape:
+    """Logos and text: the 3D shape straight from the artwork (each colour a raised part on a plaque)."""
+    id = "logo"
+    label = "From your artwork (exact)"
+    kind = "offline"
+    logo_only = True
+    note = "Instant and free. Every letter and shape exactly as drawn; each logo colour is its own part."
+
+    def available(self, ctx: EngineContext) -> tuple[bool, str]:
+        return True, ""
+
+    def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        progress(0.2, "Reading the logo's colours and shapes")
+        data = logo_mod.layers_cached(_logo_source(inp))
+        progress(0.5, "Raising the shapes")
+        logo_mod.preview_mesh(data).export(inp.out)
+        progress(1.0, "Done")
+        return {"method": "logo", "colours": logo_mod.palette(data)}

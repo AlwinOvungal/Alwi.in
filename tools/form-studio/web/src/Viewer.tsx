@@ -5,13 +5,15 @@ import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
 
+export type ViewerPart = { url: string; color: string };
+
 type Props = {
-  bodyUrl?: string;
-  baseUrl?: string;
+  /** the print's parts (each STL in its filament colour) */
+  parts: ViewerPart[];
   rawUrl?: string;
   mode: "print" | "raw";
-  bodyColor: string;
-  baseColor: string;
+  /** the AI mesh is shown in this colour (the body / first part) */
+  rawColor: string;
   /** magnets and keychains lie flat: look down at them */
   flat?: boolean;
 };
@@ -62,6 +64,28 @@ function Raw({ url, color }: { url: string; color: string }) {
   return <primitive object={scene} />;
 }
 
+/** What's in the view: the print parts in their colours, or the AI mesh. */
+function Model({ parts, rawUrl, mode, rawColor }: Pick<Props, "parts" | "rawUrl" | "mode" | "rawColor">) {
+  if (mode === "print" && parts.length) {
+    return (
+      // STL files are z-up (printer); three.js is y-up
+      <group rotation={[-Math.PI / 2, 0, 0]}>
+        {parts.map((p) => (
+          <Part key={p.url} url={p.url} color={p.color} />
+        ))}
+      </group>
+    );
+  }
+  if (rawUrl) {
+    return (
+      <Center bottom>
+        <Raw url={rawUrl} color={rawColor} />
+      </Center>
+    );
+  }
+  return null;
+}
+
 /** Turns the camera to a named view of the whole model. Goes through <Bounds>, which animates the camera
  * itself (moving the camera directly would be undone by its own animation). */
 function ViewSnap({ view, nonce }: { view: ViewId | null; nonce: number }) {
@@ -103,59 +127,97 @@ function BedGrid() {
   );
 }
 
-export default function Viewer({ bodyUrl, baseUrl, rawUrl, mode, bodyColor, baseColor, flat }: Props) {
+function Lights() {
+  return (
+    <>
+      <hemisphereLight args={["#ffffff", "#d9d4c5", 1.1]} />
+      <directionalLight position={[60, 120, 80]} intensity={1.6} castShadow shadow-mapSize={[2048, 2048]} />
+      <directionalLight position={[-80, 40, -60]} intensity={0.35} />
+      <directionalLight position={[0, -120, 0]} intensity={0.45} />
+    </>
+  );
+}
+
+const TRI_VIEWS: { id: ViewId; label: string }[] = [
+  { id: "front", label: "Front" },
+  { id: "right", label: "Side" },
+  { id: "top", label: "Top" },
+];
+
+/** One fixed view for the 3-view layout: the camera starts on its axis and <Bounds> keeps the model
+ * fitted, so every panel updates together when the shape or a colour changes. */
+function TriPanel({ view, children }: { view: ViewId; children: React.ReactNode }) {
+  const dir = new THREE.Vector3(...VIEWS[view].dir).normalize().multiplyScalar(160);
+  return (
+    <Canvas shadows camera={{ position: [dir.x, dir.y, dir.z], up: view === "top" ? [0, 0, -1] : [0, 1, 0], fov: 30, near: 0.5, far: 4000 }} dpr={[1, 2]}>
+      <Lights />
+      <Suspense fallback={null}>
+        <Bounds fit clip observe margin={1.35}>
+          {children}
+        </Bounds>
+      </Suspense>
+    </Canvas>
+  );
+}
+
+export default function Viewer({ parts, rawUrl, mode, rawColor, flat }: Props) {
   const lookDown = flat && mode === "print";
   const [view, setView] = useState<{ id: ViewId | null; n: number }>({ id: null, n: 0 });
   const [spin, setSpin] = useState(false);
+  const [tri, setTri] = useState(false);
   const snap = (id: ViewId) => setView((v) => ({ id, n: v.n + 1 }));
   const onKey = (e: React.KeyboardEvent) => {
     if (e.key === "r" || e.key === "R") return setSpin((s) => !s);
     const hit = (Object.keys(VIEWS) as ViewId[]).find((k) => VIEWS[k].key && VIEWS[k].key === e.key);
-    if (hit) snap(hit);
+    if (hit) (setTri(false), snap(hit));
   };
+  const model = <Model parts={parts} rawUrl={rawUrl} mode={mode} rawColor={rawColor} />;
 
   return (
     <div className="viewer-wrap" tabIndex={0} onKeyDown={onKey} aria-label="3D view: drag to turn, scroll to zoom. Keys: 1 front, 3 right, 7 top, 9 bottom, 0 three-quarter, R spin">
-      <Canvas
-        key={lookDown ? "flat" : "standing"}
-        shadows
-        camera={{ position: lookDown ? [0, 160, 45] : [70, 60, 90], fov: 35, near: 0.5, far: 4000 }}
-        dpr={[1, 2]}
-      >
-        <hemisphereLight args={["#ffffff", "#d9d4c5", 1.1]} />
-        <directionalLight position={[60, 120, 80]} intensity={1.6} castShadow shadow-mapSize={[2048, 2048]} />
-        <directionalLight position={[-80, 40, -60]} intensity={0.35} />
-        <directionalLight position={[0, -120, 0]} intensity={0.45} />
-        <Suspense fallback={null}>
-          <Bounds fit clip observe margin={1.5}>
-            {mode === "print" && bodyUrl ? (
-              // STL files are z-up (printer); three.js is y-up
-              <group rotation={[-Math.PI / 2, 0, 0]}>
-                <Part url={bodyUrl} color={bodyColor} />
-                {baseUrl && <Part url={baseUrl} color={baseColor} />}
-              </group>
-            ) : rawUrl ? (
-              <Center bottom>
-                <Raw url={rawUrl} color={bodyColor} />
-              </Center>
-            ) : null}
-            <ViewSnap view={view.id} nonce={view.n} />
-          </Bounds>
-        </Suspense>
-        <BedGrid />
-        {/* full turn in every direction, including underneath (to check a magnet pocket) */}
-        <OrbitControls makeDefault enableDamping target={[0, lookDown ? 0 : 20, 0]} autoRotate={spin} autoRotateSpeed={2.5} />
-        <GizmoHelper alignment="bottom-right" margin={[64, 64]}>
-          <GizmoViewport axisColors={["#c0453a", "#5e8a2e", "#3d6fb6"]} labelColor="#ffffff" />
-        </GizmoHelper>
-      </Canvas>
+      {tri ? (
+        <div className="tri-grid" aria-label="Front, side and top views">
+          {TRI_VIEWS.map((v) => (
+            <figure key={v.id} className="tri-panel">
+              <TriPanel view={v.id}>{model}</TriPanel>
+              <figcaption className="chip">{v.label}</figcaption>
+            </figure>
+          ))}
+        </div>
+      ) : (
+        <Canvas
+          key={lookDown ? "flat" : "standing"}
+          shadows
+          camera={{ position: lookDown ? [0, 160, 45] : [70, 60, 90], fov: 35, near: 0.5, far: 4000 }}
+          dpr={[1, 2]}
+        >
+          <Lights />
+          <Suspense fallback={null}>
+            <Bounds fit clip observe margin={1.5}>
+              {model}
+              <ViewSnap view={view.id} nonce={view.n} />
+            </Bounds>
+          </Suspense>
+          <BedGrid />
+          {/* full turn in every direction, including underneath (to check a magnet pocket) */}
+          <OrbitControls makeDefault enableDamping target={[0, lookDown ? 0 : 20, 0]} autoRotate={spin} autoRotateSpeed={2.5} />
+          <GizmoHelper alignment="bottom-right" margin={[64, 64]}>
+            <GizmoViewport axisColors={["#c0453a", "#5e8a2e", "#3d6fb6"]} labelColor="#ffffff" />
+          </GizmoHelper>
+        </Canvas>
+      )}
       <div className="view-tools" role="toolbar" aria-label="Views">
+        <button type="button" className={tri ? "on" : ""} onClick={() => setTri((t) => !t)} title="Front, side and top at once">
+          3 views
+        </button>
+        <span className="sep" aria-hidden />
         {(Object.keys(VIEWS) as ViewId[]).map((k) => (
-          <button key={k} type="button" className={view.id === k ? "on" : ""} onClick={() => snap(k)} title={VIEWS[k].key ? `${VIEWS[k].label} (key ${VIEWS[k].key})` : VIEWS[k].label}>
+          <button key={k} type="button" className={!tri && view.id === k ? "on" : ""} disabled={tri}
+            onClick={() => snap(k)} title={VIEWS[k].key ? `${VIEWS[k].label} (key ${VIEWS[k].key})` : VIEWS[k].label}>
             {VIEWS[k].label}
           </button>
         ))}
-        <button type="button" className={spin ? "on" : ""} onClick={() => setSpin((s) => !s)} title="Turn slowly (key R)">Spin</button>
+        <button type="button" className={spin ? "on" : ""} disabled={tri} onClick={() => setSpin((s) => !s)} title="Turn slowly (key R)">Spin</button>
       </div>
     </div>
   );

@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { api, Candidate, Colour, Engines, FILAMENTS, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, Settings, Style, useJob } from "./api";
+import { api, BACKERS, Candidate, Colour, Engines, FILAMENTS, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, Settings, Style, useJob } from "./api";
 import { StylePicker } from "./Library";
 import { ClayFields, EnginePicker, ErrorCard, go, NeedsBlender, Progress, Slider, Switch, useBlender, useToast } from "./ui";
 
@@ -182,6 +182,11 @@ function otherEngine(list: Engines["stylize"] | undefined, current: string): str
 }
 
 /** The preferred engine if it's usable, otherwise the first one that is. */
+/** The engines that fit this object: the exact-logo engines only for logos, the rest only for objects. */
+function fitKind(list: Engines["stylize"] | undefined, job: Job) {
+  return (list ?? []).filter((e) => (job.kind === "logo" ? true : !e.logo_only));
+}
+
 function pickAvailable(list: Engines["stylize"] | undefined, preferred: string | undefined): string {
   if (!list) return "";
   return list.find((e) => e.id === preferred && e.available)?.id ?? list.find((e) => e.available)?.id ?? "";
@@ -222,7 +227,13 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
       setNaming(false);
     }
   };
-  useEffect(() => setEngine((e) => e || pickAvailable(engines?.stylize, settings?.engines.stylize)), [settings, engines]);
+  const stylizers = useMemo(() => fitKind(engines?.stylize, job), [engines, job.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setEngine((e) => e || pickAvailable(stylizers, job.kind === "logo" ? "logo" : settings?.engines.stylize)), [settings, engines, stylizers, job.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setEngine(job.kind === "logo" ? "logo" : pickAvailable(stylizers, settings?.engines.stylize)), [job.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  const setKind = (v: boolean) => {
+    if (reached(job, "confirmed") && !confirm("Switch? The 3D shape will be made again (your options are kept).")) return;
+    run(api.setKind(job.id, v ? "logo" : "object"));
+  };
   const working = busy && job.task?.kind === "stylize";
   const { failed, dismiss } = useFailure(job, "stylize");
   const generate = async () => {
@@ -273,7 +284,13 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
             </div>
           </label>
           <span className="small muted">Want a keychain, magnet or stand? Choose that in the Print step.</span>
-          {engines && <EnginePicker engines={engines.stylize} value={engine} onChange={setEngine} />}
+          <Switch label="Logo or text: keep the exact shapes" checked={job.kind === "logo"} onChange={setKind} disabled={busy} />
+          <p className="small muted" style={{ margin: 0 }}>
+            {job.kind === "logo"
+              ? "The 3D shape is built straight from your file, so every letter and shape stays exactly as drawn, each colour on its own filament. (AI restyles redraw letters and often misspell them.)"
+              : "Turn this on for logos, lettering and flat graphics: they're built exactly from the file instead of being redrawn by AI."}
+          </p>
+          {engines && <EnginePicker engines={stylizers} value={engine} onChange={setEngine} />}
           {engine === "local-sdxl" && <QualityPicker value={quality} onChange={setQuality} disabled={busy} />}
         </div>
         <div className="card panel stack">
@@ -291,7 +308,7 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
                 />
               )}
               <button className="btn olive" disabled={busy || !engine} onClick={generate}>
-                Generate {settings?.candidates ?? 4} option{(settings?.candidates ?? 4) === 1 ? "" : "s"}
+                {engine === "logo" ? "Draw the exact logo (free)" : `Generate ${settings?.candidates ?? 4} option${(settings?.candidates ?? 4) === 1 ? "" : "s"}`}
               </button>
               <button className="btn" disabled={busy} onClick={() => run(api.confirm(job.id, null))} title="Skip restyling: use the cut-out photo for the 3D step">
                 Skip: use photo as is
@@ -316,7 +333,8 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
   useEffect(() => {
     if (settings) setQuality(settings.sdxl_quality);
   }, [settings]);
-  useEffect(() => setEngine((e) => e || pickAvailable(engines?.stylize, job.candidates[job.candidates.length - 1]?.engine ?? settings?.engines.stylize)), [engines, settings]); // eslint-disable-line react-hooks/exhaustive-deps
+  const stylizers = useMemo(() => fitKind(engines?.stylize, job), [engines, job.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => setEngine((e) => e || pickAvailable(stylizers, job.candidates[job.candidates.length - 1]?.engine ?? (job.kind === "logo" ? "logo" : settings?.engines.stylize))), [engines, settings, stylizers]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!working) setAsked(null);
   }, [working]);
@@ -332,12 +350,12 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
     setAsked({ before: cands.length, n: count });
     run(api.stylize(job.id, engine, undefined, count, engine === "local-sdxl" ? quality : undefined));
   };
-  const shapeEngine = pickAvailable(engines?.reconstruct, settings?.engines.reconstruct);
+  const shapeEngine = pickAvailable(fitKind(engines?.reconstruct, job), job.kind === "logo" ? "logo" : settings?.engines.reconstruct);
   // "3 views": pick this option and draw its front, side and back (stops options still being made)
   const views = (i: number) => run(api.useNow(job.id, i, undefined, true));
   // while options are still being made, "Use this" stops the rest and builds the 3D shape at once
   const use = (i: number) =>
-    settings?.views_auto ? views(i) : run(working ? api.useNow(job.id, i, shapeEngine || undefined) : api.confirm(job.id, i));
+    settings?.views_auto && job.kind !== "logo" ? views(i) : run(working ? api.useNow(job.id, i, shapeEngine || undefined) : api.confirm(job.id, i));
   const remove = (i: number) => run(api.removeCandidate(job.id, i));
   const clear = () => confirm(`Remove all ${cands.length} options?`) && run(api.clearCandidates(job.id));
 
@@ -380,7 +398,7 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
         <label className="field">
           <span>Engine</span>
           <select className="select" value={engine} disabled={busy} onChange={(e) => setEngine(e.target.value)}>
-            {engines?.stylize.map((e) => <option key={e.id} value={e.id} disabled={!e.available}>{e.label}{e.available ? "" : " (not set up)"}</option>)}
+            {stylizers.map((e) => <option key={e.id} value={e.id} disabled={!e.available}>{e.label}{e.available ? "" : " (not set up)"}</option>)}
           </select>
         </label>
         <label className="field">
@@ -561,9 +579,11 @@ function ViewsCard({ job, busy, engines, settings, run }: StepProps & { engines:
 
 function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines: Engines | null }) {
   const [engine, setEngine] = useState("");
+  // logos: only the exact engine fits (AI 3D loses thin letters); objects: everything but it
+  const list = useMemo(() => (engines?.reconstruct ?? []).filter((e) => (job.kind === "logo") === !!e.logo_only), [engines, job.kind]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(
-    () => setEngine((e) => e || pickAvailable(engines?.reconstruct, job.reconstruct?.engine ?? settings?.engines.reconstruct)),
-    [settings, engines, job.reconstruct],
+    () => setEngine((e) => (e && list.some((x) => x.id === e) ? e : pickAvailable(list, job.reconstruct?.engine ?? (job.kind === "logo" ? "logo" : settings?.engines.reconstruct)))),
+    [settings, engines, job.reconstruct, list, job.kind],
   );
   const working = busy && job.task?.kind === "reconstruct";
   const { failed, dismiss } = useFailure(job, "reconstruct");
@@ -576,17 +596,19 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
         <figcaption className="chip">Chosen look</figcaption>
       </figure>
       <div className="stack">
-        <ViewsCard job={job} busy={busy} engines={engines} settings={settings} run={run} />
+        {job.kind !== "logo" && <ViewsCard job={job} busy={busy} engines={engines} settings={settings} run={run} />}
         <div className="card panel stack">
           <h2>Build the 3D shape</h2>
           <p className="small muted" style={{ margin: 0 }}>
-            {job.views && engines?.reconstruct.find((e) => e.id === engine)?.multi_view
+            {job.kind === "logo"
+              ? "Built straight from your artwork: every letter and shape exactly as drawn, each colour its own raised part on a plaque. Instant and free."
+              : job.views && engines?.reconstruct.find((e) => e.id === engine)?.multi_view
               ? "This engine builds from all 3 views. Form Studio then cleans the shape up for printing."
               : job.views
                 ? "This engine uses the front view only. Meshy, TRELLIS and Hunyuan3D use all 3 views."
                 : "The 3D model guesses the back and sides from this one image. Make 3 views above for a better back. Form Studio then cleans it up for printing."}
           </p>
-          {engines && <EnginePicker engines={engines.reconstruct} value={engine} onChange={setEngine} />}
+          {engines && <EnginePicker engines={list} value={engine} onChange={setEngine} />}
         </div>
         <div className="card panel stack">
           {working && job.task ? (
@@ -659,15 +681,20 @@ function ColourPick({ label, colour, onPick, disabled }: { label: string; colour
   );
 }
 
-function ColoursCard({ job, hasBase, busy, run }: { job: Job; hasBase: boolean; busy: boolean; run: (p: Promise<Job>) => Promise<void> }) {
+function ColoursCard({ job, busy, run }: { job: Job; busy: boolean; run: (p: Promise<Job>) => Promise<void> }) {
   const toast = useToast();
   const c = job.colours;
-  if (!c) return null;
-  const pick = (part: "body" | "base") => (col: { hex: string; name?: string }) => run(api.setColours(job.id, { [part]: col }));
+  const parts = job.parts ?? [];
+  if (!c || !parts.length) return null;
+  const ids = parts.map((p) => p.id);
+  const pick = (part: string) => (col: { hex: string; name?: string }) => run(api.setColours(job.id, { [part]: col }));
+  const swap = (a: string, b: string) =>
+    run(api.setColours(job.id, { [a]: { hex: c[b].hex, name: c[b].name }, [b]: { hex: c[a].hex, name: c[a].name } }));
   const fromPicture = async () => {
     try {
       const s = await api.suggestJobColours(job.id);
-      run(api.setColours(job.id, hasBase ? s : { body: s.body }));
+      const fit = Object.fromEntries(Object.entries(s).filter(([k]) => ids.includes(k)));
+      if (Object.keys(fit).length) await run(api.setColours(job.id, fit));
     } catch (e) {
       toast((e as Error).message, true);
     }
@@ -676,18 +703,33 @@ function ColoursCard({ job, hasBase, busy, run }: { job: Job; hasBase: boolean; 
     <div className="card panel stack">
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h3>Colours</h3>
-        {job.colours_custom ? <span className="small muted">Chosen for this object</span> : <span className="small muted">From the style</span>}
+        {job.colours_custom ? <span className="small muted">Chosen for this object</span> : (
+          <span className="small muted">{job.logo_parts ? "From your artwork" : "From the style"}</span>
+        )}
       </div>
-      <div className={`colours-row ${hasBase ? "" : "one"}`}>
-        <ColourPick label="Body · filament 1" colour={c.body} onPick={pick("body")} disabled={busy} />
-        {hasBase && <ColourPick label="Base · filament 2" colour={c.base} onPick={pick("base")} disabled={busy} />}
+      <div className={`colours-row ${ids.length === 1 ? "one" : ""}`}>
+        {parts.map((part, i) => (
+          <div key={part.id} className="colour-slot">
+            <ColourPick label={`${c[part.id]?.label ?? part.label ?? part.id} · filament ${part.filament}`}
+              colour={c[part.id] ?? part} onPick={pick(part.id)} disabled={busy} />
+            {i < parts.length - 1 && (
+              <button type="button" className="swap-mid" disabled={busy} title="Swap these two colours"
+                onClick={() => swap(part.id, parts[i + 1].id)} aria-label={`Swap with ${parts[i + 1].label ?? parts[i + 1].id}`}>⇄</button>
+            )}
+          </div>
+        ))}
       </div>
       <div className="row" style={{ gap: 6 }}>
         <button className="btn sm" disabled={busy} onClick={fromPicture}>From the picture</button>
-        {hasBase && <button className="btn sm ghost" disabled={busy} onClick={() => run(api.setColours(job.id, { body: c.base, base: c.body }))}>Swap</button>}
-        {job.colours_custom && <button className="btn sm ghost" disabled={busy} onClick={() => run(api.resetColours(job.id))}>Style colours</button>}
+        {job.colours_custom && (
+          <button className="btn sm ghost" disabled={busy} onClick={() => run(api.resetColours(job.id))}>
+            {job.logo_parts ? "Artwork colours" : "Style colours"}
+          </button>
+        )}
       </div>
-      <span className="small muted">The 3MF tells your slicer these colours for filaments 1 and 2. Load the matching filaments in your AMS.</span>
+      <span className="small muted">
+        The 3MF tells your slicer these colours{ids.length > 1 ? ` for filaments 1–${ids.length}` : ""}. Load the matching filaments in your AMS.
+      </span>
     </div>
   );
 }
@@ -728,10 +770,9 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
   };
 
   const rep = job.report;
-  const colours = job.colours ?? style?.palette;
-  const body = colours?.body.hex ?? "#5E6B2E";
-  const base = colours?.base.hex ?? "#F2F0EA";
-  const hasBase = job.files.includes("05_print/base.stl");
+  const parts = job.parts ?? [];
+  const multi = parts.length > 1;
+  const rawColor = parts[0]?.hex ?? job.colours?.body?.hex ?? style?.palette.body.hex ?? "#5E6B2E";
   const exported = job.stage === "exported";
   const slicer = settings?.slicer ?? "bambu";
   const slicerName = { bambu: "Bambu Studio", orca: "OrcaSlicer", prusa: "PrusaSlicer" }[slicer];
@@ -759,11 +800,9 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           <Suspense fallback={<div className="busy muted">Loading 3D…</div>}>
             <Viewer
               mode={view}
-              bodyUrl={fileUrl(job, "05_print/body.stl")}
-              baseUrl={hasBase ? fileUrl(job, "05_print/base.stl") : undefined}
-              rawUrl={fileUrl(job, "04_raw.glb")}
-              bodyColor={body}
-              baseColor={base}
+              parts={parts.map((pt) => ({ url: fileUrl(job, pt.file), color: pt.hex }))}
+              rawUrl={job.files.includes("04_raw.glb") ? fileUrl(job, "04_raw.glb") : undefined}
+              rawColor={rawColor}
               flat={fmt !== "stand"}
             />
           </Suspense>
@@ -775,8 +814,9 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           </div>
           {view === "print" && (
             <div className="legend">
-              <span><i className="swatch" style={{ background: body }} />{colours?.body.name} · filament 1</span>
-              {hasBase && <span><i className="swatch" style={{ background: base }} />{colours?.base.name} · filament 2</span>}
+              {parts.map((pt) => (
+                <span key={pt.id}><i className="swatch" style={{ background: pt.hex }} />{pt.name} · filament {pt.filament}</span>
+              ))}
             </div>
           )}
           {rebuilding && <div className="busy"><span className="chip">Rebuilding…</span></div>}
@@ -813,17 +853,39 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
             ))}
           </div>
           <p className="small muted" style={{ margin: 0 }}>{FORMAT_HINT[fmt]}</p>
-          <Slider label={fmt === "stand" ? "Height" : "Object height"} unit=" mm" min={15} max={180} step={1} value={p.geometry.height_mm} onChange={(v) => set("geometry", { height_mm: v })} onCommit={(v) => set("geometry", { height_mm: v }, true)} disabled={busy} />
+          {job.logo_parts && p.logo && (
+            <>
+              <label className="field" style={{ margin: 0 }}><span>Behind the logo</span></label>
+              <div className="seg" role="radiogroup" aria-label="Behind the logo" style={{ alignSelf: "start" }}>
+                {BACKERS.filter((b) => b.id !== "bar" || fmt === "stand").map((b) => (
+                  <button key={b.id} role="radio" aria-checked={p.logo!.backer === b.id} className={p.logo!.backer === b.id ? "on" : ""}
+                    disabled={busy} onClick={() => p.logo!.backer !== b.id && set("logo", { backer: b.id }, true)}>
+                    {b.label}
+                  </button>
+                ))}
+              </div>
+              <p className="small muted" style={{ margin: 0 }}>{BACKERS.find((b) => b.id === p.logo!.backer)?.hint}</p>
+              <Slider label="Logo width" unit=" mm" min={25} max={200} step={1} value={p.logo.width_mm} onChange={(v) => set("logo", { width_mm: v })} onCommit={(v) => set("logo", { width_mm: v }, true)} disabled={busy} />
+              <Slider label="Raised letters" unit=" mm" min={0.6} max={6} step={0.2} value={p.logo.raise_mm} onChange={(v) => set("logo", { raise_mm: v })} onCommit={(v) => set("logo", { raise_mm: v }, true)} disabled={busy} />
+              <Slider label="Plate thickness" unit=" mm" min={1.5} max={8} step={0.5} value={p.logo.plaque_mm} onChange={(v) => set("logo", { plaque_mm: v })} onCommit={(v) => set("logo", { plaque_mm: v }, true)} disabled={busy} />
+              <Slider label="Border" unit=" mm" min={1} max={12} step={0.5} value={p.logo.margin_mm} onChange={(v) => set("logo", { margin_mm: v })} onCommit={(v) => set("logo", { margin_mm: v }, true)} disabled={busy} />
+              {p.logo.backer === "plaque" && (
+                <Slider label="Corner radius" unit=" mm" min={0} max={12} step={0.5} value={p.logo.corner_mm} onChange={(v) => set("logo", { corner_mm: v })} onCommit={(v) => set("logo", { corner_mm: v }, true)} disabled={busy} />
+              )}
+              <Slider label="Thinnest stroke" unit=" mm" min={0.6} max={3} step={0.1} value={p.logo.min_stroke_mm} onChange={(v) => set("logo", { min_stroke_mm: v })} onCommit={(v) => set("logo", { min_stroke_mm: v }, true)} disabled={busy} />
+            </>
+          )}
+          {!job.logo_parts && <Slider label={fmt === "stand" ? "Height" : "Object height"} unit=" mm" min={15} max={180} step={1} value={p.geometry.height_mm} onChange={(v) => set("geometry", { height_mm: v })} onCommit={(v) => set("geometry", { height_mm: v }, true)} disabled={busy} />}
           <label className="field">
             <span>3D finish</span>
             <select className="select" value={finish} disabled={busy} onChange={(e) => set("geometry", { finish: e.target.value as Finish }, true)}>
-              {FINISHES.map((f) => (
+              {FINISHES.filter((f) => !job.logo_parts || !["blender"].includes(f.id)).map((f) => (
                 <option key={f.id} value={f.id}>{f.label}{f.id === "blender" && blender && !blender.found ? " (needs Blender)" : ""}</option>
               ))}
             </select>
             <small className="muted">{FINISHES.find((f) => f.id === finish)?.hint}</small>
           </label>
-          {finish === "blender" && <NeedsBlender b={blender} />}
+          {finish === "blender" && !job.logo_parts && <NeedsBlender b={blender} />}
           {finish === "blender" && (
             <ClayFields g={p.geometry} disabled={busy} set={(patch, commit) => set("geometry", patch, commit)} />
           )}
@@ -836,10 +898,10 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           {finish === "soft" && (
             <Slider label="Softness" unit=" mm" min={0} max={3} step={0.1} value={p.geometry.soften_mm} onChange={(v) => set("geometry", { soften_mm: v })} onCommit={(v) => set("geometry", { soften_mm: v }, true)} disabled={busy} />
           )}
-          <Slider label="Thinnest part" unit=" mm" min={0.8} max={5} step={0.1} value={p.geometry.min_feature_mm} onChange={(v) => set("geometry", { min_feature_mm: v })} onCommit={(v) => set("geometry", { min_feature_mm: v }, true)} disabled={busy} />
-          <Slider label="Detail (remesh)" unit=" mm" min={0.25} max={1.5} step={0.05} value={p.geometry.voxel_mm} onChange={(v) => set("geometry", { voxel_mm: v })} onCommit={(v) => set("geometry", { voxel_mm: v }, true)} disabled={busy} />
+          {!job.logo_parts && <Slider label="Thinnest part" unit=" mm" min={0.8} max={5} step={0.1} value={p.geometry.min_feature_mm} onChange={(v) => set("geometry", { min_feature_mm: v })} onCommit={(v) => set("geometry", { min_feature_mm: v }, true)} disabled={busy} />}
+          {!job.logo_parts && <Slider label="Detail (remesh)" unit=" mm" min={0.25} max={1.5} step={0.05} value={p.geometry.voxel_mm} onChange={(v) => set("geometry", { voxel_mm: v })} onCommit={(v) => set("geometry", { voxel_mm: v }, true)} disabled={busy} />}
           <div className="divider" />
-          {fmt !== "stand" && (
+          {fmt !== "stand" && !job.logo_parts && (
             <Slider label="Thickness" unit=" mm" min={3} max={25} step={0.5} value={p.flat_back.thickness_mm} onChange={(v) => set("flat_back", { thickness_mm: v })} onCommit={(v) => set("flat_back", { thickness_mm: v }, true)} disabled={busy} />
           )}
           {fmt === "keychain" && (
@@ -848,7 +910,7 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
               <Slider label="Loop thickness" unit=" mm" min={2} max={6} step={0.5} value={p.ring.thickness_mm} onChange={(v) => set("ring", { thickness_mm: v })} onCommit={(v) => set("ring", { thickness_mm: v }, true)} disabled={busy} />
             </>
           )}
-          {fmt === "stand" && (
+          {fmt === "stand" && !job.logo_parts && (
             <>
               <Switch label="Base" checked={p.base.enabled} onChange={(v) => set("base", { enabled: v }, true)} disabled={busy} />
               {p.base.enabled && (
@@ -859,10 +921,10 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
               )}
             </>
           )}
-          {fmt !== "keychain" && (
+          {fmt !== "keychain" && (!job.logo_parts || fmt === "magnet") && (
             <Switch label="Magnet pocket" checked={p.magnet.enabled} onChange={(v) => set("magnet", { enabled: v }, true)} disabled={busy} />
           )}
-          {fmt !== "keychain" && p.magnet.enabled && (
+          {fmt !== "keychain" && (!job.logo_parts || fmt === "magnet") && p.magnet.enabled && (
             <div className="pair" style={{ gap: 10 }}>
               <label className="field"><span>Ø mm</span><input className="input" type="number" step="0.5" min="2" max="30" value={p.magnet.diameter_mm} onChange={(e) => set("magnet", { diameter_mm: Number(e.target.value) })} onBlur={(e) => set("magnet", { diameter_mm: Number(e.target.value) }, true)} /></label>
               <label className="field"><span>Depth mm</span><input className="input" type="number" step="0.5" min="0.5" max="10" value={p.magnet.depth_mm} onChange={(e) => set("magnet", { depth_mm: Number(e.target.value) })} onBlur={(e) => set("magnet", { depth_mm: Number(e.target.value) }, true)} /></label>
@@ -870,12 +932,12 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           )}
         </div>
 
-        <ColoursCard job={job} hasBase={hasBase} busy={busy || applying} run={run} />
+        <ColoursCard job={job} busy={busy || applying} run={run} />
 
         <div className="card panel stack">
           <h3>Export</h3>
           <div className="row small">
-            {[["3mf", hasBase ? "3MF (two colours)" : "3MF"], ["step", "STEP"]].map(([f, label]) => (
+            {[["3mf", multi ? `3MF (${parts.length} colours)` : "3MF"], ["step", "STEP"]].map(([f, label]) => (
               <label key={f} className="row" style={{ gap: 6 }}>
                 <input type="checkbox" checked={formats.includes(f)} onChange={(e) => setFormats((cur) => (e.target.checked ? [...cur, f] : cur.filter((x) => x !== f)))} />
                 {label}
@@ -898,11 +960,11 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
                 {job.exports.some((f) => f.endsWith(".3mf")) && (
                   <button className="btn sm grow" onClick={() => api.open(job.id, slicer, "05_print/model.3mf").catch((e) => toast(e.message, true))}>Open in {slicerName}</button>
                 )}
-                <button className="btn sm ghost" onClick={() => api.open(job.id, "finder", "05_print/body.stl").catch((e) => toast(e.message, true))}>Show in Finder</button>
+                <button className="btn sm ghost" onClick={() => api.open(job.id, "finder", parts[0]?.file ?? "05_print/body.stl").catch((e) => toast(e.message, true))}>Show in Finder</button>
               </div>
               <p className="small muted" style={{ margin: 0 }}>
-                {hasBase
-                  ? "The 3MF opens as one object with two parts: body on filament 1, base on filament 2. Load the matching colours in your AMS."
+                {multi
+                  ? `The 3MF opens as one object with ${parts.length} parts, each on its own filament (${parts.map((pt) => pt.filament).join(", ")}). Load the matching colours in your AMS.`
                   : "The 3MF opens as one part on filament 1. It lies flat on its back, so it needs no supports."}
               </p>
             </>

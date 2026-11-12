@@ -56,6 +56,7 @@ class StylizeInput:
     subject: str
     seeds: list[int]
     out_dir: Path
+    source: Path | None = None  # the original upload (logos are read from it at full resolution)
 
 
 @dataclass
@@ -69,6 +70,7 @@ class ReconstructInput:
     # front / left / back pictures of the same object (from "Make 3 views"), each (image on white, mask).
     # Engines that can use several views use them; the others use `image` (the front).
     views: dict[str, tuple[Path, Path]] | None = None
+    source: Path | None = None  # the original upload (the logo engine builds from it)
 
 
 VIEW_NAMES = ("front", "left", "back")
@@ -105,7 +107,7 @@ class Reconstructor(Engine, Protocol):
 def describe(e: Engine, ctx: EngineContext) -> dict:
     ok, why = e.available(ctx)
     return {"id": e.id, "label": e.label, "kind": e.kind, "note": e.note, "available": ok, "reason": why,
-            "multi_view": bool(getattr(e, "multi_view", False))}
+            "multi_view": bool(getattr(e, "multi_view", False)), "logo_only": bool(getattr(e, "logo_only", False))}
 
 
 def missing(*modules: str) -> str | None:

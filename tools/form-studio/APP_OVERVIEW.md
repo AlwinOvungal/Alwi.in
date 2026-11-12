@@ -107,7 +107,8 @@ Web UI (React + TypeScript + three.js)  web/src/  → built into backend/formstu
      - **X / Y / Z axis gizmo** (bottom right; click an axis to look along it)
      - view buttons **Front · Back · Left · Right · Top · Bottom · 3/4** and **Spin**; keys 1 / 3 / 7 / 9 / 0 and R
      - the camera can go under the bed (to see a magnet pocket); the bed grid hides when you look from below
-   - **Colours:** Body (filament 1) and Base / back (filament 2) per object, from a palette of common filament colours
+   - **Colours:** one card per part — Body and Base for objects; each logo colour and the Plaque for logos
+     (filaments 1..4) — from a palette of common filament colours
      or a Custom colour (named automatically); **From the picture**, **Swap**, **Style colours**. Changing a colour
      doesn't rebuild the shape; it clears exported 3MF/STEP so you never save old colours.
    - **Format:** Stand · Magnet · Keychain, each with its own defaults
@@ -261,6 +262,15 @@ The new built-ins have no reference pictures; their words alone set the look.
   - The Blender app works too, if you have it.
   - Settings → Printing shows whether Blender is ready, with an optional app path and **Look again**.
   - Without Blender (or if it fails), Soft is used, with a warning.
+- **Logos and text (exact):** a flat graphic is detected at upload ("Logo or text" on the Photo step, you can
+  change it). The 3D is built straight from the artwork — every letter kept — by `core/logo.py`: the file's colours
+  (up to 3) become raised clay parts on a **plaque** (or a sticker-cut outline, or a bar for Stand), each on its own
+  filament, the plaque on the next one (up to 4 with AMS). "Draw the exact logo" previews it instantly and free;
+  AI engines stay available but warn that they redraw letters. Print controls: backer, logo width, raised height,
+  plate thickness, border, corner radius, thinnest stroke (thin strokes are thickened with a warning). Works as
+  Stand / Magnet / Keychain; export writes every part into one 3MF on filaments 1..N.
+- **3 views in the viewer:** a "3 views" toggle shows Front · Side · Top side by side, kept in step with the shape
+  and colours.
 - **Colours per object (Print step):** pick each filament's colour (palette or custom), suggest from the picture,
   swap, or go back to the style's. The 3D view, legend and 3MF use them.
 - **Look around on X, Y, Z:** axis gizmo, Front/Back/Left/Right/Top/Bottom/3/4 buttons, Spin, keys, views from

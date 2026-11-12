@@ -497,6 +497,8 @@ def run(raw_path: Path, out_dir: Path, params: dict[str, Any], progress: Progres
     out_dir.mkdir(parents=True, exist_ok=True)
     st = raw_path.stat()
     res = printify(load_mesh(raw_path), params, progress, cache_key=f"{raw_path.resolve()}:{st.st_mtime_ns}:{st.st_size}")
+    for stale in ["parts.json", "plaque.stl", *(f.name for f in out_dir.glob("part_*.stl"))]:
+        (out_dir / stale).unlink(missing_ok=True)  # an earlier logo build of this object
     res.body.export(out_dir / "body.stl")
     if res.base is not None:
         res.base.export(out_dir / "base.stl")

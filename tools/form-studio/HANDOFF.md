@@ -72,7 +72,8 @@ backend/formstudio/          FastAPI, Python ≥3.10
   core/colours.py            palette suggestion from pictures (no AI)
   core/ingest.py             background removal (rembg) → square cut-out on white + mask
   core/printify.py           geometry: voxelize, min feature, finishes, flat cut, base, magnet, keychain ring
-  core/export.py             STL, two-colour 3MF (Bambu/Orca/Prusa metadata), optional STEP
+  core/export.py             STL, multi-part 3MF (each part on its own filament; Bambu/Orca/Prusa metadata), STEP
+  core/logo.py               logos & text: detect a flat graphic, split it into colour layers, build plaque + raised parts
   core/primitives.py         builds meshes from Claude Sculpt "recipes" (soft primitives)
   engines/                   stylizers + reconstructors (see §4)
   models.py                  local model downloads: progress/ETA, stop, resume, delete, start-over queue
@@ -164,7 +165,8 @@ POST /api/jobs/{id}/confirm {index}   POST /api/jobs/{id}/reconstruct {engine}
 POST /api/jobs/{id}/style {style_id}  POST /api/jobs/{id}/suggest-name
 POST /api/jobs/{id}/rebuild-recipe    POST /api/jobs/{id}/printify {overrides}
 POST /api/jobs/{id}/reset-print       POST /api/jobs/{id}/export {formats}
-POST /api/jobs/{id}/colours {body?:{hex,name?}, base?:{hex,name?}}   (saved in print_params.colours; clears 3MF/STEP)
+POST /api/jobs/{id}/kind {kind: "logo"|"object"}   (logo: built exactly from the artwork; detected at upload)
+POST /api/jobs/{id}/colours {<part id>: {hex,name?}, …}   (part ids: body/base, or logo_1..3/plaque; clears 3MF/STEP)
 DELETE /api/jobs/{id}/colours         (back to the style palette)   POST /api/jobs/{id}/colours/suggest (from the picture)
 GET  /api/jobs/{id}/files/{path}      POST /api/jobs/{id}/open   (Finder / slicer)
 GET  /api/jobs/{id}/events            (SSE: {"type":"task",...} progress and {"type":"job", job} state)
@@ -299,8 +301,11 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
      - Clear options
    - **Shape:** chosen image, 3D engine, Build / Rebuild, plus the Claude recipe actions.
    - **Print:**
-     - three.js viewer (`Viewer.tsx`): X/Y/Z gizmo, view buttons and keys, Spin, views from below. View snaps go
+     - three.js viewer (`Viewer.tsx`): takes `parts` (each STL + colour), X/Y/Z gizmo, view buttons and keys, Spin,
+       views from below, and a **3 views** toggle (Front · Side · Top, synchronized). View snaps go
        through drei `useBounds()` (moving the camera directly is undone by `<Bounds>`' own animation)
+     - logos (`job.kind === "logo"`): "Logo or text" switch on the Photo step; the exact engines (id `logo`) are the
+       defaults; Print shows backer/width/raise controls; `core/logo.py build()` writes part_*.stl + parts.json
      - Colours block: body / base filament per object (`FILAMENTS` in `api.ts`, custom colour, from picture, swap,
        style colours); `pipeline.colours_of(job)` is what the viewer legend and the 3MF use
      - Format (Stand / Magnet / Keychain)

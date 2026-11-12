@@ -25,6 +25,7 @@ from pydantic import BaseModel, Field
 
 from .. import __version__, paths, pipeline
 from ..core.job import PRINT_DIR, Job
+from ..core import logo as logo_mod
 from ..core import style as style_mod
 from ..core.style import get_style, list_styles
 from ..engines import RECONSTRUCTORS, STYLIZERS, VIEWERS, describe
@@ -79,10 +80,13 @@ def _view(job: Job) -> dict[str, Any]:
     try:  # the style's name, even if it was deleted since (older objects keep their style)
         st = get_style(job.manifest["style"]["id"])
         d["style_name"], d["style_removed"] = st.name, st.removed
-        d["colours"] = pipeline.colours_of(job)  # the two filament colours: yours, else the style's
+        d["colours"] = pipeline.colours_of(job)  # each part's filament colour: yours, else the defaults
         d["colours_custom"] = bool((job.manifest.get("print_params") or {}).get("colours"))
+        d["parts"] = pipeline.print_parts(job)
     except KeyError:
         d["style_name"], d["style_removed"] = job.manifest["style"]["id"], True
+    d["kind"] = job.manifest.get("kind") or "object"
+    d["logo_parts"] = pipeline.logo_parts(job)
     t = worker.tasks.get(job.id)
     d["task"] = t.public() if t else None
     return d
@@ -779,11 +783,11 @@ class StylizeBody(BaseModel):
 def stylize(job_id: str, body: StylizeBody) -> dict[str, Any]:
     job = _job(job_id)
     s = settings_mod.load()
-    engine = body.engine or s["engines"]["stylize"]
+    engine = body.engine or pipeline.default_engine(job, "stylize", s)
     if engine not in STYLIZERS:
         raise HTTPException(400, "Unknown engine")
     style = get_style(job.manifest["style"]["id"])
-    n = max(1, min(8, body.n or s.get("candidates", 4)))
+    n = 1 if engine == "logo" else max(1, min(8, body.n or s.get("candidates", 4)))  # the exact logo has one look
     if body.seed is None:  # the style's seeds first, then fresh ones: every run adds new options
         start = len(job.manifest.get("candidates") or [])
         k = max(1, len(style.seeds))
@@ -834,7 +838,7 @@ def use_now(job_id: str, body: UseNowBody) -> dict[str, Any]:
 
         return _queue(job, "views", run_views, replace=True, meta={"engine": maker or "none", "device": ctx.device},
                       eta_s=_eta("views", maker) if maker else None)
-    engine = body.engine or settings_mod.load()["engines"]["reconstruct"]
+    engine = body.engine or pipeline.default_engine(job, "reconstruct", settings_mod.load())
     if engine not in RECONSTRUCTORS:
         raise HTTPException(400, "Unknown engine")
 
@@ -890,7 +894,7 @@ class EngineBody(BaseModel):
 @app.post("/api/jobs/{job_id}/reconstruct")
 def reconstruct(job_id: str, body: EngineBody) -> dict[str, Any]:
     job = _job(job_id)
-    engine = body.engine or settings_mod.load()["engines"]["reconstruct"]
+    engine = body.engine or pipeline.default_engine(job, "reconstruct", settings_mod.load())
     if engine not in RECONSTRUCTORS:
         raise HTTPException(400, "Unknown engine")
     if not job.reached("confirmed"):
@@ -923,6 +927,18 @@ def remove_views(job_id: str) -> dict[str, Any]:
 
 class StyleBody(BaseModel):
     style: str
+
+
+class KindBody(BaseModel):
+    kind: Literal["logo", "object"]
+
+
+@app.post("/api/jobs/{job_id}/kind")
+def set_job_kind(job_id: str, body: KindBody) -> dict[str, Any]:
+    """Logo or text (built exactly from the artwork) or an object (AI restyle and 3D)."""
+    with _locked(job_id) as job:
+        pipeline.set_kind(job, body.kind)
+    return _view(job)
 
 
 @app.post("/api/jobs/{job_id}/style")
@@ -987,18 +1003,18 @@ class ColourIn(BaseModel):
     name: str | None = Field(default=None, max_length=40)
 
 
-class ColoursBody(BaseModel):
-    body: ColourIn | None = None
-    base: ColourIn | None = None
+PART_ID = re.compile(r"^(body|base|plaque|logo_[1-9])$")
 
 
 @app.post("/api/jobs/{job_id}/colours")
-def set_colours(job_id: str, body: ColoursBody) -> dict[str, Any]:
-    """Choose this object's filament colours (no rebuild)."""
+def set_colours(job_id: str, body: dict[str, ColourIn | None]) -> dict[str, Any]:
+    """Choose filament colours by part ({body, base} or {logo_1, …, plaque}); no rebuild."""
+    if not body or any(not PART_ID.match(k) for k in body):
+        raise HTTPException(400, "Name the parts: body, base, plaque or logo_1…")
     with _locked(job_id) as job:
         if not job.manifest.get("print_params"):
             raise HTTPException(400, "Build the 3D shape first.")
-        pipeline.set_colours(job, {k: c.model_dump() for k in ("body", "base") if (c := getattr(body, k))})
+        pipeline.set_colours(job, {k: c.model_dump() for k, c in body.items() if c})
     return _view(job)
 
 
@@ -1015,6 +1031,11 @@ def suggest_job_colours(job_id: str) -> dict[str, Any]:
     from ..core import colours as colours_mod
 
     job = _job(job_id)
+    if pipeline.logo_parts(job):  # the artwork's own colours (the plaque keeps its colour)
+        try:
+            return {f"logo_{i + 1}": c for i, c in enumerate(logo_mod.palette(pipeline.logo_data(job)))}
+        except (OSError, ValueError) as e:
+            raise _bad(e)
     src = next((job.path(f) for f in ("03_confirmed.png", "01_cutout.png") if job.path(f).exists()), None)
     if src is None:
         raise HTTPException(400, "Pick a picture first.")

@@ -1,11 +1,13 @@
 """Step 6: print files.
 
-model.3mf is one object made of two parts (body + base). Each part gets a
+model.3mf is one object made of several parts (body + base, or each logo colour + the plaque). Each part gets a
 filament slot in Metadata/model_settings.config, the file Bambu Studio and
-OrcaSlicer read, so the object opens ready to print in two colours. Colours
+OrcaSlicer read, so the object opens ready to print in its colours. Colours
 are also written as 3MF base materials so other slicers show them.
 """
 from __future__ import annotations
+
+import json
 
 import zipfile
 from dataclasses import dataclass
@@ -167,12 +169,26 @@ def write_step(parts: list[Part], path: Path, max_faces: int = 12000) -> None:
 
 
 def export(print_dir: Path, title: str, palette: dict, formats: list[str]) -> list[str]:
-    body = trimesh.load(print_dir / "body.stl", force="mesh")
-    parts = [Part("body", body, 1, palette["body"]["name"], palette["body"]["hex"])]
-    if (print_dir / "base.stl").exists():
-        base = trimesh.load(print_dir / "base.stl", force="mesh")
-        parts.append(Part("base", base, 2, palette["base"]["name"], palette["base"]["hex"]))
-    written = ["body.stl"] + (["base.stl"] if len(parts) > 1 else [])
+    """The 3MF / STEP of every part, each part on its own filament (1, 2, 3, …) with its colour.
+
+    Parts come from parts.json (logos: each logo colour and the plaque), else body.stl and base.stl.
+    `palette` maps part id → {name, hex}.
+    """
+    if (print_dir / "parts.json").exists():
+        listed = json.loads((print_dir / "parts.json").read_text())
+    else:
+        listed = [{"id": "body", "file": "body.stl"}, {"id": "base", "file": "base.stl"}]
+    parts: list[Part] = []
+    written: list[str] = []
+    for p in listed:
+        f = print_dir / p["file"]
+        if not f.exists():
+            continue
+        c = palette.get(p["id"]) or {"name": "Grey", "hex": "#8A8A85"}
+        parts.append(Part(p["id"], trimesh.load(f, force="mesh"), len(parts) + 1, c["name"], c["hex"]))
+        written.append(p["file"])
+    if not parts:
+        raise FileNotFoundError("The print files are missing. Prepare the print again.")
     if "3mf" in formats:
         write_3mf(parts, print_dir / "model.3mf", title)
         written.append("model.3mf")

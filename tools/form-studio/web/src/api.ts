@@ -106,6 +106,33 @@ export interface PrintParams {
   };
   base: { enabled: boolean; margin_mm: number; thickness_mm: number; fillet_mm: number };
   magnet: { enabled: boolean; diameter_mm: number; depth_mm: number; clearance_mm: number };
+  /** logos and text (built exactly from the artwork) */
+  logo?: {
+    backer: LogoBacker;
+    width_mm: number;
+    margin_mm: number;
+    corner_mm: number;
+    plaque_mm: number;
+    raise_mm: number;
+    min_stroke_mm: number;
+  };
+}
+
+export type LogoBacker = "plaque" | "outline" | "bar";
+export const BACKERS: { id: LogoBacker; label: string; hint: string }[] = [
+  { id: "plaque", label: "Plaque", hint: "A rounded plate behind the whole logo, like a sign." },
+  { id: "outline", label: "Sticker cut", hint: "A plate following the logo's outline with a small border." },
+  { id: "bar", label: "On a bar", hint: "The logo stands on a long foot, like desk letters (Stand only)." },
+];
+
+/** One printed part: its STL, filament slot and colour. */
+export interface PrintPart {
+  id: string;
+  file: string;
+  filament: number;
+  name: string;
+  hex: string;
+  label?: string;
 }
 
 export interface Report {
@@ -143,9 +170,15 @@ export interface Job {
   views?: { engine: string; files: string[]; created: string } | null;
   style_name?: string;
   style_removed?: boolean;
-  /** the two filament colours: chosen for this object, else the style's */
-  colours?: { body: Colour; base: Colour };
+  /** each part's filament colour (body/base, or each logo colour + plaque): chosen, else the defaults */
+  colours?: Record<string, Colour>;
   colours_custom?: boolean;
+  /** "logo": built exactly from the artwork; "object": AI restyle and 3D */
+  kind?: "logo" | "object";
+  /** the shape is one part per logo colour plus a plaque */
+  logo_parts?: boolean;
+  /** the print's parts in filament order */
+  parts?: PrintPart[];
   timings?: Partial<Record<"cutout" | "stylize" | "reconstruct" | "printify" | "export", StepTime>>;
 }
 
@@ -158,6 +191,8 @@ export interface Engine {
   reason: string;
   /** builds the 3D shape from front, side and back views when the object has them */
   multi_view?: boolean;
+  /** only for logos and text ("Logo or text" on the Photo step) */
+  logo_only?: boolean;
 }
 
 export interface Engines {
@@ -188,6 +223,8 @@ export interface Style {
 export interface Colour {
   name: string;
   hex: string;
+  /** what this part is, e.g. "Body" or "Plaque" (set by the app) */
+  label?: string;
 }
 
 export interface StyleDetail extends Style {
@@ -437,10 +474,11 @@ export const api = {
   remove: (id: string) => req<{ ok: boolean }>("DELETE", `/api/jobs/${id}`),
   stylize: (id: string, engine?: string, seed?: number, n?: number, quality?: Quality) =>
     req<Job>("POST", `/api/jobs/${id}/stylize`, { engine, seed, n, quality }),
-  setColours: (id: string, colours: { body?: { hex: string; name?: string }; base?: { hex: string; name?: string } }) =>
+  setColours: (id: string, colours: Record<string, { hex: string; name?: string }>) =>
     req<Job>("POST", `/api/jobs/${id}/colours`, colours),
   resetColours: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/colours`),
-  suggestJobColours: (id: string) => req<{ body: Colour; base: Colour }>("POST", `/api/jobs/${id}/colours/suggest`),
+  suggestJobColours: (id: string) => req<Record<string, Colour>>("POST", `/api/jobs/${id}/colours/suggest`),
+  setKind: (id: string, kind: "logo" | "object") => req<Job>("POST", `/api/jobs/${id}/kind`, { kind }),
   cancel: (id: string) => req<Job>("POST", `/api/jobs/${id}/cancel`),
   makeViews: (id: string, engine?: string) => req<Job>("POST", `/api/jobs/${id}/views`, { engine }),
   removeViews: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/views`),

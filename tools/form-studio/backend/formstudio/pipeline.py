@@ -16,6 +16,7 @@ from . import paths
 from .core import export as export_mod
 from .core import timing
 from .core import ingest, printify as printify_mod
+from .core import logo as logo_mod
 from .core.job import CANDIDATES, CONFIRMED, CUTOUT, PRINT_DIR, RAW_MESH, VIEWS_DIR, Job
 from .core.style import get_style
 from .engines import RECONSTRUCTORS, STYLIZERS, VIEWERS, EngineContext, ReconstructInput, StylizeInput
@@ -67,8 +68,107 @@ def create(photo: Path, name: str, subject: str, style_id: str) -> Job:
         raise
     log.info("%s: cut-out saved (%s)", job.id, info.get("matting"))
     job.manifest["cutout"] = info
+    try:  # logos and text are built from the artwork itself, so their letters stay exact
+        job.manifest["kind"] = "logo" if logo_mod.is_graphic(dest) else "object"
+    except Exception as e:  # never stop an upload over this
+        log.warning("%s: couldn't check for a logo: %s", job.id, e)
+        job.manifest["kind"] = "object"
     job.set_stage("cutout")
     return job
+
+
+# ---- logos and text ----------------------------------------------------------------
+
+def is_logo(job: Job) -> bool:
+    return job.manifest.get("kind") == "logo"
+
+
+def logo_parts(job: Job) -> bool:
+    """Is the shape (or will it be) built from the artwork, as one part per logo colour plus a plaque?"""
+    return is_logo(job) and ((job.manifest.get("reconstruct") or {}).get("engine") or "logo") == "logo"
+
+
+def logo_data(job: Job) -> dict[str, Any]:
+    src = job.input_path()
+    if not src or not src.exists():
+        raise FileNotFoundError("This object's original picture is missing. Create it again from the logo file.")
+    return logo_mod.layers_cached(src)
+
+
+def set_kind(job: Job, kind: str) -> None:
+    """Logo or text (built from the artwork) or an object (AI restyle and 3D). The chosen option and
+    shape are redone; options already made stay."""
+    if kind not in ("logo", "object"):
+        raise ValueError("kind is 'logo' or 'object'")
+    if job.manifest.get("kind") == kind:
+        return
+    _reset_keeping_options(job)
+    job.manifest["kind"] = kind
+    job.save()
+
+
+def default_engine(job: Job, step: str, settings: dict[str, Any]) -> str:
+    if is_logo(job):
+        return "logo"
+    return settings["engines"][step]
+
+
+LOGO_SAFE = [  # the house prompts forbid text; for a logo the AI should try to keep it
+    ("no text, no fine detail, ", ""), ("no text or fine detail. ", ""), ("no text or fine detail", ""),
+    ("remove all fine detail and text", "keep every letter exactly as written"), ("no text, ", ""),
+    (", no text", ""), ("text, logo, ", ""), ("text, ", ""), ("logo, ", ""),
+]
+
+
+def _logo_style(style):
+    import dataclasses
+
+    def clean(t: str) -> str:
+        for a, b in LOGO_SAFE:
+            t = t.replace(a, b)
+        return t
+
+    return dataclasses.replace(
+        style,
+        prompt=clean(style.prompt) + ", keep the exact lettering and logo shapes",
+        edit_prompt=clean(style.edit_prompt) + " Keep every letter and the logo's shapes exactly as they are.",
+        negative_prompt=clean(style.negative_prompt) + ", misspelt letters, extra letters",
+    )
+
+
+def print_parts(job: Job) -> list[dict[str, Any]]:
+    """The print's parts in filament order: [{id, label, file, filament, name, hex}]."""
+    d = job.path(PRINT_DIR)
+    colours = colours_of(job)
+    if (d / "parts.json").exists():
+        try:
+            listed = json.loads((d / "parts.json").read_text())
+        except (OSError, ValueError):
+            listed = []
+    else:
+        listed = [{"id": "body", "file": "body.stl"}, {"id": "base", "file": "base.stl"}]
+    out = []
+    for p in listed:
+        if not (d / p["file"]).exists():
+            continue
+        c = colours.get(p["id"]) or {"name": "Grey", "hex": "#8A8A85", "label": p.get("label", p["id"])}
+        out.append({**c, "id": p["id"], "file": f"{PRINT_DIR}/{p['file']}", "filament": len(out) + 1})
+    return out
+
+
+def _printify_logo(job: Job, params: dict[str, Any], progress: Progress | None) -> dict[str, Any]:
+    res = logo_mod.build(logo_data(job), params, progress)
+    out = job.path(PRINT_DIR)
+    out.mkdir(parents=True, exist_ok=True)
+    for f in out.glob("*.stl"):
+        f.unlink()
+    listed = []
+    for i, p in enumerate(res["parts"]):
+        name = "plaque.stl" if p["id"] == "plaque" else f"part_{i + 1}.stl"
+        p["mesh"].export(out / name)
+        listed.append({"id": p["id"], "file": name})
+    (out / "parts.json").write_text(json.dumps(listed))
+    return res["report"]
 
 
 def _cutout_files_exist(job: Job) -> bool:
@@ -112,7 +212,10 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
     ok, why = engine.available(ctx)
     if not ok:
         raise RuntimeError(why)
+    if getattr(engine, "logo_only", False) and not is_logo(job):
+        raise RuntimeError("This is for logos and text. Turn on \"Logo or text\" in the Photo step first.")
     ensure_cutout(job)
+    look = _logo_style(style) if is_logo(job) and not getattr(engine, "logo_only", False) else style
     log.info("%s: restyling with %s (%s), seeds %s", job.id, engine_id, style.id, seeds)
     out_dir = job.path(CANDIDATES)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -123,7 +226,8 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
     first: list[float] = []
 
     def inp(seed_list: list[int], tmp: Path) -> StylizeInput:
-        return StylizeInput(cut, cut.with_name(cut.stem + "_mask.png"), style, job.manifest["subject"], seed_list, tmp)
+        return StylizeInput(cut, cut.with_name(cut.stem + "_mask.png"), look, job.manifest["subject"], seed_list, tmp,
+                            source=job.input_path())
 
     def fresh(tmp: Path) -> Path:
         shutil.rmtree(tmp, ignore_errors=True)
@@ -349,6 +453,8 @@ def reconstruct(job: Job, ctx: EngineContext, engine_id: str, progress: Progress
     ok, why = engine.available(ctx)
     if not ok:
         raise RuntimeError(why)
+    if getattr(engine, "logo_only", False) and not is_logo(job):
+        raise RuntimeError("This is for logos and text. Turn on \"Logo or text\" in the Photo step first.")
     job.reset_after("confirmed")
     log.info("%s: building 3D with %s", job.id, engine_id)
     seed = int((job.manifest.get("confirmed") or {}).get("seed") or 0)
@@ -371,7 +477,7 @@ def reconstruct(job: Job, ctx: EngineContext, engine_id: str, progress: Progress
     else:
         views = _views(job) if getattr(engine, "multi_view", False) else None
         inp = ReconstructInput(img, img.with_name(img.stem + "_mask.png"), seed, tmp, style=style, subject=job.manifest["subject"],
-                               views=views)
+                               views=views, source=job.input_path())
         with timing.stage("reconstruct", engine=engine_id, device=ctx.device, cached=False):
             info = engine.reconstruct(inp, ctx, lambda p, m: progress(None if p is None else p * 0.8, m)) or {}
         tmp.replace(job.path(RAW_MESH))
@@ -437,15 +543,21 @@ def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | No
         raise ValueError(f"Unknown format '{fmt}'")
     if fmt and fmt != current["format"]:
         colours = current.get("colours")
+        backer = (current.get("logo") or {}).get("backer")
         current = style.print_params(fmt)  # a new format starts from its own defaults…
         if colours:
             current["colours"] = colours  # …but keeps the colours you chose
+        if backer:
+            current["logo"]["backer"] = backer  # …and the plaque shape
     params = _deep_merge(style.print_params(current["format"]), current)  # fills keys older objects lack
     params = _deep_merge(params, overrides)
     log.info("%s: preparing print (%s)", job.id, params["format"])
     t0 = time.perf_counter()
     with timing.stage("printify", format=params["format"], finish=params["geometry"].get("finish")):
-        report = printify_mod.run(job.path(RAW_MESH), job.path(PRINT_DIR), params, progress)
+        if logo_parts(job):
+            report = _printify_logo(job, params, progress)
+        else:
+            report = printify_mod.run(job.path(RAW_MESH), job.path(PRINT_DIR), params, progress)
     _note_time(job, "printify", time.perf_counter() - t0)
     job.manifest["print_params"] = params
     job.manifest["report"] = report
@@ -459,10 +571,23 @@ def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | No
 
 
 def colours_of(job: Job) -> dict[str, dict[str, str]]:
-    """The object's two filament colours: the ones you chose, else the style's."""
+    """Each part's filament colour, in filament order: the ones you chose, else the defaults.
+    Objects: body and base (the style's colours). Logos: each logo colour (the artwork's own) and the plaque."""
     palette = get_style(job.manifest["style"]["id"]).palette
-    chosen = (job.manifest.get("print_params") or {}).get("colours") or {}
-    return {part: {**palette[part], **(chosen.get(part) or {})} for part in ("body", "base")}
+    params = job.manifest.get("print_params") or {}
+    chosen = params.get("colours") or {}
+    defaults: list[tuple[str, str, dict[str, str]]] = []
+    if logo_parts(job):
+        try:
+            for i, c in enumerate(logo_mod.palette(logo_data(job))):
+                defaults.append((f"logo_{i + 1}", f"Logo colour {i + 1}", {**c, "artwork": c["name"]}))
+        except (OSError, ValueError) as e:
+            log.warning("%s: couldn't read the logo: %s", job.id, e)
+        backer = (params.get("logo") or {}).get("backer", "plaque")
+        defaults.append(("plaque", "Plaque" if backer == "plaque" else "Backing", dict(palette["base"])))
+    else:
+        defaults += [("body", "Body", dict(palette["body"])), ("base", "Base / back", dict(palette["base"]))]
+    return {pid: {**d, **(chosen.get(pid) or {}), "label": label} for pid, label, d in defaults}
 
 
 def set_colours(job: Job, colours: dict[str, dict[str, str]] | None) -> None:
@@ -475,8 +600,9 @@ def set_colours(job: Job, colours: dict[str, dict[str, str]] | None) -> None:
         params.pop("colours", None)
     else:
         merged = dict(params.get("colours") or {})
+        known = colours_of(job)
         for part, c in colours.items():
-            if not c:
+            if not c or part not in known:
                 continue
             hexv = c["hex"].upper()
             rgb = tuple(int(hexv[i:i + 2], 16) for i in (1, 3, 5))

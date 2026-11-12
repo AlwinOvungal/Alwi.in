@@ -33,7 +33,7 @@ def test_choose_colours_export_and_reset(mug_photo):
 
         j = c.post(f"/api/jobs/{jid}/colours", json={"body": {"hex": "#ff6a13"}, "base": {"hex": "#000000", "name": "Black"}}).json()
         assert j["colours"]["body"]["hex"] == "#FF6A13" and j["colours"]["body"]["name"]  # named for you
-        assert j["colours"]["base"] == {"hex": "#000000", "name": "Black"} and j["colours_custom"]
+        assert j["colours"]["base"] == {"hex": "#000000", "name": "Black", "label": "Base / back"} and j["colours_custom"]
         assert j["stage"] == "printified" and j["exports"] == []  # the old 3MF had the old colours
         assert j["report"] == report_before  # colour isn't geometry: no rebuild
 

@@ -20,9 +20,11 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel, Field
 
 from .. import paths
+from .logo import DEFAULTS as LOGO_DEFAULTS
 
 MAX_REFERENCES = 4
 TEMPLATE_STYLE = "clay-minimal"
+
 
 
 @dataclass
@@ -94,6 +96,8 @@ class StyleSpec:
             "magnet": copy.deepcopy(self.magnet),
             "flat_back": {"enabled": False, "thickness_mm": 8},
             "ring": {"enabled": False, "outer_radius_mm": 4.5, "hole_mm": 4.5, "thickness_mm": 3.5},
+            # logos and text (built from the artwork): plaque, sizes; the width suits the format
+            "logo": {**LOGO_DEFAULTS, "width_mm": {"magnet": 60, "keychain": 50}.get(fmt, LOGO_DEFAULTS["width_mm"])},
         }
         for key, value in self.formats[fmt].items():
             if isinstance(value, dict) and isinstance(params.get(key), dict):
