@@ -94,6 +94,13 @@ def logo_parts(job: Job) -> bool:
     return is_logo(job) and ((job.manifest.get("reconstruct") or {}).get("engine") or "logo") == "logo"
 
 
+def region_parts(job: Job) -> list[dict[str, str]]:
+    """The picture-colour parts of the last print build ([{id, name, hex}]), or []."""
+    if logo_parts(job):
+        return []
+    return list((job.manifest.get("report") or {}).get("regions") or [])
+
+
 def logo_data(job: Job) -> dict[str, Any]:
     src = job.input_path()
     if not src or not src.exists():
@@ -680,7 +687,8 @@ def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | No
         if logo_parts(job):
             report = _printify_logo(job, params, progress)
         else:
-            report = printify_mod.run(job.path(RAW_MESH), job.path(PRINT_DIR), params, progress)
+            report = printify_mod.run(job.path(RAW_MESH), job.path(PRINT_DIR), params, progress,
+                                      mask_path=job.path("03_confirmed_mask.png"), image_path=job.path(CONFIRMED))
     _note_time(job, "printify", time.perf_counter() - t0)
     job.manifest["print_params"] = params
     job.manifest["report"] = report
@@ -708,6 +716,9 @@ def colours_of(job: Job) -> dict[str, dict[str, str]]:
             log.warning("%s: couldn't read the logo: %s", job.id, e)
         backer = (params.get("logo") or {}).get("backer", "plaque")
         defaults.append(("plaque", "Plaque" if backer == "plaque" else "Backing", dict(palette["base"])))
+    elif regions := region_parts(job):  # picture colours: one filament per colour region
+        for i, r in enumerate(regions):
+            defaults.append((r["id"], f"Picture colour {i + 1}", {"name": r["name"], "hex": r["hex"], "artwork": r["name"]}))
     else:
         defaults += [("body", "Body", dict(palette["body"])), ("base", "Base / back", dict(palette["base"]))]
     return {pid: {**d, **(chosen.get(pid) or {}), "label": label} for pid, label, d in defaults}

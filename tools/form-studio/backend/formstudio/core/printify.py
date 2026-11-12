@@ -12,6 +12,7 @@ steps give every object the same soft, chunky, printable character.
 """
 from __future__ import annotations
 
+import json
 import math
 from collections import OrderedDict
 from dataclasses import dataclass
@@ -21,6 +22,7 @@ from typing import Any, Callable
 import manifold3d as mf
 import numpy as np
 import trimesh
+from PIL import Image
 from scipy import ndimage
 from skimage import measure
 
@@ -37,6 +39,7 @@ class PrintResult:
     body: trimesh.Trimesh
     base: trimesh.Trimesh | None
     report: dict[str, Any]
+    parts: list[tuple[str, trimesh.Trimesh]] | None = None  # picture-colour regions, filament order
 
 
 # ---- conversions -------------------------------------------------------------
@@ -180,6 +183,107 @@ def _largest(m: mf.Manifold) -> mf.Manifold:
     return max(parts, key=lambda p: p.volume()) if parts else m
 
 
+def _mask_to_grid(mask: np.ndarray, nx: int, nz: int) -> np.ndarray:
+    """The picture's silhouette on the standing volume's (x, z) grid (z up)."""
+    ys, xs = np.nonzero(mask)
+    crop = mask[ys.min():ys.max() + 1, xs.min():xs.max() + 1]
+    img = Image.fromarray(crop.astype(np.uint8) * 255).resize((nx, nz), Image.BILINEAR)
+    return (np.asarray(img) > 127)[::-1].T  # image rows go down; the grid's z goes up
+
+
+def relief_volume(opened: np.ndarray, pitch: float, thickness_mm: float,
+                  mask: np.ndarray | None, w: list[str]) -> tuple[np.ndarray, dict[str, Any]]:
+    """Flat formats (magnet, keychain): the whole front surface pressed into the thickness.
+
+    The standing volume (front at low y) becomes a bas-relief: a back plate whose outline is
+    the picture's own silhouette, with each column's surface raised in proportion to how far
+    forward it sat. However deep the AI mesh is, every ridge survives — the old way kept only
+    the front few millimetres, which turned deep meshes into blobs and cut recessed parts
+    (a tree's trunk) away completely. Columns the picture shows but the mesh missed stay as
+    plate, so nothing in the picture can go missing.
+    """
+    nx, ny, nz = opened.shape
+    cols = opened.any(axis=1)
+    plate_mm = max(2.0, min(0.3 * thickness_mm, 4.0))
+    avail_mm = max(thickness_mm - plate_mm, pitch)
+    front = np.where(cols, np.argmax(opened, axis=1), ny).astype(np.float32)
+    sil, outline = cols, "3D shape"
+    if mask is not None and mask.any():
+        m = _mask_to_grid(mask, nx, nz)
+        iou = (m & cols).sum() / max((m | cols).sum(), 1)
+        if iou >= 0.5:
+            sil, outline = m, "picture"
+        else:
+            w.append("The picture and the 3D shape disagree on the outline; kept the 3D shape's.")
+    # prominence: how far forward each column's surface sits (percentiles shrug off stray spikes)
+    ref = float(np.percentile(front[cols], 95)) if cols.any() else 0.0
+    prom = np.clip(ref - front, 0, None)
+    prom[~cols] = 0.0
+    prom = ndimage.gaussian_filter(prom, sigma=1.0)  # softens voxel stair-steps between ridges
+    top = float(np.percentile(prom[cols], 98)) if cols.any() else 0.0
+    avail_vox = avail_mm / pitch
+    # smooth compression instead of a hard clip: a hard ceiling leaves a visibly flat plateau
+    relief = np.tanh(1.2 * prom / max(top, 1e-6))
+    relief *= avail_vox / max(float(relief.max()), 1e-6)  # the highest point still reaches full thickness
+    plate_vox = max(2, int(round(plate_mm / pitch)))
+    counts = np.zeros((nx, nz), np.int32)
+    counts[sil] = np.maximum(plate_vox + np.round(np.where(cols, relief, 0.0)[sil]).astype(np.int32), plate_vox)
+    need = int(counts.max()) + 2
+    yy = np.arange(need)[None, :, None]
+    out = yy >= (need - counts[:, None, :])  # solid toward the back (high y); the plate lies on the bed
+    out &= (counts > 0)[:, None, :]
+    info = {"relief": True, "plate_mm": round(plate_mm, 1),
+            "relief_mm": round(float(counts.max() * pitch - plate_mm), 1), "outline": outline}
+    return out, info
+
+
+def _region_grid(labels: np.ndarray, mask: np.ndarray, gx: int, gy: int) -> np.ndarray:
+    """The picture's colour regions on the lying body's (x, y) grid, every cell owned by a region."""
+    ys, xs = np.nonzero(mask)
+    crop = (labels + 1)[ys.min():ys.max() + 1, xs.min():xs.max() + 1]  # 0 = outside
+    arr = np.asarray(Image.fromarray(crop.astype(np.uint8)).resize((gx, gy), Image.NEAREST))
+    g = arr[::-1].T.astype(np.int32) - 1  # (x, y) with y up
+    if (g < 0).any():  # cells outside the picture (a key-ring loop, overhangs) take the nearest colour
+        _, (ix, iy) = ndimage.distance_transform_edt(g < 0, return_indices=True)
+        g = g[ix, iy]
+    return g
+
+
+def split_by_regions(body: mf.Manifold, labels: np.ndarray, mask: np.ndarray, n_regions: int,
+                     warnings: list[str]) -> list[tuple[int, mf.Manifold]]:
+    """Cut a flat body into one part per picture colour, with straight shared walls between colours.
+
+    The grid gives every cell to exactly one region, and marching cubes over complementary cell sets
+    yields coincident wall surfaces — so each part is a single clean intersection: parts never
+    overlap, key together exactly, and stay watertight (no coplanar boolean subtractions).
+    Returns (region index, part) pairs, in region order.
+    """
+    bb = body.bounding_box()
+    lo, hi = np.array(bb[:3]), np.array(bb[3:])
+    cell = 0.35
+    gx, gy = max(2, int((hi[0] - lo[0]) / cell)), max(2, int((hi[1] - lo[1]) / cell))
+    grid = _region_grid(labels, mask, gx, gy)
+    dx, dy = (hi[0] - lo[0]) / gx, (hi[1] - lo[1]) / gy
+    out: list[tuple[int, mf.Manifold]] = []
+    for i in range(n_regions):
+        m2 = grid == i
+        if not m2.any():
+            continue
+        v = np.pad(np.repeat(m2[:, :, None], 4, axis=2).astype(np.float32), 2)
+        verts, faces, _, _ = measure.marching_cubes(v, level=0.5)
+        verts = (verts - 2) * [dx, dy, (hi[2] - lo[2] + 4) / 3] + [lo[0], lo[1], lo[2] - 2]
+        tm = trimesh.Trimesh(vertices=verts, faces=faces, process=True)
+        if tm.volume < 0:
+            tm.invert()
+        part = body ^ to_manifold(tm)
+        if part.volume() >= 1.0:
+            out.append((i, part))
+    if len(out) < 2:
+        warnings.append("The picture's colours couldn't be split into printable regions; one part kept.")
+        return [(0, body)]
+    return out
+
+
 def lay_flat(body: mf.Manifold, thickness: float) -> mf.Manifold:
     """Keep the front of a standing body and lay it on its new flat back.
 
@@ -306,7 +410,8 @@ def _blender_clay(opened: np.ndarray, origin: np.ndarray, pitch: float, geo: dic
 
 
 def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | None = None,
-             cache_key: str | None = None) -> PrintResult:
+             cache_key: str | None = None, mask_path: Path | None = None,
+             image_path: Path | None = None) -> PrintResult:
     say = progress or (lambda p, m: None)
     geo = params["geometry"]
     base_p = params["base"]
@@ -324,14 +429,22 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     pitch_req = float(geo.get("voxel_mm", 0.5))
     min_feat = float(geo.get("min_feature_mm", 1.6))
     finish = str(geo.get("finish", "soft"))
+    flat_on = bool(flat.get("enabled"))
+    flat_t = float(flat.get("thickness_mm", 8))
+    mask_sig = None
+    if flat_on and mask_path is not None and Path(mask_path).exists():
+        st = Path(mask_path).stat()
+        mask_sig = f"{mask_path}:{st.st_mtime_ns}:{st.st_size}"
+    relief_sig = ("relief", round(flat_t, 2), mask_sig) if flat_on else None
     k1 = (cache_key, round(body_h, 4), round(flat_cut, 4), round(pitch_req, 4)) if cache_key and CACHE["enabled"] else None
     k2 = k1 and (*k1, round(min_feat, 4))
-    k3 = k2 and (*k2, finish, *(geo.get(k) for k in ("voxel_size_mm", "facets", "soften_mm", "smooth_iters", "target_faces",
+    k3 = k2 and (*k2, finish, relief_sig, *(geo.get(k) for k in ("voxel_size_mm", "facets", "soften_mm", "smooth_iters", "target_faces",
                                                        "clay_texture_mm", "clay_grain_mm", "clay_smooth")))
 
+    relief_info: dict[str, Any] = {}
     hit3 = _get(k3)
     if hit3:
-        body, pitch, thin_removed, w = hit3
+        body, pitch, thin_removed, relief_info, w = hit3
         warnings += w
         say(0.6, "Reusing the shape (only the parts you changed are rebuilt)")
     else:
@@ -389,6 +502,13 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
             _put(k2, (opened, origin, pitch, thin_removed, list(warnings)))
 
         w = []
+        if flat_on:  # magnet / keychain: a bas-relief of the front, on the picture's own outline
+            say(0.45, "Pressing the front into a relief")
+            mask_arr = None
+            if mask_sig:
+                mask_arr = np.asarray(Image.open(mask_path).convert("L")) > 24
+            with timing.stage("printify.relief"):
+                opened, relief_info = relief_volume(opened, pitch, flat_t, mask_arr, w)
         with timing.stage("printify.finish", finish=finish):
             if finish == "voxel":
                 say(0.5, "Rebuilding from blocks")
@@ -404,7 +524,7 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
                 say(0.5, "Softening into clay")
                 body = _soft(opened, origin, pitch, geo, w)
         warnings += w
-        _put(k3, (body, pitch, thin_removed, list(warnings)))
+        _put(k3, (body, pitch, thin_removed, relief_info, list(warnings)))
 
     say(0.7, "Cutting a flat bottom")
     body_m = to_manifold(body)
@@ -453,13 +573,43 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
                 base_m = base_m - cutter
                 warnings.append("Base is thinner than the magnet; the pocket goes into the body too.")
 
+    regions_p = params.get("regions") or {}
+    region_parts: list[tuple[str, trimesh.Trimesh]] | None = None
+    region_cols: list[dict[str, str]] = []
+    if flat_on and regions_p.get("enabled"):
+        if mask_sig and image_path is not None and Path(image_path).exists():
+            say(0.9, "Splitting the picture's colours into parts")
+            from . import logo as logo_mod
+
+            img = Image.open(image_path)
+            mask_full = np.asarray(Image.open(mask_path).convert("L")) > 24
+            labels, region_cols = logo_mod.regions(img, mask_full, int(regions_p.get("max_colours", 4)))
+            if len(region_cols) >= 2:
+                with timing.stage("printify.regions", n=len(region_cols)):
+                    pieces = split_by_regions(body_m, labels, mask_full, len(region_cols), warnings)
+                if len(pieces) >= 2:
+                    # simplify welds the booleans' duplicate edges, keeping every part watertight
+                    region_cols = [region_cols[ri] for ri, _ in pieces]
+                    region_parts = [(f"colour_{i + 1}", to_trimesh(m.simplify(0.01))) for i, (_, m) in enumerate(pieces)]
+            else:
+                warnings.append("The picture is one colour, so there's nothing to split.")
+        else:
+            warnings.append("Picture colours need the chosen picture; this object has none saved.")
+
     say(0.95, "Checking printability")
     body_t = to_trimesh(body_m)
     base_tm = to_trimesh(base_m) if base_m is not None else None
     report = _report(body_t, base_tm, pitch, min_feat, thin_removed, warnings)
+    report.update(relief_info)
+    if region_parts:
+        bad = [i for i, (_, m) in enumerate(region_parts) if not m.is_watertight]
+        if bad:
+            warnings.append("A colour part is not watertight; the slicer may need to repair it.")
+        report["regions"] = [{"id": pid, **c} for (pid, _), c in zip(region_parts, region_cols)]
+        report["faces"] = int(sum(len(m.faces) for _, m in region_parts))
     report["format"] = params.get("format", "stand")
     say(1.0, "Ready to print")
-    return PrintResult(body_t, base_tm, report)
+    return PrintResult(body_t, base_tm, report, parts=region_parts)
 
 
 def _overhang_pct(m: trimesh.Trimesh, floor_z: float) -> float:
@@ -493,12 +643,24 @@ def _report(body, base, pitch, min_feat, thin_removed, warnings) -> dict[str, An
     }
 
 
-def run(raw_path: Path, out_dir: Path, params: dict[str, Any], progress: Progress | None = None) -> dict[str, Any]:
+def run(raw_path: Path, out_dir: Path, params: dict[str, Any], progress: Progress | None = None,
+        mask_path: Path | None = None, image_path: Path | None = None) -> dict[str, Any]:
     out_dir.mkdir(parents=True, exist_ok=True)
     st = raw_path.stat()
-    res = printify(load_mesh(raw_path), params, progress, cache_key=f"{raw_path.resolve()}:{st.st_mtime_ns}:{st.st_size}")
+    res = printify(load_mesh(raw_path), params, progress, cache_key=f"{raw_path.resolve()}:{st.st_mtime_ns}:{st.st_size}",
+                   mask_path=mask_path, image_path=image_path)
     for stale in ["parts.json", "plaque.stl", *(f.name for f in out_dir.glob("part_*.stl"))]:
-        (out_dir / stale).unlink(missing_ok=True)  # an earlier logo build of this object
+        (out_dir / stale).unlink(missing_ok=True)  # an earlier logo or picture-colours build of this object
+    if res.parts:  # picture colours: one part per colour, on its own filament
+        listed = []
+        for i, (pid, m) in enumerate(res.parts):
+            name = f"part_{i + 1}.stl"
+            m.export(out_dir / name)
+            listed.append({"id": pid, "file": name})
+        (out_dir / "parts.json").write_text(json.dumps(listed))
+        (out_dir / "body.stl").unlink(missing_ok=True)
+        (out_dir / "base.stl").unlink(missing_ok=True)
+        return res.report
     res.body.export(out_dir / "body.stl")
     if res.base is not None:
         res.base.export(out_dir / "base.stl")

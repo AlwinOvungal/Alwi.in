@@ -936,6 +936,33 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           {fmt !== "stand" && !job.logo_parts && (
             <Slider label="Thickness" unit=" mm" min={3} max={25} step={0.5} value={p.flat_back.thickness_mm} onChange={(v) => set("flat_back", { thickness_mm: v })} onCommit={(v) => set("flat_back", { thickness_mm: v }, true)} disabled={busy} />
           )}
+          {(fmt === "magnet" || fmt === "keychain") && !job.logo_parts && (
+            <>
+              <Switch
+                label="Picture colours (AMS)"
+                checked={!!p.regions?.enabled}
+                onChange={(v) => set("regions", { enabled: v }, true)}
+                disabled={busy}
+              />
+              {p.regions?.enabled ? (
+                <div className="field">
+                  <span>Up to how many colours (one filament each)</span>
+                  <div className="seg wide" role="radiogroup" aria-label="Most colours to keep">
+                    {[2, 3, 4].map((n) => (
+                      <button key={n} type="button" role="radio" aria-checked={(p.regions?.max_colours ?? 4) === n}
+                        className={(p.regions?.max_colours ?? 4) === n ? "on" : ""} disabled={busy}
+                        onClick={() => set("regions", { max_colours: n }, true)}>
+                        {n}
+                      </button>
+                    ))}
+                  </div>
+                  <span className="small muted">The picture is reduced to its main colours; each prints as its own part. Change any of them below.</span>
+                </div>
+              ) : (
+                <span className="small muted">Off: one colour, as before. On: the picture's own colours, one filament each.</span>
+              )}
+            </>
+          )}
           {fmt === "keychain" && (
             <>
               <Slider label="Key-ring hole" unit=" mm" min={3} max={8} step={0.5} value={p.ring.hole_mm} onChange={(v) => set("ring", { hole_mm: v })} onCommit={(v) => set("ring", { hole_mm: v, outer_radius_mm: Math.max(p.ring.outer_radius_mm, v / 2 + 2) }, true)} disabled={busy} />

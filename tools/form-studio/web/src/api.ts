@@ -116,6 +116,8 @@ export interface PrintParams {
     raise_mm: number;
     min_stroke_mm: number;
   };
+  /** Picture colours (AMS): the picture reduced to at most max_colours, one part per colour */
+  regions?: { enabled: boolean; max_colours: number };
 }
 
 export type LogoBacker = "plaque" | "outline" | "bar";

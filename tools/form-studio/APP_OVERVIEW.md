@@ -59,6 +59,21 @@ extruded together. Now:
 - Restyle prompts now also say "one object, one view, no sheets, no labels" (and the SDXL negative prompt
   forbids turnaround sheets), so new options are less likely to be sheets at all.
 
+### Magnets & keychains: bas-reliefs of your picture, in its own colours
+
+Flat formats no longer slice the AI mesh (which blurred deep meshes into blobs and cut recessed parts — a
+tree's trunk — away). Instead `core/printify.py` builds a **bas-relief**: the mesh's whole front surface is
+pressed smoothly (tanh, no flat plateau) into the chosen thickness, on a plate whose outline is the **confirmed
+picture's own silhouette** — nothing the picture shows can go missing, and the outline matches it (IoU-checked;
+falls back to the mesh's outline when they disagree). Finishes, magnet pocket and key ring apply as before.
+
+**Picture colours (AMS)** — the Print step's new control for magnets and keychains, **off by default**. On, the
+picture is reduced to at most 2–4 colours (`core/logo.py: regions`, chunky regions, every pixel assigned) and
+the body is split into one watertight part per colour (`split_by_regions`: shared straight walls, no overlaps,
+parts key together exactly). Each part gets its own colour card and filament (AMS slots 1..N in card order),
+colours editable per part, "From the picture" restores the artwork's own; the 3MF carries every part with its
+extruder and hex. Off keeps today's single body.
+
 ## 2. Where things live
 
 | What | Where |

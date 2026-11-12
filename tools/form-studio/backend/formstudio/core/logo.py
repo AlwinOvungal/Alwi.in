@@ -221,6 +221,59 @@ def load_layers(path: Path) -> dict[str, Any]:
     return {"layers": out, "size": [w, h]}
 
 
+def regions(img: "Image.Image", mask: np.ndarray, n: int) -> tuple[np.ndarray, list[dict[str, str]]]:
+    """The picture's colour regions, chunky enough to print: (label image, colours biggest-first).
+
+    Labels: -1 outside the mask, else 0..k-1 into the returned colour list. Every masked pixel is
+    assigned: specks and anti-aliased edges go to the nearest surviving region, so the regions
+    partition the silhouette exactly. Used by the Print step's "Picture colours" (AMS) control.
+    """
+    from scipy import ndimage
+
+    from . import colours as colours_mod
+
+    rgb = np.asarray(img.convert("RGB"))
+    lab = _lab(rgb.reshape(-1, 3)).reshape(*rgb.shape[:2], 3)
+    px = lab[mask]
+    centres, _ = _kmeans(px[:: max(1, len(px) // 40000)], max(1, min(int(n), 4)), seed=3)
+    # merge centres closer than a filament change is worth
+    kept: list[np.ndarray] = []
+    for c in centres:
+        if all(np.linalg.norm(c - k) >= 12 for k in kept):
+            kept.append(c)
+    centres = np.asarray(kept)
+    d = np.linalg.norm(lab[..., None, :] - centres[None, None], axis=-1)
+    lab_id = np.argmin(d, axis=-1)
+    ys, xs = np.nonzero(mask)
+    span = max(ys.max() - ys.min(), xs.max() - xs.min()) if len(ys) else 1
+    r = max(2, int(span * 0.012))  # ~0.4 mm at print size: thinner colour slivers won't print
+    keep_ids = []
+    solid = np.full(mask.shape, -1, np.int32)
+    for i in range(len(centres)):
+        m = ndimage.binary_opening(mask & (lab_id == i), structure=np.ones((r, r), bool))
+        if m.sum() >= 0.01 * mask.sum():
+            solid[m] = len(keep_ids)
+            keep_ids.append(i)
+    if not keep_ids:  # one colour after all
+        solid[mask] = 0
+        keep_ids = [int(np.bincount(lab_id[mask]).argmax())]
+    # every masked pixel joins its nearest surviving region
+    missing = mask & (solid < 0)
+    if missing.any():
+        _, (iy, ix) = ndimage.distance_transform_edt(solid < 0, return_indices=True)
+        solid[missing] = solid[iy[missing], ix[missing]]
+    # biggest region first: that's filament 1, and any boolean slivers join it later
+    order = np.argsort([-np.sum(solid == i) for i in range(len(keep_ids))])
+    out = np.full(mask.shape, -1, np.int32)
+    cols = []
+    for new, old in enumerate(order):
+        m = solid == old
+        out[m] = new
+        mean = rgb[m].mean(axis=0).astype(int)
+        cols.append({"hex": "#{:02X}{:02X}{:02X}".format(*mean), "name": colours_mod.name_for(tuple(mean))})
+    return out, cols
+
+
 def palette(data: dict[str, Any]) -> list[dict[str, str]]:
     return [{"hex": l["hex"], "name": l["name"]} for l in data["layers"]]
 

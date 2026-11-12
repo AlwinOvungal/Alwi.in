@@ -1048,7 +1048,7 @@ class ColourIn(BaseModel):
     name: str | None = Field(default=None, max_length=40)
 
 
-PART_ID = re.compile(r"^(body|base|plaque|logo_[1-9])$")
+PART_ID = re.compile(r"^(body|base|plaque|logo_[1-9]|colour_[1-9])$")
 
 
 @app.post("/api/jobs/{job_id}/colours")
@@ -1081,6 +1081,8 @@ def suggest_job_colours(job_id: str) -> dict[str, Any]:
             return {f"logo_{i + 1}": c for i, c in enumerate(logo_mod.palette(pipeline.logo_data(job)))}
         except (OSError, ValueError) as e:
             raise _bad(e)
+    if regions := pipeline.region_parts(job):  # each part goes back to its own picture colour
+        return {r["id"]: {"name": r["name"], "hex": r["hex"]} for r in regions}
     src = next((job.path(f) for f in ("03_confirmed.png", "01_cutout.png") if job.path(f).exists()), None)
     if src is None:
         raise HTTPException(400, "Pick a picture first.")
