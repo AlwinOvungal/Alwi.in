@@ -29,6 +29,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "openai": {"model": "gpt-image-2.5-sunburst", "quality": "medium"},
     "meshy": {"ai_model": "latest"},
     "slicer": "bambu",
+    "mcp": {"token": ""},  # the secret in the MCP address (/mcp/<token>/); made at first start
     "blender_path": "",  # empty: look in Applications  # bambu | orca | prusa
 }
 
@@ -64,6 +65,18 @@ def load() -> dict[str, Any]:
         except json.JSONDecodeError:
             log.warning("settings.json is unreadable; using defaults")
     return copy.deepcopy(DEFAULT_SETTINGS)
+
+
+def ensure_mcp_token() -> str:
+    """The secret in the MCP address. Made once, kept in settings.json."""
+    import secrets as pysecrets
+
+    s = load()
+    token = (s.get("mcp") or {}).get("token") or ""
+    if not token:
+        token = pysecrets.token_urlsafe(18)
+        save({"mcp": {"token": token}})
+    return token
 
 
 def save(update: dict[str, Any]) -> dict[str, Any]:

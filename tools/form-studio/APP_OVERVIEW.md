@@ -23,6 +23,22 @@ Photo ─► cut-out ─► restyled options (pick one) ─► 3D shape ─► p
 
 ---
 
+### Chat assistants (MCP)
+
+Form Studio is also an **MCP server**, so ChatGPT and Claude can drive it in plain language ("make a fridge magnet
+from this picture"). It's part of the app's own server at **`/mcp/<secret>/`** (streamable HTTP, JSON answers); the
+secret lives in `settings.json` and is made at first start. Settings → Cloud accounts → **Chat assistants (MCP)**
+shows the full address with a Copy button and the set-up steps.
+
+- **Tools:** `make_object` (picture → printable stand toy / magnet / keychain, runs the one-click chain and waits),
+  `object_status`, `list_objects`, `list_styles`, `set_part_colour`, `export_print_files` (writes the files and says
+  where they are on the Mac), `preview_image` (sends the picture back to the chat).
+- **Claude Code on the Mac:** `claude mcp add --transport http form-studio http://127.0.0.1:<port>/mcp/<secret>/`.
+- **ChatGPT:** its connectors only reach public HTTPS addresses, so share the port first (e.g. `ngrok http <port>`),
+  then add the tunnel address + `/mcp/<secret>/` as a custom connector (Settings → Connectors → Advanced →
+  Developer mode, "No authentication"). The path secret is what keeps strangers out — treat the tunnel URL as private.
+- Pictures reach the Mac as a URL, base64, or a path to a file already there; requests without the secret get 404.
+
 ## 2. Where things live
 
 | What | Where |

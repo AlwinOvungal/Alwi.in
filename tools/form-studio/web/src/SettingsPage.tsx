@@ -736,6 +736,35 @@ function StorageSection() {
 
 // ---------- page ----------
 
+/** Chat assistants: ChatGPT (and Claude) can drive Form Studio over MCP. */
+function McpCard({ s }: { s: Settings }) {
+  const toast = useToast();
+  const token = s.mcp?.token ?? "";
+  const url = `${location.origin}/mcp/${token}/`;
+  if (!token) return null;
+  return (
+    <Group title="Chat assistants (MCP)" note="Ask ChatGPT or Claude to make a magnet from a picture; Form Studio does the work on this Mac.">
+      <div className="stack" style={{ gap: 8, padding: "10px 0" }}>
+        <label className="field">
+          <span>This Mac's MCP address (the last part is a secret: share it with no one)</span>
+          <div className="row" style={{ gap: 8 }}>
+            <input className="input grow" readOnly value={url} onFocus={(e) => e.target.select()} />
+            <button className="btn sm" onClick={() => navigator.clipboard.writeText(url).then(() => toast("Address copied"))}>Copy</button>
+          </div>
+        </label>
+        <span className="small muted">
+          <b>Claude Code</b> on this Mac: <code>claude mcp add --transport http form-studio {"<address>"}</code>.{" "}
+          <b>ChatGPT</b> can only reach public addresses, so first share the port with a tunnel, e.g.{" "}
+          <code>ngrok http {location.port || "80"}</code> — then in ChatGPT: Settings → Connectors → Advanced →
+          Developer mode → Create, with the tunnel's address + <code>/mcp/{"<secret>"}/</code> and No authentication.
+          Keep the tunnel's address private too: with it, anyone can use this app. The assistant can then make stand
+          toys, magnets and keychains from pictures, check progress, change part colours and export print files.
+        </span>
+      </div>
+    </Group>
+  );
+}
+
 export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => void }) {
   const [s, setS] = useState<Settings | null>(null);
   const [engines, setEngines] = useState<Engines | null>(null);
@@ -955,6 +984,7 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
                 </details>
               </Account>
             </Group>
+            <McpCard s={s} />
           </Section>
 
           <Section id="local" title="Local AI" intro="Free engines that run on this Mac need these downloads. An interrupted download continues where it stopped. Cloud engines need none of this.">

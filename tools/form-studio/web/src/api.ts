@@ -295,6 +295,8 @@ export interface Settings {
   meshy: { ai_model: string; has_key: boolean; key_hint: string };
   slicer: "bambu" | "orca" | "prusa";
   keychain: boolean;
+  /** chat assistants (ChatGPT, Claude) drive the app over /mcp/<token>/ */
+  mcp?: { token: string };
 }
 
 async function req<T>(method: string, url: string, body?: unknown): Promise<T> {

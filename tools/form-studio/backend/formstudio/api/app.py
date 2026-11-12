@@ -34,11 +34,13 @@ from . import settings as settings_mod
 from ..core import timing
 from ..engines.base import quality_of
 from .worker import BACKGROUND, Bus, Worker
+from . import mcp as mcp_mod
 
 log = logging.getLogger(__name__)
 
 bus = Bus()
 worker = Worker(bus)
+_mcp = mcp_mod.asgi_app() if mcp_mod.READY else None  # ChatGPT / Claude drive the app over /mcp/<secret>/
 
 
 @asynccontextmanager
@@ -48,10 +50,20 @@ async def lifespan(app: FastAPI):
         _warm_soon()  # get the default local engines ready while you pick a photo
     except Exception as e:  # never stop the app from opening
         log.warning("warm-up skipped: %s", e)
-    yield
+    if _mcp:
+        try:
+            settings_mod.ensure_mcp_token()
+        except Exception as e:
+            log.warning("couldn't make the MCP secret: %s", e)
+        async with _mcp[1]():  # a mounted app's own lifespan doesn't run by itself
+            yield
+    else:
+        yield
 
 
 app = FastAPI(title="Form Studio", version=__version__, lifespan=lifespan)
+if _mcp:
+    app.mount("/mcp", _mcp[0])
 
 
 # ---- helpers -------------------------------------------------------------------
@@ -856,26 +868,33 @@ class AutoBody(BaseModel):
     format: str | None = None  # stand / magnet / keychain; empty keeps the object's current format
 
 
-@app.post("/api/jobs/{job_id}/auto")
-def auto_make(job_id: str, body: AutoBody) -> dict[str, Any]:
-    """One click: restyle, pick the first option, build the 3D shape and prepare the print,
-    with the best engines that are ready right now (logos take their exact-artwork path)."""
-    job = _job(job_id)
-    if body.format and body.format not in get_style(job.manifest["style"]["id"]).formats:
-        raise HTTPException(400, f"Unknown format '{body.format}'")
+def start_auto(job: Job, fmt: str | None) -> dict[str, Any]:
+    """Queue the one-click chain: restyle, pick the first option, build the 3D shape and prepare the
+    print, with the best engines that are ready right now (logos take their exact-artwork path)."""
+    if fmt and fmt not in get_style(job.manifest["style"]["id"]).formats:
+        raise ValueError(f"Unknown format '{fmt}'")
     s = settings_mod.load()
     ctx = settings_mod.context()
     st = pipeline.pick_engine(job, "stylize", ctx, s)
     rc = pipeline.pick_engine(job, "reconstruct", ctx, s) or "extrude"
 
     def run(progress):
-        fresh = Job.load(job_id)
-        pipeline.auto(fresh, ctx, s, body.format, progress, publish=lambda: _publish_state(fresh))
+        fresh = Job.load(job.id)
+        pipeline.auto(fresh, ctx, s, fmt, progress, publish=lambda: _publish_state(fresh))
 
     eta = ((_eta("stylize", st) or 0.0) if st else 0.0) + (_eta("reconstruct", rc) or 0.0)
     return _queue(job, "auto", run, replace=True,
-                  meta={"engine": rc, "stylize": st or "photo", "format": body.format, "device": ctx.device},
+                  meta={"engine": rc, "stylize": st or "photo", "format": fmt, "device": ctx.device},
                   eta_s=eta or None)
+
+
+@app.post("/api/jobs/{job_id}/auto")
+def auto_make(job_id: str, body: AutoBody) -> dict[str, Any]:
+    """One click: the whole journey as one task."""
+    try:
+        return start_auto(_job(job_id), body.format)
+    except ValueError as e:
+        raise _bad(e)
 
 
 class ConfirmBody(BaseModel):

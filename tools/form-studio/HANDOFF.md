@@ -166,6 +166,10 @@ POST /api/jobs/{id}/style {style_id}  POST /api/jobs/{id}/suggest-name
 POST /api/jobs/{id}/rebuild-recipe    POST /api/jobs/{id}/printify {overrides}
 POST /api/jobs/{id}/reset-print       POST /api/jobs/{id}/export {formats}
 POST /api/jobs/{id}/kind {kind: "logo"|"object"}   (logo: built exactly from the artwork; detected at upload)
+POST|GET /mcp/{secret}/                             (MCP streamable HTTP: api/mcp.py; tools make_object,
+                                                     object_status, list_objects, list_styles, set_part_colour,
+                                                     export_print_files, preview_image; secret = settings mcp.token,
+                                                     made at start-up; TokenGate 404s anything else)
 POST /api/jobs/{id}/auto {format?}                  (one click: restyle → pick → 3D → print as one "auto" task;
                                                      pipeline.pick_engine chooses engines that are ready right now,
                                                      falling back to photo-as-is + extrude; logos use the logo path)
