@@ -852,6 +852,32 @@ def use_now(job_id: str, body: UseNowBody) -> dict[str, Any]:
                   eta_s=_eta("reconstruct", engine))
 
 
+class AutoBody(BaseModel):
+    format: str | None = None  # stand / magnet / keychain; empty keeps the object's current format
+
+
+@app.post("/api/jobs/{job_id}/auto")
+def auto_make(job_id: str, body: AutoBody) -> dict[str, Any]:
+    """One click: restyle, pick the first option, build the 3D shape and prepare the print,
+    with the best engines that are ready right now (logos take their exact-artwork path)."""
+    job = _job(job_id)
+    if body.format and body.format not in get_style(job.manifest["style"]["id"]).formats:
+        raise HTTPException(400, f"Unknown format '{body.format}'")
+    s = settings_mod.load()
+    ctx = settings_mod.context()
+    st = pipeline.pick_engine(job, "stylize", ctx, s)
+    rc = pipeline.pick_engine(job, "reconstruct", ctx, s) or "extrude"
+
+    def run(progress):
+        fresh = Job.load(job_id)
+        pipeline.auto(fresh, ctx, s, body.format, progress, publish=lambda: _publish_state(fresh))
+
+    eta = ((_eta("stylize", st) or 0.0) if st else 0.0) + (_eta("reconstruct", rc) or 0.0)
+    return _queue(job, "auto", run, replace=True,
+                  meta={"engine": rc, "stylize": st or "photo", "format": body.format, "device": ctx.device},
+                  eta_s=eta or None)
+
+
 class ConfirmBody(BaseModel):
     candidate: int | None = None  # None = use the photo as is
 

@@ -511,3 +511,6 @@ button.link { border: none; background: none; padding: 0; font: inherit; color: 
 .swap-mid { border: 1px solid var(--line); background: var(--card); border-radius: 8px; width: 26px; height: 26px; line-height: 1;
   cursor: pointer; color: var(--muted); flex: 0 0 auto; }
 .swap-mid:hover { color: var(--ink); }
+
+/* ---- one click ("Make it now") ---- */
+.auto-banner { border-left: 3px solid var(--olive, #7a8450); gap: 6px; }

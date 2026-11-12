@@ -140,6 +140,8 @@ export default function JobPage({ id }: { id: string }) {
         </div>
       </div>
 
+      {job.task?.kind === "auto" && <AutoCard job={job} run={run} />}
+
       <div className="job">
         <ol className="steps">
           {STEPS.map((s, i) => (
@@ -164,6 +166,36 @@ export default function JobPage({ id }: { id: string }) {
       </div>
     </div>
   );
+}
+
+const FMT_WORD: Record<string, string> = { stand: "stand toy", magnet: "magnet", keychain: "keychain" };
+
+/** One click ("Make it now"): restyle, 3D shape and print files run as one task; this card follows it. */
+function AutoCard({ job, run }: { job: Job; run: (p: Promise<Job>) => void }) {
+  const t = job.task;
+  const { failed, dismiss } = useFailure(job, "auto");
+  const what = FMT_WORD[job.print_params?.format ?? ""] ?? "print";
+  if (t && (t.status === "queued" || t.status === "running"))
+    return (
+      <div className="card panel stack auto-banner" aria-live="polite">
+        <strong style={{ fontWeight: 500 }}>Making your {what}</strong>
+        <span className="small muted">
+          Form Studio is choosing everything for you: the look, the 3D shape and the print files. The steps below fill
+          in as it goes, and you can fine-tune any of them afterwards.
+        </span>
+        <Progress task={t} onCancel={() => run(api.cancel(job.id))} />
+      </div>
+    );
+  if (failed)
+    return (
+      <ErrorCard
+        title={`Couldn't make the ${what} in one go`}
+        task={failed}
+        onRetry={() => (dismiss(), run(api.autoMake(job.id)))}
+        onDismiss={dismiss}
+      />
+    );
+  return null;
 }
 
 /** The last failed task of this kind, until it's dismissed or something new starts. */

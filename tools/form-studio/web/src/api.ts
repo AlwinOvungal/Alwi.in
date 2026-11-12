@@ -479,6 +479,8 @@ export const api = {
   resetColours: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/colours`),
   suggestJobColours: (id: string) => req<Record<string, Colour>>("POST", `/api/jobs/${id}/colours/suggest`),
   setKind: (id: string, kind: "logo" | "object") => req<Job>("POST", `/api/jobs/${id}/kind`, { kind }),
+  /** One click: restyle, pick, build and prepare the print with the best engines that are ready. */
+  autoMake: (id: string, format?: string) => req<Job>("POST", `/api/jobs/${id}/auto`, { format }),
   cancel: (id: string) => req<Job>("POST", `/api/jobs/${id}/cancel`),
   makeViews: (id: string, engine?: string) => req<Job>("POST", `/api/jobs/${id}/views`, { engine }),
   removeViews: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/views`),

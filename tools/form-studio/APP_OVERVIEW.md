@@ -74,7 +74,14 @@ Web UI (React + TypeScript + three.js)  web/src/  → built into backend/formstu
 - **Grid of objects:** thumbnail, name, style, stage and when it was last changed.
 - **"New object" drop zone:**
   - drop a photo, then "What is the object?" (left empty → Claude names it if an Anthropic key is set)
-  - pick a style, then **Start**
+  - pick a style and what it becomes (**Stand toy · Magnet · Keychain**), then:
+    - **Make it now** (one click, like meshy.ai): the whole journey runs as one task — restyle, pick, 3D shape,
+      print files — with the best engines that are *ready right now*: your defaults when their models are
+      downloaded / keys set, else the best available, else photo-as-is + the offline engine. Logos take the
+      exact-artwork path. It never starts a model download on its own, and a failed restyle falls back to the
+      photo instead of stopping. The object page shows a "Making your magnet" banner with progress and Cancel,
+      and the steps fill in as it goes; everything can still be fine-tuned afterwards.
+    - **Step by step**: today's flow, choosing each option yourself.
   - names like "Pasted…", "Screenshot…" or "IMG_1234" are ignored
 - **Styles chip:** links to the Styles page.
 

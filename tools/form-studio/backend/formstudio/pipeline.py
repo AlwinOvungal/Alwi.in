@@ -113,6 +113,83 @@ def default_engine(job: Job, step: str, settings: dict[str, Any]) -> str:
     return settings["engines"][step]
 
 
+AUTO_ORDER = {  # "Make it now": your default engine first, then the best one that's ready right now
+    "stylize": ["local-sdxl", "openai-image", "fal-nano-banana", "fal-kontext"],
+    "reconstruct": ["triposr", "hunyuan-mini", "meshy", "fal-trellis", "fal-hunyuan", "extrude"],
+}
+
+
+LOCAL_PACKS = {"triposr": ["triposr-code", "triposr"], "hunyuan-mini": ["hunyuan"], "hunyuan-mv": ["hunyuan-mv"]}
+
+
+def pick_engine(job: Job, step: str, ctx: EngineContext, settings: dict[str, Any]) -> str | None:
+    """The engine the one-click flow uses: the logo path for logos, your default when it's ready,
+    else the best engine that's ready right now. A local engine counts as ready only when its models
+    are already downloaded — one click never starts a 12 GB download. None (stylize only) means
+    keep the photo as it is."""
+    if is_logo(job):
+        return "logo"
+    from .engines.local import sdxl_packs
+    from .models import status
+
+    def ready(eid: str, e: Any) -> bool:
+        if getattr(e, "logo_only", False) or not e.available(ctx)[0]:
+            return False
+        if getattr(e, "kind", "") != "local":
+            return True  # cloud engines check their key in available(); offline ones need nothing
+        packs = sdxl_packs(ctx.settings) if eid == "local-sdxl" else LOCAL_PACKS.get(eid, [])
+        try:
+            return all(status(p)["status"] == "ready" for p in packs)
+        except Exception:  # can't tell (offline): don't guess
+            return False
+
+    table = STYLIZERS if step == "stylize" else RECONSTRUCTORS
+    for eid in [settings["engines"][step], *AUTO_ORDER[step]]:
+        e = table.get(eid)
+        if e is not None and ready(eid, e):
+            return eid
+    return None
+
+
+def auto(job: Job, ctx: EngineContext, settings: dict[str, Any], fmt: str | None, progress: Progress,
+         publish: Callable[[], None] = lambda: None) -> None:
+    """One click: photo in, printable parts out. Restyles with the best engine that's ready (keeping
+    the photo when none is, or when restyling fails), picks the first option, builds the 3D shape and
+    prepares the print in the chosen format. Logos take their exact-artwork path throughout."""
+    from .engines.base import Cancelled
+
+    style = get_style(job.manifest["style"]["id"])
+    if fmt:
+        if fmt not in style.formats:
+            raise ValueError(f"Unknown format '{fmt}'")
+        if (job.manifest.get("print_params") or {}).get("format") != fmt:
+            job.manifest["print_params"] = style.print_params(fmt)
+            job.save()
+    ensure_cutout(job)
+
+    def part(a: float, b: float) -> Progress:
+        return lambda p, m: progress(None if p is None else a + (b - a) * min(max(p, 0.0), 1.0), m)
+
+    if not job.reached("confirmed"):
+        if not (job.manifest.get("candidates") or []):
+            st = pick_engine(job, "stylize", ctx, settings)
+            if st:
+                try:
+                    stylize(job, ctx, st, [style.seeds[0]], part(0.0, 0.45), on_candidate=publish)
+                except Cancelled:
+                    raise
+                except Exception as e:  # a cloud hiccup shouldn't stop the one-click flow
+                    log.warning("%s: one-click restyle with %s failed (%s); keeping the photo", job.id, st, e)
+        if job.manifest.get("candidates"):
+            confirm(job, 0)
+        else:
+            progress(0.45, "Keeping your photo as it is")
+            use_photo_as_is(job)
+        publish()
+    rc = pick_engine(job, "reconstruct", ctx, settings) or "extrude"
+    reconstruct(job, ctx, rc, part(0.5, 1.0))
+
+
 LOGO_SAFE = [  # the house prompts forbid text; for a logo the AI should try to keep it
     ("no text, no fine detail, ", ""), ("no text or fine detail. ", ""), ("no text or fine detail", ""),
     ("remove all fine detail and text", "keep every letter exactly as written"), ("no text, ", ""),

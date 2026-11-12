@@ -166,6 +166,9 @@ POST /api/jobs/{id}/style {style_id}  POST /api/jobs/{id}/suggest-name
 POST /api/jobs/{id}/rebuild-recipe    POST /api/jobs/{id}/printify {overrides}
 POST /api/jobs/{id}/reset-print       POST /api/jobs/{id}/export {formats}
 POST /api/jobs/{id}/kind {kind: "logo"|"object"}   (logo: built exactly from the artwork; detected at upload)
+POST /api/jobs/{id}/auto {format?}                  (one click: restyle → pick → 3D → print as one "auto" task;
+                                                     pipeline.pick_engine chooses engines that are ready right now,
+                                                     falling back to photo-as-is + extrude; logos use the logo path)
 POST /api/jobs/{id}/colours {<part id>: {hex,name?}, …}   (part ids: body/base, or logo_1..3/plaque; clears 3MF/STEP)
 DELETE /api/jobs/{id}/colours         (back to the style palette)   POST /api/jobs/{id}/colours/suggest (from the picture)
 GET  /api/jobs/{id}/files/{path}      POST /api/jobs/{id}/open   (Finder / slicer)

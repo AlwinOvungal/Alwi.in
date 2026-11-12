@@ -82,13 +82,20 @@ export function StylePicker({ styles, value, onChange }: { styles: Style[]; valu
   );
 }
 
+const MAKE_AS = [
+  { id: "stand", label: "Stand toy" },
+  { id: "magnet", label: "Magnet" },
+  { id: "keychain", label: "Keychain" },
+];
+
 function NewObject({ styles, claude }: { styles: Style[]; claude: boolean }) {
   const [styleId, setStyleId] = useState<string>("");
   const [file, setFile] = useState<File | null>(null);
   const [preview, setPreview] = useState<string | null>(null);
   const [subject, setSubject] = useState("");
+  const [fmt, setFmt] = useState("magnet");
   const [over, setOver] = useState(false);
-  const [busy, setBusy] = useState(false);
+  const [busy, setBusy] = useState<"auto" | "steps" | null>(null);
   const input = useRef<HTMLInputElement>(null);
   const toast = useToast();
 
@@ -104,15 +111,16 @@ function NewObject({ styles, claude }: { styles: Style[]; claude: boolean }) {
     setSubject(claude || meaningless ? "" : guess);
   };
 
-  const create = async () => {
+  const create = async (auto: boolean) => {
     if (!file) return;
-    setBusy(true);
+    setBusy(auto ? "auto" : "steps");
     try {
       const job = await api.create(file, subject.trim() || (claude ? "" : "object"), styleId || styles[0]?.id || "clay-minimal");
+      if (auto) await api.autoMake(job.id, fmt).catch(() => {}); // the job page shows any problem
       go(`/job/${job.id}`);
     } catch (e) {
       toast((e as Error).message, true);
-      setBusy(false);
+      setBusy(null);
     }
   };
 
@@ -128,10 +136,19 @@ function NewObject({ styles, claude }: { styles: Style[]; claude: boolean }) {
             value={subject}
             placeholder={claude ? "Leave empty and Claude will name it" : "e.g. coffee mug"}
             onChange={(e) => setSubject(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && create()}
+            onKeyDown={(e) => e.key === "Enter" && create(true)}
           />
         </label>
-        <span className="small muted">Name the thing itself. You can make it a keychain, magnet or stand later.</span>
+        <div className="field">
+          <span>Make it into</span>
+          <div className="seg wide" role="radiogroup" aria-label="What it becomes">
+            {MAKE_AS.map((m) => (
+              <button key={m.id} type="button" role="radio" aria-checked={fmt === m.id} className={fmt === m.id ? "on" : ""} onClick={() => setFmt(m.id)}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+        </div>
         {styles.length > 1 && (
           <div className="field">
             <span>Style</span>
@@ -139,13 +156,19 @@ function NewObject({ styles, claude }: { styles: Style[]; claude: boolean }) {
           </div>
         )}
         <div className="row">
-          <button className="btn primary grow" onClick={create} disabled={busy}>
-            {busy ? (claude && !subject.trim() ? "Preparing photo, Claude is naming it…" : "Removing background…") : "Start"}
+          <button className="btn primary grow" onClick={() => create(true)} disabled={!!busy}>
+            {busy === "auto" ? (claude && !subject.trim() ? "Preparing photo, Claude is naming it…" : "Removing background…") : "Make it now"}
           </button>
-          <button className="btn ghost" onClick={() => (setFile(null), setPreview(null))} disabled={busy}>
+          <button className="btn ghost" onClick={() => create(false)} disabled={!!busy} title="Choose the style options, the 3D engine and every setting yourself">
+            {busy === "steps" ? "Preparing…" : "Step by step"}
+          </button>
+          <button className="btn ghost" onClick={() => (setFile(null), setPreview(null))} disabled={!!busy}>
             Cancel
           </button>
         </div>
+        <span className="small muted">
+          Make it now picks everything for you and lands on the finished print. Step by step lets you choose each option along the way.
+        </span>
       </div>
     );
   }
