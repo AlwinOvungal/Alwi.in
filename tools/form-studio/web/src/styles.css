@@ -117,7 +117,7 @@ input[type="range"] { width: 100%; accent-color: var(--olive); }
 
 /* ---- library ---- */
 .lib-head { display: flex; align-items: end; justify-content: space-between; gap: 24px; margin-bottom: 28px; flex-wrap: wrap; }
-.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; align-items: start; }
 .tile { overflow: hidden; text-decoration: none; display: grid; transition: transform 0.15s, box-shadow 0.15s; }
 .tile:hover { transform: translateY(-2px); box-shadow: 0 10px 30px -18px rgba(27,27,24,.5); }
 .tile .thumb { aspect-ratio: 1; background: #fff; display: grid; place-items: center; border-bottom: 1px solid var(--line); }
