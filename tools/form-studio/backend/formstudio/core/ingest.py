@@ -54,10 +54,27 @@ def remove_background(img: Image.Image) -> Image.Image:
     return out
 
 
+def _despeck(alpha: "np.ndarray") -> "np.ndarray":
+    """Drop tiny stray bits — labels, dimension text, dust — so they never reach the print."""
+    from scipy import ndimage
+
+    labels, n = ndimage.label(alpha > 24)
+    if n <= 1:
+        return alpha
+    areas = np.bincount(labels.ravel())[1:]
+    keep = areas >= max(16, int(areas.max() * 0.02))
+    if keep.all():
+        return alpha
+    out = alpha.copy()
+    out[~np.isin(labels, np.nonzero(keep)[0] + 1)] = 0
+    return out
+
+
 def cutout(src: Path, dst: Path, size: int = SIZE) -> dict:
     img = ImageOps.exif_transpose(Image.open(src))
     rgba = remove_background(img)
-    alpha = np.asarray(rgba.getchannel("A"))
+    alpha = _despeck(np.asarray(rgba.getchannel("A")))
+    rgba.putalpha(Image.fromarray(alpha))
     ys, xs = np.nonzero(alpha > 24)
     if len(xs) == 0:  # nothing found: keep the whole frame
         box = (0, 0, rgba.width, rgba.height)

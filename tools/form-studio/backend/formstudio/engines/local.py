@@ -21,7 +21,7 @@ from PIL import Image
 from .. import paths
 from ..core import timing
 from ..core.ingest import remove_background
-from .base import EngineContext, EngineError, Progress, ReconstructInput, StylizeInput, missing, quality_of
+from .base import SHEET_NEGATIVE, EngineContext, EngineError, Progress, ReconstructInput, StylizeInput, missing, quality_of
 
 log = logging.getLogger(__name__)
 
@@ -388,7 +388,7 @@ class LocalSDXL:
                     img = pipe(
                         prompt=prompt,
                         # Lightning runs without guidance, so there's nothing to steer away from
-                        negative_prompt=None if quick else inp.style.negative_prompt,
+                        negative_prompt=None if quick else f"{inp.style.negative_prompt}, {SHEET_NEGATIVE}",
                         image=depth, ip_adapter_image=ref,
                         controlnet_conditioning_scale=float(cfg.get("controlnet_scale", 0.55)),
                         num_inference_steps=steps, guidance_scale=0.0 if quick else float(cfg.get("guidance", 6.0)),

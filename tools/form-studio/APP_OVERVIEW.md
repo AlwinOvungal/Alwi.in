@@ -39,6 +39,26 @@ shows the full address with a Copy button and the set-up steps.
   Developer mode, "No authentication"). The path secret is what keeps strangers out — treat the tunnel URL as private.
 - Pictures reach the Mac as a URL, base64, or a path to a file already there; requests without the secret get 404.
 
+### Sheets and multi-view pictures
+
+A picture that is really a **product or turnaround sheet** — several views of the object side by side, often with
+labels and dimension callouts (what ChatGPT likes to draw) — used to be printed whole: every view and every label
+extruded together. Now:
+
+- **Cut-outs drop stray bits.** Labels, dimension text and dust (anything under 2% of the main shape) never reach
+  the mask (`core/ingest.py`).
+- **Sheets are recognised** (`core/views.py: panels / main_object / split_panels`): 2–4 side-by-side pieces of
+  similar size that make up nearly all of the picture. Strict on purpose — a mug with a handle or a mark +
+  wordmark logo never matches.
+- **Only the front object is built.** Wherever a picture enters the 3D step (picking an option, "use photo as is",
+  a restyle that came back as a sheet), the first panel becomes the object; the option card shows that front object
+  too (the original sheet is kept beside it).
+- **Three panels = free views.** The sheet's side and back are saved as the object's views, so multi-view 3D
+  engines (Meshy, TRELLIS multi, Hunyuan-mv) see the whole object without any extra AI call.
+- **A 3-view sheet of flat art counts as an object,** not a logo, so it never becomes a plaque by mistake.
+- Restyle prompts now also say "one object, one view, no sheets, no labels" (and the SDXL negative prompt
+  forbids turnaround sheets), so new options are less likely to be sheets at all.
+
 ## 2. Where things live
 
 | What | Where |

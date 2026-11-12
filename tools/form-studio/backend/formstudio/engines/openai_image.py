@@ -12,7 +12,7 @@ import time
 
 import httpx
 
-from .base import EngineContext, EngineError, Progress, StylizeInput
+from .base import ONE_OBJECT, EngineContext, EngineError, Progress, StylizeInput
 from .cloud import _clean_to_white, _data_uri
 
 API = "https://api.openai.com/v1/images/edits"
@@ -24,6 +24,7 @@ LEAD = (
     "{refs}"
     "Redraw the object from image 1 completely in the target style, as a single object, "
     "on a transparent background. "
+    + ONE_OBJECT
 )
 REFS = (
     "Images 2 to {last} show the target style: copy their look, materials, colours and level of "

@@ -16,6 +16,7 @@ from . import paths
 from .core import export as export_mod
 from .core import timing
 from .core import ingest, printify as printify_mod
+from .core import views as views_mod
 from .core import logo as logo_mod
 from .core.job import CANDIDATES, CONFIRMED, CUTOUT, PRINT_DIR, RAW_MESH, VIEWS_DIR, Job
 from .core.style import get_style
@@ -69,7 +70,12 @@ def create(photo: Path, name: str, subject: str, style_id: str) -> Job:
     log.info("%s: cut-out saved (%s)", job.id, info.get("matting"))
     job.manifest["cutout"] = info
     try:  # logos and text are built from the artwork itself, so their letters stay exact
-        job.manifest["kind"] = "logo" if logo_mod.is_graphic(dest) else "object"
+        kind = "logo" if logo_mod.is_graphic(dest) else "object"
+        # a 3-view turnaround sheet of flat art is an object, not a logo (2 pieces side by side is
+        # usually a mark + wordmark, so that stays a logo)
+        if kind == "logo" and len(views_mod.panels_of(dest) or ()) >= 3:
+            kind = "object"
+        job.manifest["kind"] = kind
     except Exception as e:  # never stop an upload over this
         log.warning("%s: couldn't check for a logo: %s", job.id, e)
         job.manifest["kind"] = "object"
@@ -315,6 +321,17 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
         num = _next_candidate_number(job)
         name = f"candidate_{num}.png"
         (tmp / r["file"]).replace(out_dir / name)
+        if not is_logo(job):  # an AI that answered with a turnaround sheet: show its front object instead
+            try:
+                if views_mod.panels_of(out_dir / name):
+                    sheet = f"candidate_{num}_sheet.png"
+                    shutil.copyfile(out_dir / name, out_dir / sheet)
+                    info = views_mod.main_object(out_dir / sheet, out_dir / name)
+                    (out_dir / name).with_name(f"candidate_{num}_mask.png").unlink(missing_ok=True)
+                    r = {**r, "sheet": info["panels"], "sheet_file": f"{CANDIDATES}/{sheet}"}
+                    log.info("%s: option %d came back as a sheet of %d; kept its front object", job.id, num, info["panels"])
+            except Exception as e:
+                log.warning("%s: sheet check on option %d failed: %s", job.id, num, e)
         job.manifest.setdefault("candidates", []).append({
             **r, "n": num, "file": f"{CANDIDATES}/{name}", "engine": engine_id,
             "style_id": style.id, "style_name": style.name,
@@ -379,6 +396,31 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
     log.info("%s: %d new options (%d in total)", job.id, made[0], len(job.manifest["candidates"]))
 
 
+def _handle_sheet(job: Job, src: Path) -> dict[str, Any]:
+    """A turnaround / product sheet went into the 3D step: keep only its FRONT object as the
+    confirmed picture, and with three panels keep the side and back as views, so the multi-view
+    3D engines see the whole object for free. {} when the picture is one object."""
+    try:
+        info = views_mod.main_object(src, job.path(CONFIRMED))
+    except Exception as e:  # never lose the pick over this
+        log.warning("%s: sheet check failed: %s", job.id, e)
+        return {}
+    if not info:
+        return {}
+    n = info["panels"]
+    log.info("%s: the picture is a sheet of %d panels; building from the first one", job.id, n)
+    if n == 3:
+        try:
+            out = job.path(VIEWS_DIR)
+            shutil.rmtree(out, ignore_errors=True)
+            if views_mod.split_panels(src, out):
+                job.manifest["views"] = {"engine": "sheet", "files": [f"{VIEWS_DIR}/{v}.png" for v in VIEW_NAMES],
+                                         "created": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        except Exception as e:
+            log.warning("%s: couldn't keep the sheet's views: %s", job.id, e)
+    return {"sheet": n}
+
+
 def _reset_keeping_options(job: Job) -> None:
     """Clear the chosen option and everything after it, but keep all generated options."""
     job.reset_after("stylized" if job.manifest.get("candidates") else "cutout")
@@ -390,6 +432,8 @@ def remove_candidate(job: Job, index: int) -> None:
         raise ValueError("No such option")
     gone = cands.pop(index)
     job.path(gone["file"]).unlink(missing_ok=True)
+    if gone.get("sheet_file"):
+        job.path(gone["sheet_file"]).unlink(missing_ok=True)
     if not cands and job.manifest["stage"] == "stylized":
         job.manifest["stage"] = "cutout"
     job.save()
@@ -410,7 +454,8 @@ def confirm(job: Job, index: int) -> None:
         raise ValueError("No such candidate")
     job.reset_after("stylized")
     ingest.cutout(job.path(cands[index]["file"]), job.path(CONFIRMED))
-    job.manifest["confirmed"] = {"index": index, **cands[index]}
+    extra = {} if is_logo(job) else _handle_sheet(job, job.path(cands[index].get("sheet_file") or cands[index]["file"]))
+    job.manifest["confirmed"] = {"index": index, **cands[index], **extra}
     job.set_stage("confirmed")
 
 
@@ -421,7 +466,8 @@ def use_photo_as_is(job: Job) -> None:
     shutil.copyfile(job.path(CUTOUT), job.path(CONFIRMED))
     cut = job.path(CUTOUT)
     shutil.copyfile(cut.with_name(cut.stem + "_mask.png"), job.path("03_confirmed_mask.png"))
-    job.manifest["confirmed"] = {"index": None, "file": CUTOUT, "seed": None, "engine": "photo"}
+    extra = {} if is_logo(job) else _handle_sheet(job, cut)
+    job.manifest["confirmed"] = {"index": None, "file": CUTOUT, "seed": None, "engine": "photo", **extra}
     job.set_stage("confirmed")
 
 

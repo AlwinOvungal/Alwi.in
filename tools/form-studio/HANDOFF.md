@@ -166,6 +166,9 @@ POST /api/jobs/{id}/style {style_id}  POST /api/jobs/{id}/suggest-name
 POST /api/jobs/{id}/rebuild-recipe    POST /api/jobs/{id}/printify {overrides}
 POST /api/jobs/{id}/reset-print       POST /api/jobs/{id}/export {formats}
 POST /api/jobs/{id}/kind {kind: "logo"|"object"}   (logo: built exactly from the artwork; detected at upload)
+(sheet handling: core/views.py panels/main_object/split_panels + ingest._despeck; hooks in pipeline
+ create/confirm/use_photo_as_is/stylize-add — a turnaround sheet builds from its front panel only,
+ 3 panels also fill 03_views; candidates keep the original as candidate_N_sheet.png)
 POST|GET /mcp/{secret}/                             (MCP streamable HTTP: api/mcp.py; tools make_object,
                                                      object_status, list_objects, list_styles, set_part_colour,
                                                      export_print_files, preview_image; secret = settings mcp.token,
