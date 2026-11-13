@@ -43,10 +43,10 @@ def test_one_click_photo_to_magnet(mug_photo):
         assert r.status_code == 200, r.text
         assert r.json()["task"]["kind"] == "auto"
         j = _wait(c, jid)
-        # no AI is available in tests, so the photo is kept and the offline engine builds the shape
+        # no AI is available in tests, so the photo is kept; a magnet is built from the picture itself
         assert j["stage"] == "printified"
         assert j["confirmed"]["engine"] == "photo"
-        assert j["reconstruct"]["engine"] == "extrude"
+        assert j["reconstruct"]["engine"] == "picture"
         assert j["print_params"]["format"] == "magnet"
         assert j["parts"] and j["parts"][0]["filament"] == 1
         r = c.post(f"/api/jobs/{jid}/export", json={"formats": ["3mf"]})

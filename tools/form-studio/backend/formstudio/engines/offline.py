@@ -4,6 +4,7 @@ and genuinely useful for simple shapes:
 - Palette preview: recolours the cutout in the style palette (a quick look, not a restyle)
 - Lathe: spins the silhouette around its centre line (cups, vases, bottles, lamps)
 - Extrude: pushes the silhouette into a thick rounded slab (logos, flat objects, 2D art)
+- Picture relief: magnets, keychains, ornaments made from the picture itself (exact outline, its colours)
 """
 from __future__ import annotations
 
@@ -132,6 +133,33 @@ class Extrude:
         _volume_to_glb(vol, inp.out)
         progress(1.0, "Done")
         return {"method": "extrude"}
+
+
+class PictureRelief:
+    id = "picture"
+    label = "From the picture (instant)"
+    kind = "offline"
+    note = ("Instant. For magnets, keychains and ornaments: the picture becomes a relief with its exact "
+            "outline and its own colours. No AI 3D model needed.")
+    flat_only = True
+
+    def available(self, ctx: EngineContext) -> tuple[bool, str]:
+        return True, ""
+
+    def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        from ..core import relief
+        from ..core.printify import to_trimesh
+
+        progress(0.2, "Reading the picture")
+        img = Image.open(inp.image).convert("RGB")
+        mask = np.asarray(Image.open(inp.mask).convert("L").resize(img.size)) > 24
+        progress(0.5, "Pressing the picture into a relief")
+        labels, _ = logo_mod.regions(img, mask, None)
+        body, _ = relief.build(np.asarray(img), mask, labels, 50.0, 10.0, 1.0, {"soften_mm": 0.6})
+        # lying flat it's x right, y up, z towards you: already the y-up, front-facing frame of a GLB
+        to_trimesh(body).export(inp.out, file_type="glb")
+        progress(1.0, "Done")
+        return {"method": "picture"}
 
 
 def _logo_source(inp) -> Path:

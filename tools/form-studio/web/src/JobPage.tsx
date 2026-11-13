@@ -612,10 +612,15 @@ function ViewsCard({ job, busy, engines, settings, run }: StepProps & { engines:
 function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines: Engines | null }) {
   const [engine, setEngine] = useState("");
   // logos: only the exact engine fits (AI 3D loses thin letters); objects: everything but it
-  const list = useMemo(() => (engines?.reconstruct ?? []).filter((e) => (job.kind === "logo") === !!e.logo_only), [engines, job.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  const flat = !!job.print_params?.flat_back?.enabled;
+  // logos: only the exact engine fits; magnets/keychains/ornaments: "from the picture" first, AI 3D optional
+  const list = useMemo(
+    () => (engines?.reconstruct ?? []).filter((e) => (job.kind === "logo") === !!e.logo_only && (flat || !e.flat_only)),
+    [engines, job.kind, flat],
+  );
   useEffect(
-    () => setEngine((e) => (e && list.some((x) => x.id === e) ? e : pickAvailable(list, job.reconstruct?.engine ?? (job.kind === "logo" ? "logo" : settings?.engines.reconstruct)))),
-    [settings, engines, job.reconstruct, list, job.kind],
+    () => setEngine((e) => (e && list.some((x) => x.id === e) ? e : pickAvailable(list, job.reconstruct?.engine ?? (job.kind === "logo" ? "logo" : flat ? "picture" : settings?.engines.reconstruct)))),
+    [settings, engines, job.reconstruct, list, job.kind, flat],
   );
   const working = busy && job.task?.kind === "reconstruct";
   const { failed, dismiss } = useFailure(job, "reconstruct");
@@ -634,6 +639,10 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
           <p className="small muted" style={{ margin: 0 }}>
             {job.kind === "logo"
               ? "Built straight from your artwork: every letter and shape exactly as drawn, each colour its own raised part on a plaque. Instant and free."
+              : flat && engine === "picture"
+              ? "A flat object is made from the chosen picture itself: its exact outline, a rounded relief, and one part per colour. Instant, and true to the picture. Pick an AI 3D engine instead to take the relief's depth from a 3D model."
+              : flat
+              ? "The relief's depth comes from this AI 3D model; the outline and colours still come from the picture. \"From the picture\" is faster and usually closer to it."
               : job.views && engines?.reconstruct.find((e) => e.id === engine)?.multi_view
               ? "This engine builds from all 3 views. Form Studio then cleans the shape up for printing."
               : job.views
@@ -936,31 +945,19 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           {fmt !== "stand" && !job.logo_parts && (
             <Slider label="Thickness" unit=" mm" min={3} max={25} step={0.5} value={p.flat_back.thickness_mm} onChange={(v) => set("flat_back", { thickness_mm: v })} onCommit={(v) => set("flat_back", { thickness_mm: v }, true)} disabled={busy} />
           )}
-          {(fmt === "magnet" || fmt === "keychain") && !job.logo_parts && (
+          {!!p.flat_back?.enabled && !job.logo_parts && (
             <>
               <Switch
-                label="Picture colours (AMS)"
-                checked={!!p.regions?.enabled}
-                onChange={(v) => set("regions", { enabled: v }, true)}
+                label="Print in one colour"
+                checked={!p.regions?.enabled}
+                onChange={(v) => set("regions", { enabled: !v }, true)}
                 disabled={busy}
               />
-              {p.regions?.enabled ? (
-                <div className="field">
-                  <span>Up to how many colours (one filament each)</span>
-                  <div className="seg wide" role="radiogroup" aria-label="Most colours to keep">
-                    {[2, 3, 4].map((n) => (
-                      <button key={n} type="button" role="radio" aria-checked={(p.regions?.max_colours ?? 4) === n}
-                        className={(p.regions?.max_colours ?? 4) === n ? "on" : ""} disabled={busy}
-                        onClick={() => set("regions", { max_colours: n }, true)}>
-                        {n}
-                      </button>
-                    ))}
-                  </div>
-                  <span className="small muted">The picture is reduced to its main colours; each prints as its own part. Change any of them below.</span>
-                </div>
-              ) : (
-                <span className="small muted">Off: one colour, as before. On: the picture's own colours, one filament each.</span>
-              )}
+              <span className="small muted">
+                {p.regions?.enabled
+                  ? `Each of the picture's colours prints as its own part, one AMS slot each${p.regions?.max_colours ? ` (reduced to at most ${p.regions.max_colours} in the Photo step)` : ""}. Change any colour below.`
+                  : "One part, one filament. Turn off to print the picture's own colours."}
+              </span>
             </>
           )}
           {fmt === "keychain" && (

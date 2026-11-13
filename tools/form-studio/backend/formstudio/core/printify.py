@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import math
+import logging
 from collections import OrderedDict
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,8 @@ from scipy import ndimage
 from skimage import measure
 
 from . import timing
+
+log = logging.getLogger(__name__)
 
 Progress = Callable[[float, str], None]
 
@@ -237,12 +240,29 @@ def relief_volume(opened: np.ndarray, pitch: float, thickness_mm: float,
     return out, info
 
 
-def _region_grid(labels: np.ndarray, mask: np.ndarray, gx: int, gy: int) -> np.ndarray:
-    """The picture's colour regions on the lying body's (x, y) grid, every cell owned by a region."""
+def _region_grid(labels: np.ndarray, mask: np.ndarray, gx: int, gy: int,
+                 cells: tuple[np.ndarray, np.ndarray] | None = None,
+                 extent: tuple[float, float, float, float] | None = None) -> np.ndarray:
+    """The picture's colour regions on the lying body's (x, y) grid, every cell owned by a region.
+
+    With `extent` (the picture box's xmin, xmax, ymin, ymax in mm) and the cell centres, each cell
+    samples the picture where it really is — parts added outside the picture (a key-ring loop)
+    don't squash the mapping; they take the nearest colour."""
     ys, xs = np.nonzero(mask)
     crop = (labels + 1)[ys.min():ys.max() + 1, xs.min():xs.max() + 1]  # 0 = outside
-    arr = np.asarray(Image.fromarray(crop.astype(np.uint8)).resize((gx, gy), Image.NEAREST))
-    g = arr[::-1].T.astype(np.int32) - 1  # (x, y) with y up
+    if extent is None or cells is None:
+        arr = np.asarray(Image.fromarray(crop.astype(np.uint8)).resize((gx, gy), Image.NEAREST))
+        g = arr[::-1].T.astype(np.int32) - 1  # (x, y) with y up
+    else:
+        cx, cy = cells
+        x0, x1, y0, y1 = extent
+        h, w = crop.shape
+        col = np.floor((cx - x0) / max(x1 - x0, 1e-6) * w).astype(int)
+        row = np.floor((y1 - cy) / max(y1 - y0, 1e-6) * h).astype(int)
+        inside = (col >= 0) & (col < w) & (row >= 0) & (row < h)
+        g = np.full((gx, gy), -1, np.int32)
+        ci, ri = np.meshgrid(np.arange(gx), np.arange(gy), indexing="ij")
+        g[inside] = crop[row[inside], col[inside]].astype(np.int32) - 1
     if (g < 0).any():  # cells outside the picture (a key-ring loop, overhangs) take the nearest colour
         _, (ix, iy) = ndimage.distance_transform_edt(g < 0, return_indices=True)
         g = g[ix, iy]
@@ -250,7 +270,8 @@ def _region_grid(labels: np.ndarray, mask: np.ndarray, gx: int, gy: int) -> np.n
 
 
 def split_by_regions(body: mf.Manifold, labels: np.ndarray, mask: np.ndarray, n_regions: int,
-                     warnings: list[str]) -> list[tuple[int, mf.Manifold]]:
+                     warnings: list[str], extent: tuple[float, float, float, float] | None = None
+                     ) -> list[tuple[int, mf.Manifold]]:
     """Cut a flat body into one part per picture colour, with straight shared walls between colours.
 
     The grid gives every cell to exactly one region, and marching cubes over complementary cell sets
@@ -262,8 +283,10 @@ def split_by_regions(body: mf.Manifold, labels: np.ndarray, mask: np.ndarray, n_
     lo, hi = np.array(bb[:3]), np.array(bb[3:])
     cell = 0.35
     gx, gy = max(2, int((hi[0] - lo[0]) / cell)), max(2, int((hi[1] - lo[1]) / cell))
-    grid = _region_grid(labels, mask, gx, gy)
     dx, dy = (hi[0] - lo[0]) / gx, (hi[1] - lo[1]) / gy
+    cx = lo[0] + (np.arange(gx) + 0.5) * dx
+    cy = lo[1] + (np.arange(gy) + 0.5) * dy
+    grid = _region_grid(labels, mask, gx, gy, np.meshgrid(cx, cy, indexing="ij"), extent)
     out: list[tuple[int, mf.Manifold]] = []
     for i in range(n_regions):
         m2 = grid == i
@@ -324,16 +347,23 @@ def add_ring(body: mf.Manifold, ring: dict[str, Any], warnings: list[str]) -> mf
     x_top = float(near_top[np.argmin(np.abs(near_top[:, 0] - (bb[0] + bb[3]) / 2)), 0])
     cy = ytop + hole_r + 0.6  # the hole sits just clear of the body
     stem_w = outer * 1.2
-    stem_bottom = ytop - 3.0  # the stem reaches 3 mm into the body for a strong joint
-    shape = mf.CrossSection.circle(outer, 64) + mf.CrossSection.square((stem_w, cy - stem_bottom)).translate(
-        (-stem_w / 2, stem_bottom - cy)
-    )
-    shape = shape - mf.CrossSection.circle(hole_r, 48)
-    loop = shape.extrude(thickness).translate((x_top, cy, 0))
-    joined = body + loop
-    if len(joined.decompose()) > 1:
-        warnings.append("The key-ring loop doesn't touch the object; check it in the slicer.")
-        return body
+    joined = None
+    # the stem reaches into the body for a strong joint; if its edge happens to graze the body's
+    # surface the union can pinch (fine in memory, broken once saved as STL), so try a little deeper
+    for depth in (3.0, 3.6, 4.3):
+        stem_bottom = ytop - depth
+        shape = mf.CrossSection.circle(outer, 64) + mf.CrossSection.square((stem_w, cy - stem_bottom)).translate(
+            (-stem_w / 2, stem_bottom - cy)
+        )
+        shape = shape - mf.CrossSection.circle(hole_r, 48)
+        loop = shape.extrude(thickness).translate((x_top, cy, 0))
+        joined = body + loop
+        if len(joined.decompose()) > 1:
+            warnings.append("The key-ring loop doesn't touch the object; check it in the slicer.")
+            return body
+        mesh = joined.to_mesh()
+        if trimesh.Trimesh(np.asarray(mesh.vert_properties)[:, :3], np.asarray(mesh.tri_verts), process=True).is_watertight:
+            break
     return joined
 
 
@@ -441,111 +471,170 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     k3 = k2 and (*k2, finish, relief_sig, *(geo.get(k) for k in ("voxel_size_mm", "facets", "soften_mm", "smooth_iters", "target_faces",
                                                        "clay_texture_mm", "clay_grain_mm", "clay_smooth")))
 
+    regions_p = params.get("regions") or {}
+    n_paint = regions_p.get("max_colours")
+    n_paint = int(n_paint) if n_paint else None
+    have_picture = mask_sig is not None and image_path is not None and Path(image_path).exists()
+    picture = flat_on and have_picture and flat.get("depth_from", "picture") == "picture"
+    labels = region_cols = mask_full = extent = None
     relief_info: dict[str, Any] = {}
-    hit3 = _get(k3)
-    if hit3:
-        body, pitch, thin_removed, relief_info, w = hit3
-        warnings += w
-        say(0.6, "Reusing the shape (only the parts you changed are rebuilt)")
-    else:
-        hit2 = _get(k2)
-        if hit2:
-            opened, origin, pitch, thin_removed, w = hit2
+    if picture:  # magnet / keychain / ornament straight from the picture: exact outline, its colours
+        from . import logo as logo_mod
+        from . import relief as relief_mod
+
+        ist = Path(image_path).stat()
+        kp = (("picture", f"{image_path}:{ist.st_mtime_ns}:{ist.st_size}", mask_sig, round(height, 3), round(flat_t, 3),
+               round(min_feat, 3), finish, n_paint, *(geo.get(k) for k in ("soften_mm", "voxel_size_mm", "facets",
+               "clay_texture_mm", "clay_grain_mm"))) if CACHE["enabled"] else None)
+        hit = _get(kp)
+        if hit:
+            body_m, labels, region_cols, mask_full, relief_info, w = hit
             warnings += w
+            say(0.6, "Reusing the relief (only the parts you changed are rebuilt)")
         else:
-            hit1 = _get(k1)
-            if hit1:
-                vol, origin, pitch, solid_vox, w = hit1
-                warnings += w
-            else:
-                w: list[str] = []
-                say(0.05, "Standing the mesh up")
-                mesh = raw.copy()
-                mesh.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 2, [1, 0, 0]))  # y-up → z-up
-                ext = mesh.extents
-                if ext[2] <= 1e-9:
-                    raise ValueError("the AI mesh is flat")
-                # scale so that after the flat cut the body is exactly body_h tall
-                s = body_h / (ext[2] * (1 - flat_cut))
-                mesh.apply_scale(s)
-                mesh.apply_translation(-mesh.bounds[0])
-
-                pitch = pitch_req
-                longest = float(mesh.extents.max())
-                if longest / pitch > MAX_VOXELS:
-                    pitch = longest / MAX_VOXELS
-                    w.append(f"Large object: remesh resolution relaxed to {pitch:.2f} mm.")
-
-                say(0.2, "Making it solid")
-                with timing.stage("printify.voxelize"):
-                    vol, origin = solid_volume(mesh, pitch)
-                solid_vox = int(vol.sum())
-                if solid_vox == 0:
-                    raise ValueError("the AI mesh has no volume")
-                warnings += w
-                _put(k1, (vol, origin, pitch, solid_vox, list(warnings)))
-
             w = []
-            say(0.35, "Removing parts too thin to print")
-            with timing.stage("printify.thin_parts"):
-                r_vox = int(round(min_feat / 2 / pitch))
-                opened = ndimage.binary_opening(np.pad(vol, r_vox + 1), structure=_ball(r_vox))
-                opened = opened[r_vox + 1 : -(r_vox + 1), r_vox + 1 : -(r_vox + 1), r_vox + 1 : -(r_vox + 1)]
-                opened = _largest_component(opened)
-            if opened.sum() < 0.2 * solid_vox:
-                w.append("Most of the shape was thinner than the minimum feature size; kept the original.")
-                opened = _largest_component(vol)
-            thin_removed = 1.0 - opened.sum() / solid_vox
-            if thin_removed > 0.08:
-                w.append(f"{thin_removed:.0%} of the volume was too thin to print and was removed.")
+            say(0.15, "Reading the picture's colours")
+            img = Image.open(image_path)
+            mask_full = np.asarray(Image.open(mask_path).convert("L")) > 24
+            _, mm_px = relief_mod.fit(mask_full, height)
+            with timing.stage("printify.colours"):
+                labels, region_cols = logo_mod.regions(img, mask_full, n_paint, mm_per_px=mm_px)
+            say(0.4, "Pressing the picture into a relief")
+            look = {"soften_mm": min(float(geo.get("soften_mm", 0.9)), 1.2)}
+            if finish == "blender":
+                look.update(clay_texture_mm=float(geo.get("clay_texture_mm", 0.25)) * 0.6,
+                            clay_grain_mm=float(geo.get("clay_grain_mm", 3.0)))
+            elif finish == "voxel":
+                look = {"terrace_mm": min(float(geo.get("voxel_size_mm", 2.5)) / 2, 1.0)}
+            elif finish == "faceted":  # about `facets` flat triangles over the picture
+                look = {"lowpoly_mm": max(1.0, math.sqrt(height * height / max(int(geo.get("facets", 400)) / 2, 1)))}
+            rgb = np.asarray(img.convert("RGB").resize(mask_full.shape[::-1]))
+            with timing.stage("printify.relief", source="picture"):
+                body_m, relief_info = relief_mod.build(rgb, mask_full, labels, height, flat_t, min_feat, look)
+            try:  # how closely the outline follows the picture (before pocket and ring, which are wanted)
+                relief_info["fidelity"] = relief_mod.fidelity(body_m, relief_info["_outline"], *relief_info["_box_mm"],
+                                                              mask_full, relief_mod.fit(mask_full, height)[0])
+            except Exception as e:  # a score is a nice-to-have; never fail a print over it
+                log.warning("fidelity check failed: %s", e)
+            if relief_info["outline_removed_pct"] >= 2:
+                w.append(f"{relief_info['outline_removed_pct']:.0f}% of the outline was thinner than "
+                         f"{min_feat:g} mm and was trimmed so it won't snap.")
+            _put(kp, (body_m, labels, region_cols, mask_full, relief_info, list(w)))
             warnings += w
-            _put(k2, (opened, origin, pitch, thin_removed, list(warnings)))
-
-        w = []
-        if flat_on:  # magnet / keychain: a bas-relief of the front, on the picture's own outline
-            say(0.45, "Pressing the front into a relief")
-            mask_arr = None
-            if mask_sig:
-                mask_arr = np.asarray(Image.open(mask_path).convert("L")) > 24
-            with timing.stage("printify.relief"):
-                opened, relief_info = relief_volume(opened, pitch, flat_t, mask_arr, w)
-        with timing.stage("printify.finish", finish=finish):
-            if finish == "voxel":
-                say(0.5, "Rebuilding from blocks")
-                body = voxel_surface(opened, origin, pitch, float(geo.get("voxel_size_mm", 2.5)))
-            elif finish == "faceted":
-                say(0.5, "Cutting facets")
-                body = surface_from_volume(opened, origin, pitch, min(float(geo.get("soften_mm", 0.9)), 0.5) / pitch)
-                body = facet(body, int(geo.get("facets", 400)), w)
-            elif finish == "blender":
-                say(0.5, "Finishing in Blender (clay)")
-                body = _blender_clay(opened, origin, pitch, geo, w)
-            else:
-                say(0.5, "Softening into clay")
-                body = _soft(opened, origin, pitch, geo, w)
-        warnings += w
-        _put(k3, (body, pitch, thin_removed, relief_info, list(warnings)))
-
-    say(0.7, "Cutting a flat bottom")
-    body_m = to_manifold(body)
-    zmin, zmax = body.bounds[0][2], body.bounds[1][2]
-    body_m = body_m.trim_by_plane((0, 0, 1), zmin + flat_cut * (zmax - zmin))
-    body_m = max(body_m.decompose(), key=lambda p: p.volume())  # the cut can leave crumbs
-    bb = body_m.bounding_box()
-    lo, hi = np.array(bb[:3]), np.array(bb[3:])
-    k = body_h / (hi[2] - lo[2])  # blur and cut shift the height slightly; land it exactly
-    body_m = body_m.scale((k, k, k))
-    lo, hi = lo * k, hi * k
-    centre = (lo[:2] + hi[:2]) / 2
-    z0 = (base_t - SINK_MM) if use_base else 0.0
-    body_m = body_m.translate((-centre[0], -centre[1], z0 - lo[2]))
-
-    if flat.get("enabled"):
-        say(0.76, "Making a flat back")
-        body_m = lay_flat(body_m, float(flat.get("thickness_mm", 8)))
+        relief_info = dict(relief_info)
+        wb, hb = relief_info["_box_mm"]
+        extent = (-wb / 2, wb / 2, -hb / 2, hb / 2)
+        thin_removed = relief_info["outline_removed_pct"] / 100
+        pitch = relief_mod.GRID_MM
         if ring_p.get("enabled"):
             say(0.8, "Adding the key-ring loop")
             body_m = add_ring(body_m, ring_p, warnings)
+    else:
+        relief_info: dict[str, Any] = {}
+        hit3 = _get(k3)
+        if hit3:
+            body, pitch, thin_removed, relief_info, w = hit3
+            warnings += w
+            say(0.6, "Reusing the shape (only the parts you changed are rebuilt)")
+        else:
+            hit2 = _get(k2)
+            if hit2:
+                opened, origin, pitch, thin_removed, w = hit2
+                warnings += w
+            else:
+                hit1 = _get(k1)
+                if hit1:
+                    vol, origin, pitch, solid_vox, w = hit1
+                    warnings += w
+                else:
+                    w: list[str] = []
+                    say(0.05, "Standing the mesh up")
+                    mesh = raw.copy()
+                    mesh.apply_transform(trimesh.transformations.rotation_matrix(math.pi / 2, [1, 0, 0]))  # y-up → z-up
+                    ext = mesh.extents
+                    if ext[2] <= 1e-9:
+                        raise ValueError("the AI mesh is flat")
+                    # scale so that after the flat cut the body is exactly body_h tall
+                    s = body_h / (ext[2] * (1 - flat_cut))
+                    mesh.apply_scale(s)
+                    mesh.apply_translation(-mesh.bounds[0])
+
+                    pitch = pitch_req
+                    longest = float(mesh.extents.max())
+                    if longest / pitch > MAX_VOXELS:
+                        pitch = longest / MAX_VOXELS
+                        w.append(f"Large object: remesh resolution relaxed to {pitch:.2f} mm.")
+
+                    say(0.2, "Making it solid")
+                    with timing.stage("printify.voxelize"):
+                        vol, origin = solid_volume(mesh, pitch)
+                    solid_vox = int(vol.sum())
+                    if solid_vox == 0:
+                        raise ValueError("the AI mesh has no volume")
+                    warnings += w
+                    _put(k1, (vol, origin, pitch, solid_vox, list(warnings)))
+
+                w = []
+                say(0.35, "Removing parts too thin to print")
+                with timing.stage("printify.thin_parts"):
+                    r_vox = int(round(min_feat / 2 / pitch))
+                    opened = ndimage.binary_opening(np.pad(vol, r_vox + 1), structure=_ball(r_vox))
+                    opened = opened[r_vox + 1 : -(r_vox + 1), r_vox + 1 : -(r_vox + 1), r_vox + 1 : -(r_vox + 1)]
+                    opened = _largest_component(opened)
+                if opened.sum() < 0.2 * solid_vox:
+                    w.append("Most of the shape was thinner than the minimum feature size; kept the original.")
+                    opened = _largest_component(vol)
+                thin_removed = 1.0 - opened.sum() / solid_vox
+                if thin_removed > 0.08:
+                    w.append(f"{thin_removed:.0%} of the volume was too thin to print and was removed.")
+                warnings += w
+                _put(k2, (opened, origin, pitch, thin_removed, list(warnings)))
+
+            w = []
+            if flat_on:  # magnet / keychain: a bas-relief of the front, on the picture's own outline
+                say(0.45, "Pressing the front into a relief")
+                mask_arr = None
+                if mask_sig:
+                    mask_arr = np.asarray(Image.open(mask_path).convert("L")) > 24
+                with timing.stage("printify.relief"):
+                    opened, relief_info = relief_volume(opened, pitch, flat_t, mask_arr, w)
+            with timing.stage("printify.finish", finish=finish):
+                if finish == "voxel":
+                    say(0.5, "Rebuilding from blocks")
+                    body = voxel_surface(opened, origin, pitch, float(geo.get("voxel_size_mm", 2.5)))
+                elif finish == "faceted":
+                    say(0.5, "Cutting facets")
+                    body = surface_from_volume(opened, origin, pitch, min(float(geo.get("soften_mm", 0.9)), 0.5) / pitch)
+                    body = facet(body, int(geo.get("facets", 400)), w)
+                elif finish == "blender":
+                    say(0.5, "Finishing in Blender (clay)")
+                    body = _blender_clay(opened, origin, pitch, geo, w)
+                else:
+                    say(0.5, "Softening into clay")
+                    body = _soft(opened, origin, pitch, geo, w)
+            warnings += w
+            _put(k3, (body, pitch, thin_removed, relief_info, list(warnings)))
+
+        say(0.7, "Cutting a flat bottom")
+        body_m = to_manifold(body)
+        zmin, zmax = body.bounds[0][2], body.bounds[1][2]
+        body_m = body_m.trim_by_plane((0, 0, 1), zmin + flat_cut * (zmax - zmin))
+        body_m = max(body_m.decompose(), key=lambda p: p.volume())  # the cut can leave crumbs
+        bb = body_m.bounding_box()
+        lo, hi = np.array(bb[:3]), np.array(bb[3:])
+        k = body_h / (hi[2] - lo[2])  # blur and cut shift the height slightly; land it exactly
+        body_m = body_m.scale((k, k, k))
+        lo, hi = lo * k, hi * k
+        centre = (lo[:2] + hi[:2]) / 2
+        z0 = (base_t - SINK_MM) if use_base else 0.0
+        body_m = body_m.translate((-centre[0], -centre[1], z0 - lo[2]))
+
+        if flat.get("enabled"):
+            say(0.76, "Making a flat back")
+            body_m = lay_flat(body_m, float(flat.get("thickness_mm", 8)))
+            if ring_p.get("enabled"):
+                say(0.8, "Adding the key-ring loop")
+                body_m = add_ring(body_m, ring_p, warnings)
 
     base_m = None
     verts = np.asarray(body_m.to_mesh().vert_properties)[:, :3]
@@ -573,34 +662,30 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
                 base_m = base_m - cutter
                 warnings.append("Base is thinner than the magnet; the pocket goes into the body too.")
 
-    regions_p = params.get("regions") or {}
     region_parts: list[tuple[str, trimesh.Trimesh]] | None = None
-    region_cols: list[dict[str, str]] = []
     if flat_on and regions_p.get("enabled"):
-        if mask_sig and image_path is not None and Path(image_path).exists():
-            say(0.9, "Splitting the picture's colours into parts")
+        if labels is None and have_picture:  # depth from the AI 3D shape: colours still from the picture
             from . import logo as logo_mod
 
             img = Image.open(image_path)
             mask_full = np.asarray(Image.open(mask_path).convert("L")) > 24
-            labels, region_cols = logo_mod.regions(img, mask_full, int(regions_p.get("max_colours", 4)))
-            if len(region_cols) >= 2:
-                with timing.stage("printify.regions", n=len(region_cols)):
-                    pieces = split_by_regions(body_m, labels, mask_full, len(region_cols), warnings)
-                if len(pieces) >= 2:
-                    # simplify welds the booleans' duplicate edges, keeping every part watertight
-                    region_cols = [region_cols[ri] for ri, _ in pieces]
-                    region_parts = [(f"colour_{i + 1}", to_trimesh(m.simplify(0.01))) for i, (_, m) in enumerate(pieces)]
-            else:
-                warnings.append("The picture is one colour, so there's nothing to split.")
-        else:
+            labels, region_cols = logo_mod.regions(img, mask_full, n_paint)
+        if labels is None:
             warnings.append("Picture colours need the chosen picture; this object has none saved.")
+        elif len(region_cols) >= 2:
+            say(0.9, "Splitting the picture's colours into parts")
+            with timing.stage("printify.regions", n=len(region_cols)):
+                pieces = split_by_regions(body_m, labels, mask_full, len(region_cols), warnings, extent)
+            if len(pieces) >= 2:
+                # simplify welds the booleans' duplicate edges, keeping every part watertight
+                region_cols = [region_cols[ri] for ri, _ in pieces]
+                region_parts = [(f"colour_{i + 1}", to_trimesh(m.simplify(0.01))) for i, (_, m) in enumerate(pieces)]
 
     say(0.95, "Checking printability")
     body_t = to_trimesh(body_m)
     base_tm = to_trimesh(base_m) if base_m is not None else None
     report = _report(body_t, base_tm, pitch, min_feat, thin_removed, warnings)
-    report.update(relief_info)
+    report.update({k: v for k, v in relief_info.items() if not k.startswith("_")})
     if region_parts:
         bad = [i for i, (_, m) in enumerate(region_parts) if not m.is_watertight]
         if bad:

@@ -101,6 +101,11 @@ def region_parts(job: Job) -> list[dict[str, str]]:
     return list((job.manifest.get("report") or {}).get("regions") or [])
 
 
+def is_flat(job: Job) -> bool:
+    """Is the object a flat format (magnet, keychain, ornament): a relief of its picture?"""
+    return bool(((job.manifest.get("print_params") or {}).get("flat_back") or {}).get("enabled"))
+
+
 def logo_data(job: Job) -> dict[str, Any]:
     src = job.input_path()
     if not src or not src.exists():
@@ -142,6 +147,8 @@ def pick_engine(job: Job, step: str, ctx: EngineContext, settings: dict[str, Any
     keep the photo as it is."""
     if is_logo(job):
         return "logo"
+    if step == "reconstruct" and is_flat(job):
+        return "picture"  # magnets, keychains, ornaments: built from the picture itself, in seconds
     from .engines.local import sdxl_packs
     from .models import status
 
@@ -586,6 +593,9 @@ def reconstruct(job: Job, ctx: EngineContext, engine_id: str, progress: Progress
     if getattr(engine, "logo_only", False) and not is_logo(job):
         raise RuntimeError("This is for logos and text. Turn on \"Logo or text\" in the Photo step first.")
     job.reset_after("confirmed")
+    if is_flat(job):  # a flat object takes its depth from what you built: the picture, or the AI 3D shape
+        job.manifest["print_params"]["flat_back"]["depth_from"] = "picture" if engine_id == "picture" else "shape"
+        job.save()
     log.info("%s: building 3D with %s", job.id, engine_id)
     seed = int((job.manifest.get("confirmed") or {}).get("seed") or 0)
     img = job.path(CONFIRMED)

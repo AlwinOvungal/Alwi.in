@@ -131,7 +131,22 @@ function Lights() {
   return (
     <>
       <hemisphereLight args={["#ffffff", "#d9d4c5", 1.1]} />
-      <directionalLight position={[60, 120, 80]} intensity={1.6} castShadow shadow-mapSize={[2048, 2048]} />
+      {/* The shadow camera must cover the whole object: three's default (a 10 × 10 box) left a square
+          of self-shadow speckle on prints — the "diamond" patch. Bias settings keep surfaces clean. */}
+      <directionalLight
+        position={[60, 120, 80]}
+        intensity={1.6}
+        castShadow
+        shadow-mapSize={[2048, 2048]}
+        shadow-camera-left={-130}
+        shadow-camera-right={130}
+        shadow-camera-top={130}
+        shadow-camera-bottom={-130}
+        shadow-camera-near={1}
+        shadow-camera-far={500}
+        shadow-bias={-0.0004}
+        shadow-normalBias={0.35}
+      />
       <directionalLight position={[-80, 40, -60]} intensity={0.35} />
       <directionalLight position={[0, -120, 0]} intensity={0.45} />
     </>

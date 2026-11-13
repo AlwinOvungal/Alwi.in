@@ -87,7 +87,7 @@ export type PrintFormat = "stand" | "magnet" | "keychain";
 
 export interface PrintParams {
   format: PrintFormat;
-  flat_back: { enabled: boolean; thickness_mm: number };
+  flat_back: { enabled: boolean; thickness_mm: number; depth_from?: "picture" | "shape" };
   ring: { enabled: boolean; outer_radius_mm: number; hole_mm: number; thickness_mm: number };
   geometry: {
     finish?: Finish;
@@ -117,7 +117,7 @@ export interface PrintParams {
     min_stroke_mm: number;
   };
   /** Picture colours (AMS): the picture reduced to at most max_colours, one part per colour */
-  regions?: { enabled: boolean; max_colours: number };
+  regions?: { enabled: boolean; max_colours: number | null };
 }
 
 export type LogoBacker = "plaque" | "outline" | "bar";
@@ -195,6 +195,7 @@ export interface Engine {
   multi_view?: boolean;
   /** only for logos and text ("Logo or text" on the Photo step) */
   logo_only?: boolean;
+  flat_only?: boolean;
 }
 
 export interface Engines {

@@ -98,15 +98,17 @@ class StyleSpec:
             "ring": {"enabled": False, "outer_radius_mm": 4.5, "hole_mm": 4.5, "thickness_mm": 3.5},
             # logos and text (built from the artwork): plaque, sizes; the width suits the format
             "logo": {**LOGO_DEFAULTS, "width_mm": {"magnet": 60, "keychain": 50}.get(fmt, LOGO_DEFAULTS["width_mm"])},
-            # Picture colours (AMS): off by default; when on, the picture is reduced to at most this
-            # many colours and each becomes its own part and filament
-            "regions": {"enabled": False, "max_colours": 4},
+            # Picture colours (AMS), flat formats: each of the picture's real colours becomes its own
+            # part and filament (enabled=False prints one colour). max_colours None keeps every colour;
+            # a number is the colour-reduction cap (set from the Photo step's "Reduce colours")
+            "regions": {"enabled": fmt != "stand", "max_colours": None},
         }
         for key, value in self.formats[fmt].items():
             if isinstance(value, dict) and isinstance(params.get(key), dict):
                 params[key].update(copy.deepcopy(value))
-        if fmt in ("magnet", "keychain"):  # bas-reliefs are small volumes: afford a finer remesh
+        if params["flat_back"].get("enabled"):  # bas-reliefs are small volumes: afford a finer remesh
             params["geometry"]["voxel_mm"] = min(float(params["geometry"].get("voxel_mm", 0.5)), 0.4)
+            params["flat_back"].setdefault("depth_from", "picture")  # or "shape": the AI 3D mesh
         return params
 
     def summary(self) -> dict[str, Any]:

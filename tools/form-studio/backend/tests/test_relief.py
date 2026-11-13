@@ -116,3 +116,92 @@ def test_magnet_pocket_cut(tree, tmp_path):
     cut = solid - with_pocket
     want = math.pi * (8 / 2 + 0.15) ** 2 * 2  # the pocket's cylinder
     assert cut == pytest.approx(want, rel=0.5) and cut > 50
+
+
+# ---- built from the picture itself (the default for flat formats) -------------------------------
+
+@pytest.fixture(scope="module")
+def tree_picture(tree, tmp_path_factory):
+    """The tree picture in its own colours: green canopy, brown trunk — with clay shading."""
+    glb, mask = tree
+    m = np.asarray(Image.open(mask)) > 0
+    yy, xx = np.mgrid[:512, :512]
+    light = np.clip(1.15 - 0.7 * np.hypot(xx - 200, yy - 150) / 380, 0.4, 1.15)[..., None]
+    rgb = np.full((512, 512, 3), 255, np.uint8)
+    green = np.clip(np.array([90, 170, 60]) * light, 0, 255)
+    brown = np.clip(np.array([120, 70, 35]) * light, 0, 255)
+    rgb[m] = green[m]
+    trunk = np.zeros_like(m)
+    trunk[400:481, 226:287] = True
+    rgb[trunk & m] = brown[trunk & m]
+    pic = tmp_path_factory.mktemp("relief") / "tree.png"
+    Image.fromarray(rgb).save(pic)
+    return glb, mask, pic
+
+
+def _pic_params(fmt="magnet", finish="soft"):
+    p = _params(fmt)
+    p["geometry"]["finish"] = finish
+    p["flat_back"]["depth_from"] = "picture"
+    p["regions"] = {"enabled": True, "max_colours": None}
+    return p
+
+
+@pytest.mark.parametrize("finish", ["soft", "blender", "faceted"])
+def test_picture_relief_keeps_outline_and_colours(tree_picture, tmp_path, finish):
+    """The screenshot's bugs: shading split into colour bands, a diamond facet from the AI mesh, a
+    blob outline after Blender clay. From the picture: two parts (canopy, trunk), exact outline."""
+    import time
+
+    glb, mask, pic = tree_picture
+    t0 = time.time()
+    rep = pf.run(glb, tmp_path, _pic_params(finish=finish), mask_path=mask, image_path=pic)
+    assert time.time() - t0 < 30
+    assert rep["relief_source"] == "picture" and rep["outline"] == "picture"
+    assert rep["fidelity"]["outline_iou"] >= 0.97  # whatever the finish, the outline is the picture's
+    assert len(rep["regions"]) == 2  # canopy and trunk: shading didn't split the green
+    parts = [trimesh.load(tmp_path / f"part_{i}.stl") for i in (1, 2)]
+    assert all(p.is_watertight for p in parts)
+    trunk = parts[1]
+    assert trunk.bounds[0][1] < parts[0].bounds[0][1]  # the trunk is the lowest part of the picture
+    size = np.array(rep["size_mm"])
+    # Object height is the picture's height; the pointed tree-top is trimmed to a printable 1.6 mm
+    assert size[1] == pytest.approx(35, abs=1.0) and size[2] == pytest.approx(THICK, abs=0.3)
+
+
+def test_picture_relief_groove_and_bed(tree_picture):
+    """Colours meet in a small groove, the plate lies flat on the bed, the top reaches full thickness."""
+    from formstudio.core import logo, relief
+
+    _, mask, pic = tree_picture
+    img = Image.open(pic)
+    m = np.asarray(Image.open(mask)) > 0
+    box, mm_px = relief.fit(m, 35)
+    labels, cols = logo.regions(img, m, None, mm_per_px=mm_px)
+    assert len(cols) == 2
+    h = relief.heightmap(np.asarray(img), m, labels, box, mm_px, THICK)
+    assert h.max() == pytest.approx(THICK, abs=0.05) and h.min() >= relief.plate_mm(THICK) - 1e-3
+    # where canopy meets trunk (picture row 400, centre column) the surface dips: a groove that the
+    # one-colour version (no regions) doesn't have
+    flat = relief.heightmap(np.asarray(img), m, None, box, mm_px, THICK)
+    col = h.shape[1] // 2
+    row = round((400 - box[0]) * mm_px / relief.GRID_MM)
+    dip = (h - flat)[row - 1:row + 2, col].min() - (h - flat)[row - 10, col]
+    assert dip < -0.2
+
+
+def test_picture_relief_keychain_and_pocket(tree_picture, tmp_path):
+    glb, mask, pic = tree_picture
+    rep = pf.run(glb, tmp_path, _pic_params("keychain"), mask_path=mask, image_path=pic)
+    assert rep["size_mm"][1] > 37  # the loop sits above the picture
+    parts = [trimesh.load(tmp_path / f"part_{i}.stl") for i in (1, 2)]
+    assert all(p.is_watertight for p in parts)
+    # the loop takes the colour of the picture next to it (canopy), the trunk keeps its own
+    assert parts[0].bounds[1][1] > parts[1].bounds[1][1] + 20
+
+    p = _pic_params()
+    on = pf.run(glb, tmp_path / "on", p, mask_path=mask, image_path=pic)
+    p["magnet"]["enabled"] = False
+    off = pf.run(glb, tmp_path / "off", p, mask_path=mask, image_path=pic)
+    cut = (off["body_volume_cm3"] - on["body_volume_cm3"]) * 1000
+    assert cut == pytest.approx(math.pi * 4.15 ** 2 * 2, rel=0.15)

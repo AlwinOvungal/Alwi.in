@@ -4,12 +4,12 @@ from .cloud import FalHunyuan, FalKontext, FalNanoBanana, FalTrellis
 from .meshy import MeshyImageTo3D
 from .openai_image import OpenAIImage
 from .local import LocalHunyuanMini, LocalHunyuanMV, LocalSDXL, LocalTripoSR, pick_device, unload_all
-from .offline import Extrude, Lathe, LogoPreview, LogoShape, PalettePreview
+from .offline import Extrude, Lathe, LogoPreview, LogoShape, PalettePreview, PictureRelief
 
 STYLIZERS = {e.id: e for e in (LocalSDXL(), OpenAIImage(), FalNanoBanana(), FalKontext(), PalettePreview(), LogoPreview())}
 RECONSTRUCTORS = {
     e.id: e
-    for e in (LocalTripoSR(), LocalHunyuanMini(), LocalHunyuanMV(), MeshyImageTo3D(), FalTrellis(), FalHunyuan(), ClaudeSculpt(), Lathe(), Extrude(), LogoShape())
+    for e in (LocalTripoSR(), LocalHunyuanMini(), LocalHunyuanMV(), MeshyImageTo3D(), FalTrellis(), FalHunyuan(), ClaudeSculpt(), Lathe(), Extrude(), PictureRelief(), LogoShape())
 }
 
 DEFAULTS = {"stylize": "local-sdxl", "reconstruct": "triposr", "views": "openai-views"}

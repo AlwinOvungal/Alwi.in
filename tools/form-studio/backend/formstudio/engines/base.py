@@ -112,7 +112,8 @@ class Reconstructor(Engine, Protocol):
 def describe(e: Engine, ctx: EngineContext) -> dict:
     ok, why = e.available(ctx)
     return {"id": e.id, "label": e.label, "kind": e.kind, "note": e.note, "available": ok, "reason": why,
-            "multi_view": bool(getattr(e, "multi_view", False)), "logo_only": bool(getattr(e, "logo_only", False))}
+            "multi_view": bool(getattr(e, "multi_view", False)), "logo_only": bool(getattr(e, "logo_only", False)),
+            "flat_only": bool(getattr(e, "flat_only", False))}
 
 
 def missing(*modules: str) -> str | None:

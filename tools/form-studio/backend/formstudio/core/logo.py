@@ -221,55 +221,140 @@ def load_layers(path: Path) -> dict[str, Any]:
     return {"layers": out, "size": [w, h]}
 
 
-def regions(img: "Image.Image", mask: np.ndarray, n: int) -> tuple[np.ndarray, list[dict[str, str]]]:
+MAX_PAINTS = 16  # with colour reduction off, every real colour is kept, up to this many
+
+
+def _same_paint(a: np.ndarray, b: np.ndarray) -> bool:
+    """Are two Lab colours the same paint seen in different light (shading, highlight, texture)?
+
+    Shading changes lightness and a little chroma but keeps the hue: a shaded olive is still olive,
+    while black eyes, a white belly and an orange beak are different paints.
+    """
+    ca, cb = float(np.hypot(a[1], a[2])), float(np.hypot(b[1], b[2]))
+    dl = abs(float(a[0] - b[0]))
+    if ca < 8 and cb < 8:  # two neutrals (white, greys, black): same only if close in lightness
+        return dl < 25
+    if min(ca, cb) < 8:
+        return False
+    dh = abs(math.degrees(math.atan2(a[2], a[1]) - math.atan2(b[2], b[1]))) % 360
+    dh = min(dh, 360 - dh)
+    return dh < 20 and min(ca, cb) / max(ca, cb) > 0.45 and dl < 40
+
+
+def regions(img: "Image.Image", mask: np.ndarray, n: int | None = None, mm_per_px: float | None = None,
+            min_mm: float = 1.2) -> tuple[np.ndarray, list[dict[str, str]]]:
     """The picture's colour regions, chunky enough to print: (label image, colours biggest-first).
 
+    Regions are *paints*, not light: the picture is smoothed (clay texture, speckle), clustered with
+    lightness down-weighted, then clusters that are the same paint in different light are merged, so a
+    shaded one-colour object stays one region. `n=None` keeps every real colour (no reduction, at most
+    MAX_PAINTS); `n=k` reduces to at most k by merging the closest paints. Regions narrower than
+    `min_mm` (given `mm_per_px`) can't print as their own colour and join their neighbour.
+
     Labels: -1 outside the mask, else 0..k-1 into the returned colour list. Every masked pixel is
-    assigned: specks and anti-aliased edges go to the nearest surviving region, so the regions
-    partition the silhouette exactly. Used by the Print step's "Picture colours" (AMS) control.
+    assigned, so the regions partition the silhouette exactly.
     """
-    from scipy import ndimage
-
-    from . import colours as colours_mod
-
-    rgb = np.asarray(img.convert("RGB"))
-    lab = _lab(rgb.reshape(-1, 3)).reshape(*rgb.shape[:2], 3)
-    px = lab[mask]
-    centres, _ = _kmeans(px[:: max(1, len(px) // 40000)], max(1, min(int(n), 4)), seed=3)
-    # merge centres closer than a filament change is worth
-    kept: list[np.ndarray] = []
-    for c in centres:
-        if all(np.linalg.norm(c - k) >= 12 for k in kept):
-            kept.append(c)
-    centres = np.asarray(kept)
-    d = np.linalg.norm(lab[..., None, :] - centres[None, None], axis=-1)
-    lab_id = np.argmin(d, axis=-1)
+    H, W = mask.shape
+    rgb_full = np.asarray(img.convert("RGB").resize((W, H)) if img.size != (W, H) else img.convert("RGB"))
     ys, xs = np.nonzero(mask)
-    span = max(ys.max() - ys.min(), xs.max() - xs.min()) if len(ys) else 1
-    r = max(2, int(span * 0.012))  # ~0.4 mm at print size: thinner colour slivers won't print
-    keep_ids = []
-    solid = np.full(mask.shape, -1, np.int32)
-    for i in range(len(centres)):
-        m = ndimage.binary_opening(mask & (lab_id == i), structure=np.ones((r, r), bool))
-        if m.sum() >= 0.01 * mask.sum():
-            solid[m] = len(keep_ids)
-            keep_ids.append(i)
-    if not keep_ids:  # one colour after all
-        solid[mask] = 0
-        keep_ids = [int(np.bincount(lab_id[mask]).argmax())]
-    # every masked pixel joins its nearest surviving region
-    missing = mask & (solid < 0)
+    if not len(ys):
+        return np.full(mask.shape, -1, np.int32), []
+    # work on the object's box at ~600 px: fast, and plenty for print-sized colour regions
+    y0, y1, x0, x1 = ys.min(), ys.max() + 1, xs.min(), xs.max() + 1
+    f = min(1.0, 600 / max(y1 - y0, x1 - x0))
+    sw, sh = max(1, round((x1 - x0) * f)), max(1, round((y1 - y0) * f))
+    small = np.asarray(Image.fromarray(rgb_full[y0:y1, x0:x1]).resize((sw, sh), Image.LANCZOS))
+    m = np.asarray(Image.fromarray(mask[y0:y1, x0:x1].astype(np.uint8) * 255).resize((sw, sh), Image.NEAREST)) > 127
+    if not m.any():
+        m[sh // 2, sw // 2] = True
+    span = max(sh, sw)
+    k = max(3, int(span * 0.01)) | 1
+    smooth = np.stack([ndimage.median_filter(small[..., c], size=k) for c in range(3)], -1)
+    lab = _lab(smooth.reshape(-1, 3)).reshape(sh, sw, 3)
+    w = np.array([0.5, 1.0, 1.0])
+    px = lab[m]
+    want = MAX_PAINTS if n is None else max(1, int(n))
+    centres, _ = _kmeans(px[:: max(1, len(px) // 40000)] * w, min(want + 3, 12), seed=3)
+    centres = centres / w
+    lab_id = np.argmin(np.linalg.norm(((lab[..., None, :] - centres[None, None]) * w), axis=-1), axis=-1)
+    counts = np.bincount(lab_id[m], minlength=len(centres)).astype(float)
+    # merge clusters that are one paint in different light (union-find over the cluster pairs)
+    parent = list(range(len(centres)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+    live = [i for i in range(len(centres)) if counts[i] > 0]
+    for i in live:
+        for j in live:
+            if i < j and find(i) != find(j) and _same_paint(centres[i], centres[j]):
+                parent[find(j)] = find(i)
+    groups: dict[int, list[int]] = {}
+    for i in live:
+        groups.setdefault(find(i), []).append(i)
+    paints = [[g, float(counts[g].sum()), (centres[g] * counts[g, None]).sum(0) / counts[g].sum()]
+              for g in (np.array(v) for v in groups.values())]
+    # colour reduction: merge the closest pair (weighted by size, so big regions keep their colour)
+    while len(paints) > want:
+        best = None
+        for a in range(len(paints)):
+            for b in range(a + 1, len(paints)):
+                d = np.linalg.norm((paints[a][2] - paints[b][2]) * w) * min(paints[a][1], paints[b][1]) ** 0.25
+                if best is None or d < best[0]:
+                    best = (d, a, b)
+        _, a, b = best
+        pa, pb = paints[a], paints[b]
+        tot = pa[1] + pb[1]
+        paints[a] = [np.concatenate([pa[0], pb[0]]), tot, (pa[2] * pa[1] + pb[2] * pb[1]) / tot]
+        del paints[b]
+    lut = np.zeros(len(centres), np.int32)
+    for pi, (g, _, _) in enumerate(paints):
+        lut[g] = pi
+    pid = lut[lab_id]
+    # printable: open each region with the smallest feature a nozzle can lay down in its own colour
+    px_mm = (mm_per_px / f) if mm_per_px else None
+    r = max(1, int(round((min_mm / 2) / px_mm))) if px_mm else max(2, int(span * 0.006))
+    disk = np.hypot(*np.mgrid[-r:r + 1, -r:r + 1]) <= r
+    min_area = (min_mm ** 2 * 2) / (px_mm ** 2) if px_mm else 0.002 * m.sum()
+    solid = np.full(m.shape, -1, np.int32)
+    keep: list[int] = []
+    for i in range(len(paints)):
+        reg = ndimage.binary_opening(m & (pid == i), structure=disk)
+        if reg.sum() >= max(min_area, 4):
+            solid[reg] = len(keep)
+            keep.append(i)
+    if not keep:
+        solid[m] = 0
+        keep = [int(np.bincount(pid[m]).argmax())]
+    missing = m & (solid < 0)
     if missing.any():
         _, (iy, ix) = ndimage.distance_transform_edt(solid < 0, return_indices=True)
         solid[missing] = solid[iy[missing], ix[missing]]
+    # back to full size; edge pixels the small grid didn't own take the nearest region
+    big = np.asarray(Image.fromarray((solid + 1).astype(np.uint8)).resize((x1 - x0, y1 - y0), Image.NEAREST)).astype(np.int32) - 1
+    full = np.full(mask.shape, -1, np.int32)
+    full[y0:y1, x0:x1] = big
+    hole = mask & (full < 0)
+    if hole.any():
+        _, (iy, ix) = ndimage.distance_transform_edt(full < 0, return_indices=True)
+        full[hole] = full[iy[hole], ix[hole]]
+    full[~mask] = -1
     # biggest region first: that's filament 1, and any boolean slivers join it later
-    order = np.argsort([-np.sum(solid == i) for i in range(len(keep_ids))])
+    order = np.argsort([-np.sum(full == i) for i in range(len(keep))], kind="stable")
     out = np.full(mask.shape, -1, np.int32)
     cols = []
     for new, old in enumerate(order):
-        m = solid == old
-        out[m] = new
-        mean = rgb[m].mean(axis=0).astype(int)
+        sel = full == old
+        if not sel.any():
+            continue
+        out[sel] = len(cols)
+        px = rgb_full[sel]
+        lum = px.mean(axis=1)
+        lo_, hi_ = np.percentile(lum, [50, 92])
+        lit = px[(lum >= lo_) & (lum <= hi_)]  # the paint as it looks lit: not its shadows, not glare
+        mean = np.median(lit if len(lit) else px, axis=0).astype(int)
         cols.append({"hex": "#{:02X}{:02X}{:02X}".format(*mean), "name": colours_mod.name_for(tuple(mean))})
     return out, cols
 
