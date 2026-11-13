@@ -212,7 +212,14 @@ def _friendly(e: Exception) -> str:
     msg = str(e) or e.__class__.__name__
     if "out of memory" in msg.lower() or "MPS backend out of memory" in msg:
         return "Ran out of memory. Choose Lightest quality in Settings → Local AI, close other apps, or use a cloud engine."
-    if type(e) in EXPECTED or isinstance(e, EngineError):
+    if "state_dict" in msg and not isinstance(e, EngineError):
+        return ("The 3D model's files don't match the installed AI library. Update Form Studio (git pull, then "
+                "./scripts/setup-mac.sh), or build From the picture or with a cloud engine. Details are in the log.")
+    if isinstance(e, EngineError):
+        return msg
+    if len(msg) > 400:  # a library's error can be pages long; the full text is in the log
+        msg = msg[:400].rstrip() + "…"
+    if type(e) in EXPECTED:
         return msg
     where = _where(e)
     detail = f" (in {where})" if where else ""

@@ -433,6 +433,85 @@ def triposr_dir() -> Path:
     return paths.home() / "vendor" / "TripoSR"
 
 
+# transformers 5 renamed the ViT layers inside TripoSR's image encoder (DINO). TripoSR's checkpoint has the
+# old names and is loaded with a plain load_state_dict, so transformers' own conversion never runs.
+_VIT_RENAMES = [  # (old, new) as regex pieces after "...encoder.layer.N." / "...layers.N."
+    (r"attention\.attention\.query", "attention.q_proj"),
+    (r"attention\.attention\.key", "attention.k_proj"),
+    (r"attention\.attention\.value", "attention.v_proj"),
+    (r"attention\.output\.dense", "attention.o_proj"),
+    (r"intermediate\.dense", "mlp.fc1"),
+    (r"output\.dense", "mlp.fc2"),
+    (r"layernorm_before", "layernorm_before"),
+    (r"layernorm_after", "layernorm_after"),
+]
+
+
+def _rename_vit(key: str, to_new: bool) -> str:
+    import re
+
+    if to_new:
+        m = re.match(r"^(.*)\bencoder\.layer\.(\d+)\.(.+)$", key)
+        if not m:
+            return key
+        pre, n, rest = m.groups()
+        for old, new in _VIT_RENAMES:
+            if re.fullmatch(old + r"\.(weight|bias)", rest):
+                return f"{pre}layers.{n}.{new}.{rest.rsplit('.', 1)[1]}"
+        return key
+    m = re.match(r"^(.*)\blayers\.(\d+)\.(.+)$", key)
+    if not m:
+        return key
+    pre, n, rest = m.groups()
+    for old, new in _VIT_RENAMES:
+        if re.fullmatch(re.escape(new) + r"\.(weight|bias)", rest):
+            return f"{pre}encoder.layer.{n}.{old.replace(chr(92), '')}.{rest.rsplit('.', 1)[1]}"
+    return key
+
+
+def _match_state_dict(ckpt: dict[str, Any], model_keys: set[str], name: str = "TripoSR") -> dict[str, Any]:
+    """The checkpoint with its keys renamed to what the installed library's model expects (either
+    direction of the transformers 4 → 5 ViT renaming). Raises a readable EngineError if they still differ."""
+    if set(ckpt) == model_keys:
+        return ckpt
+    out = {}
+    for k, v in ckpt.items():
+        if k in model_keys:
+            out[k] = v
+            continue
+        for to_new in (True, False):
+            k2 = _rename_vit(k, to_new)
+            if k2 in model_keys:
+                out[k2] = v
+                break
+        else:
+            out[k] = v
+    missing_ = sorted(model_keys - set(out))
+    extra = sorted(set(out) - model_keys)
+    if missing_ or extra:
+        raise EngineError(
+            f"{name}'s model files don't match the installed AI library, so it can't load. "
+            "Run setup again (git pull, then ./scripts/setup-mac.sh), or build this object From the picture "
+            "or with a cloud 3D engine.",
+            detail=f"{len(missing_)} missing, {len(extra)} unexpected, e.g. {', '.join((missing_ + extra)[:3])}",
+        )
+    return out
+
+
+def _load_tsr(TSR):
+    """TSR.from_pretrained, but tolerant of the transformers version (see _match_state_dict)."""
+    import torch
+    from huggingface_hub import hf_hub_download
+    from omegaconf import OmegaConf
+
+    cfg = OmegaConf.load(hf_hub_download("stabilityai/TripoSR", "config.yaml"))
+    OmegaConf.resolve(cfg)
+    model = TSR(cfg)
+    ckpt = torch.load(hf_hub_download("stabilityai/TripoSR", "model.ckpt"), map_location="cpu")
+    model.load_state_dict(_match_state_dict(ckpt, set(model.state_dict().keys())))
+    return model
+
+
 class LocalTripoSR:
     id = "triposr"
     label = "TripoSR (local)"
@@ -454,7 +533,7 @@ class LocalTripoSR:
         device = ctx.device
 
         def make():
-            m = TSR.from_pretrained("stabilityai/TripoSR", config_name="config.yaml", weight_name="model.ckpt")
+            m = _load_tsr(TSR)
             m.renderer.set_chunk_size(8192)
             m.to(device)
             return m

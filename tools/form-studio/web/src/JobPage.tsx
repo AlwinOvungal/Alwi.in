@@ -771,13 +771,16 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
     () => (engines?.reconstruct ?? []).filter((e) => (job.kind === "logo") === !!e.logo_only && (flat || !e.flat_only)),
     [engines, job.kind, flat],
   );
+  // a flat object starts on "From the picture"; an engine is remembered only once it has built a shape
+  const built = reached(job, "reconstructed") ? job.reconstruct?.engine : undefined;
   useEffect(
-    () => setEngine((e) => (e && list.some((x) => x.id === e) ? e : pickAvailable(list, job.reconstruct?.engine ?? (job.kind === "logo" ? "logo" : flat ? "picture" : settings?.engines.reconstruct)))),
-    [settings, engines, job.reconstruct, list, job.kind, flat],
+    () => setEngine((e) => (e && list.some((x) => x.id === e) ? e : pickAvailable(list, job.kind === "logo" ? "logo" : flat ? (built ?? "picture") : (built ?? settings?.engines.reconstruct)))),
+    [settings, engines, built, list, job.kind, flat],
   );
   const working = busy && job.task?.kind === "reconstruct";
   const { failed, dismiss } = useFailure(job, "reconstruct");
-  const other = otherEngine(engines?.reconstruct, engine);
+  // a failed AI build of a flat object: the instant picture relief always works
+  const other = flat && engine !== "picture" && list.some((x) => x.id === "picture") ? "picture" : otherEngine(engines?.reconstruct, engine);
 
   return (
     <div className="split">
@@ -814,7 +817,8 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
                   title="Couldn't build the 3D shape"
                   task={failed}
                   onRetry={() => (dismiss(), run(api.reconstruct(job.id, engine)))}
-                  onOther={other ? () => (dismiss(), setEngine(other)) : undefined}
+                  onOther={other ? () => (dismiss(), setEngine(other), other === "picture" && run(api.reconstruct(job.id, "picture"))) : undefined}
+                  otherLabel={other === "picture" ? "Build it from the picture instead" : undefined}
                   onDismiss={dismiss}
                 />
               )}

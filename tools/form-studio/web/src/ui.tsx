@@ -205,12 +205,14 @@ export function ErrorCard({
   task,
   onRetry,
   onOther,
+  otherLabel,
   onDismiss,
 }: {
   title: string;
   task: Task;
   onRetry?: () => void;
   onOther?: () => void;
+  otherLabel?: string;
   onDismiss?: () => void;
 }) {
   return (
@@ -235,7 +237,7 @@ export function ErrorCard({
             {l.label} ↗
           </a>
         ))}
-        {onOther && <button className="btn sm olive" onClick={onOther}>Use another engine</button>}
+        {onOther && <button className="btn sm olive" onClick={onOther}>{otherLabel ?? "Use another engine"}</button>}
         {onRetry && <button className="btn sm" onClick={onRetry}>Try again</button>}
       </div>
       {task.error_detail && (
