@@ -365,16 +365,17 @@ def job_format(job: Job) -> str:
     return (job.manifest.get("print_params") or {}).get("format") or "stand"
 
 
-def _format_style(style, fmt: str):
+def _format_style(style, fmt: str, params: dict[str, Any] | None = None):
     """The chosen object type's requirements go into every picture prompt (not a display-only choice)."""
     import dataclasses
 
-    from .core.style import format_brief
+    from .core.style import detail_level, format_brief
 
     b = format_brief(fmt)
-    neg = ", ".join(x for x in (style.negative_prompt, b["avoid"]) if x)
-    return dataclasses.replace(style, prompt=f"{style.prompt}, {b['short']}",
-                               edit_prompt=f"{style.edit_prompt} {b['brief']}", negative_prompt=neg)
+    d = detail_level(params)  # the same balanced, print-friendly detail standard whatever the style
+    neg = ", ".join(x for x in (style.negative_prompt, b["avoid"], d["avoid"]) if x)
+    return dataclasses.replace(style, prompt=f"{style.prompt}, {b['short']}, moderate print-friendly detail",
+                               edit_prompt=f"{style.edit_prompt} {b['brief']} {d['brief']}", negative_prompt=neg)
 
 
 def set_format(job: Job, fmt: str) -> None:
@@ -389,6 +390,8 @@ def set_format(job: Job, fmt: str) -> None:
     params = style.print_params(fmt)
     if cur.get("colours"):
         params["colours"] = cur["colours"]
+    if cur.get("detail"):
+        params["detail"] = cur["detail"]  # the detail level you chose carries over
     pal = palette_state(job)
     if pal["enabled"]:
         params["regions"]["max_colours"] = pal["max"]
@@ -446,7 +449,7 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
     if (pal := _palette_hexes(job)) and not is_logo(job):
         look = _palette_style(look, pal)
     if not is_logo(job):  # the object type shapes the picture from the first restyle
-        look = _format_style(look, job_format(job))
+        look = _format_style(look, job_format(job), job.manifest.get("print_params"))
     if look_override is not None:
         look = look_override
     log.info("%s: restyling with %s (%s), seeds %s", job.id, engine_id, style.id, seeds)
@@ -581,12 +584,13 @@ def refine(job: Job, ctx: EngineContext, index: int, message: str, progress: Pro
     style = get_style(job.manifest["style"]["id"])
     pal = _palette_hexes(job)
     keep = (" Keep only these colours: " + ", ".join(f"{c['name'].lower()} ({c['hex']})" for c in pal) + ".") if pal else ""
-    from .core.style import format_brief
+    from .core.style import detail_level, format_brief
 
     brief = format_brief(job_format(job))
+    dl = detail_level(job.manifest.get("print_params"))
     edit = (f"Change only this: {message}. Keep everything else exactly as in the first image: the same {{subject}}, "
             f"its shape, pose, colours and style.{keep} It will be 3D printed as a {brief['label']}: {brief['brief']} "
-            "Keep shapes bold and chunky with no tiny details. One object, centred, on a plain white background.")
+            f"{dl['brief']} One object, centred, on a plain white background.")
     look = dataclasses.replace(style, references=[], edit_prompt=edit, prompt=f"{{subject}}, {message}, {style.prompt}")
     seed = int(cands[index].get("seed") or 0) + 101
     log.info("%s: refining option %s with %s: %s", job.id, cands[index].get("n"), eid, message)
@@ -880,9 +884,12 @@ def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | No
     if fmt and fmt != current["format"]:
         colours = current.get("colours")
         backer = (current.get("logo") or {}).get("backer")
+        detail = current.get("detail")
         current = style.print_params(fmt)  # a new format starts from its own defaults…
         if colours:
             current["colours"] = colours  # …but keeps the colours you chose
+        if detail:
+            current["detail"] = detail  # …and the detail level
         if backer:
             current["logo"]["backer"] = backer  # …and the plaque shape
     params = _deep_merge(style.print_params(current["format"]), current)  # fills keys older objects lack

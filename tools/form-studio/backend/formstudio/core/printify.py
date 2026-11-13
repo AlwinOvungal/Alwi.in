@@ -443,7 +443,17 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
              cache_key: str | None = None, mask_path: Path | None = None,
              image_path: Path | None = None) -> PrintResult:
     say = progress or (lambda p, m: None)
-    geo = params["geometry"]
+    from .style import detail_level
+
+    level = detail_level(params)  # the balanced, print-friendly detail standard (every style)
+    geo = dict(params["geometry"])
+    flat_pre = bool((params.get("flat_back") or {}).get("enabled"))
+    stand_edges: dict[str, Any] | None = None
+    if not flat_pre:  # figurines: the edge style sets the finish's softness (real geometry)
+        stand_edges = _stand_edges(params.get("edges") or {"style": "auto"}, geo, image_path, mask_path)
+        geo["soften_mm"] = stand_edges["soften_mm"]
+        geo["smooth_iters"] = stand_edges["smooth_iters"]
+        geo["min_feature_mm"] = max(float(geo.get("min_feature_mm", 1.6)), float(level["stand_min_feature_mm"]))
     base_p = params["base"]
     mag = params["magnet"]
     warnings: list[str] = []
@@ -488,7 +498,7 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
         edges_p = dict(params.get("edges") or {"style": "auto"})
         use_depth = relief_mod.depth_ready()
         kp = (("picture", f"{image_path}:{ist.st_mtime_ns}:{ist.st_size}", mask_sig, round(height, 3), round(flat_t, 3),
-               round(min_feat, 3), finish, n_paint, pal_sig, use_depth, tuple(sorted(edges_p.items())),
+               round(min_feat, 3), finish, n_paint, pal_sig, use_depth, tuple(sorted(edges_p.items())), level["id"],
                *(geo.get(k) for k in ("soften_mm", "voxel_size_mm", "facets"))) if CACHE["enabled"] else None)
         hit = _get(kp)
         if hit:
@@ -504,7 +514,7 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
             with timing.stage("printify.colours"):
                 cstats: dict[str, Any] = {}
                 labels, region_cols = logo_mod.regions(img, mask_full, n_paint, mm_per_px=mm_px, palette=pal_cols,
-                                                       stats=cstats)
+                                                       stats=cstats, min_mm=float(level["colour_min_mm"]))
             say(0.4, "Pressing the picture into a relief")
             # smooth and clean: no clay-grain noise on picture reliefs (it read as bumps, not texture)
             look = {"soften_mm": min(float(geo.get("soften_mm", 0.9)), 1.2)}
@@ -520,7 +530,7 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
                     depth = relief_mod.depth_for(image_path)
             with timing.stage("printify.relief", source="picture"):
                 body_m, relief_info = relief_mod.build(rgb, mask_full, labels, height, flat_t, min_feat, look,
-                                                       depth=depth, edges=edges_p)
+                                                       depth=depth, edges=edges_p, detail=level)
             try:  # how closely the outline follows the picture (before pocket and ring, which are wanted)
                 relief_info["fidelity"] = relief_mod.fidelity(body_m, relief_info["_outline"], *relief_info["_box_mm"],
                                                               mask_full, relief_mod.fit(mask_full, height)[0])
@@ -719,7 +729,10 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
             report["_preview"] = relief_mod.render_front(relief_info["_hgt"], relief_info["_outline"])
         except Exception as e:
             log.warning("front preview failed: %s", e)
-    if picture:
+    report["detail_level"] = level["id"]
+    if stand_edges is not None:
+        report["edges_used"] = {k: stand_edges[k] for k in ("style", "outer_mm", "detail_mm", "auto")}
+    if picture or not flat_on:
         report["changes"] = _changes(report, params, min_feat, len(region_parts or []) or 1)
         fid = report.get("fidelity") or {}
         rc = report.get("relief_check") or {}
@@ -740,6 +753,44 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     report["format"] = params.get("format", "stand")
     say(1.0, "Ready to print")
     return PrintResult(body_t, base_tm, report, parts=region_parts)
+
+
+def use_base_of(params: dict[str, Any]) -> bool:
+    return bool((params.get("base") or {}).get("enabled", True)) and not (params.get("flat_back") or {}).get("enabled")
+
+
+def _stand_edges(edges: dict[str, Any], geo: dict[str, Any], image_path, mask_path) -> dict[str, Any]:
+    """Figurines: the edge style becomes the finish's real softness. Soft = rounded over `outer_mm`,
+    bevel = a gentler rounding, crisp = barely softened. Feature edges set how much the surface is
+    smoothed after (less smoothing keeps small features crisp). Auto follows the picture."""
+    style = edges.get("style") or "auto"
+    outer = edges.get("outer_mm")
+    auto = style == "auto"
+    if auto:
+        sug = None
+        try:
+            if image_path is not None and mask_path is not None and Path(image_path).exists() and Path(mask_path).exists():
+                from . import relief as relief_mod
+
+                rgb = np.asarray(Image.open(image_path).convert("RGB"))
+                mk = np.asarray(Image.open(mask_path).convert("L").resize((rgb.shape[1], rgb.shape[0]))) > 24
+                if mk.any():
+                    _, mm_px = relief_mod.fit(mk, float(geo.get("height_mm", 50)))
+                    sug = relief_mod.suggest_edges(rgb, mk, mm_px)
+        except Exception as e:
+            log.warning("edge suggestion failed: %s", e)
+        if sug:
+            style, outer = sug["style"], sug["outer_mm"]
+        else:
+            style, outer = "soft", float(geo.get("soften_mm", 0.9))
+    if outer is None:
+        outer = {"soft": 1.2, "bevel": 0.8}.get(style, 0.0)
+    outer = float(outer)
+    soften = {"soft": max(outer, 0.4), "bevel": max(outer * 0.6, 0.3)}.get(style, 0.3)
+    detail_mm = float(edges.get("detail_mm", 0.4) if edges.get("detail_mm") is not None else 0.4)
+    iters = int(np.clip(round(2 + detail_mm * 12), 2, 20))
+    return {"style": style, "outer_mm": round(outer, 1), "detail_mm": round(detail_mm, 2), "auto": auto,
+            "soften_mm": round(soften, 2), "smooth_iters": iters}
 
 
 def _stl_safe(m: mf.Manifold) -> trimesh.Trimesh:
@@ -774,6 +825,23 @@ def _changes(report: dict[str, Any], params: dict[str, Any], min_feat: float, n_
     if n_parts > 1:
         out.append({"id": "grooves", "text": f"{n_parts} colours, each its own part with a small groove where two "
                     "meet, so they print and read cleanly.", "action": None})
+    simp = report.get("simplified") or {}
+    lvl = report.get("detail_level", "balanced")
+    if simp.get("small"):
+        out.append({"id": "detail", "text": f"Simplified {simp['small']} small details (bolts, lettering, texture) into the "
+                    f"surfaces around them; kept {simp.get('kept', 0)} main features ({lvl} detail).",
+                    "action": {"label": "Keep more detail", "params": {"detail": {"level": "fine"}}} if lvl != "fine" else None})
+    elif lvl:
+        out.append({"id": "detail", "text": f"{lvl.title()} detail: main forms and recognisable features kept; fine "
+                    "repetitive details simplified for a quick, sturdy print.",
+                    "action": {"label": "Keep more detail", "params": {"detail": {"level": "fine"}}} if lvl != "fine" else None})
+    if not (params.get("flat_back") or {}).get("enabled"):
+        thin = float(report.get("thin_removed_pct") or 0)
+        if thin >= 0.5:
+            out.append({"id": "thin", "text": f"Removed {thin:.1f}% of the shape that was thinner than {min_feat:g} mm "
+                        "(spikes, wires, tiny bits) so nothing snaps or needs supports.",
+                        "action": {"label": "Keep finer parts (1.2 mm)", "params": {"detail": {"level": "fine"}}}
+                        if lvl != "fine" else None})
     if report.get("features_from"):
         src = ("the depth model" if report["features_from"] == "depth" else "the picture's shading and creases")
         fd = report.get("feature_depth_mm")
@@ -783,8 +851,11 @@ def _changes(report: dict[str, Any], params: dict[str, Any], min_feat: float, n_
     if eu:
         what = {"soft": f"soft rounded ({eu['outer_mm']:g} mm)", "bevel": f"gently bevelled ({eu['outer_mm']:g} mm)",
                 "crisp": "crisp"}.get(eu["style"], eu["style"])
-        out.append({"id": "edges", "text": f"Outline edges {what}" + (", matched to the picture" if eu.get("auto") else "")
+        lead = "Outline edges" if (params.get("flat_back") or {}).get("enabled") else "Edges"
+        out.append({"id": "edges", "text": f"{lead} {what}" + (", matched to the picture" if eu.get("auto") else "")
                     + f"; feature edges rounded {eu['detail_mm']:g} mm.", "action": None})
+    if use_base_of(params):
+        out.append({"id": "base", "text": "A round base in the second colour, so it stands steadily.", "action": None})
     mag = params.get("magnet") or {}
     if mag.get("enabled"):
         pk = report.get("pocket") or {}

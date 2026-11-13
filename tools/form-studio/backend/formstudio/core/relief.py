@@ -108,6 +108,7 @@ def prism(m: np.ndarray, top_mm: float) -> mf.Manifold:
 
 
 EDGE_STYLES = ("auto", "soft", "bevel", "crisp")
+RENORM_CAP = 1.6  # kept features regain depth after simplifying, but faint shading never becomes a shape
 MIN_FEATURE_DEPTH = 0.5  # mm: a raised or recessed feature at least this proud of its surroundings (2-3 layers)
 
 
@@ -125,8 +126,8 @@ def _light_dir(lum: np.ndarray, m: np.ndarray) -> np.ndarray:
     return g / n if n > 1e-6 else np.array([-0.7, -0.7])  # studio default: top-left
 
 
-def feature_regions(lum: np.ndarray, m: np.ndarray, labels: np.ndarray | None = None
-                    ) -> tuple[np.ndarray, list[int]]:
+def feature_regions(lum: np.ndarray, m: np.ndarray, labels: np.ndarray | None = None,
+                    min_feature_mm: float = 1.2, max_features: int = 40) -> tuple[np.ndarray, list[int]]:
     """The picture's features (face panel, eyes, beak, wings…) when no depth model is available.
 
     Features are outlined by creases: the dark, thin shadow lines a raised or recessed shape makes
@@ -217,7 +218,7 @@ def feature_regions(lum: np.ndarray, m: np.ndarray, labels: np.ndarray | None = 
         parent[gy] = gx
         members[gx] |= members.pop(gy)
     reg = np.where(reg > 0, np.vectorize(find)(reg), 0)
-    min_area = (1.2 / GRID_MM) ** 2  # smaller than ~1.2 mm across: not a printable feature
+    min_area = (min_feature_mm / GRID_MM) ** 2  # smaller than this across: simplified into its surroundings
     ids = [int(i) for i in np.unique(reg) if i > 0]
     small = [i for i in ids if (reg == i).sum() < min_area]
     if small:
@@ -251,7 +252,56 @@ def feature_regions(lum: np.ndarray, m: np.ndarray, labels: np.ndarray | None = 
             continue
         delta = float(lum[lit].mean() - lum[shade].mean())
         signs.append((-1 if dark_hole else 1) if abs(delta) < 3 else (1 if delta > 0 else -1))
+    # balanced detail: keep the most telling features (big and contrasty), fold the rest into the body
+    feats = [k for k, sg in enumerate(signs) if sg]
+    if len(feats) > max_features:
+        score = {k: float((out == k).sum()) * (1 + abs(float(lum[out == k].mean()) - float(lum[m].mean())) / 50)
+                 for k in feats}
+        for k in sorted(feats, key=lambda k: score[k])[: len(feats) - max_features]:
+            signs[k] = 0
     return out, signs
+
+
+def _simplify_features(feat: np.ndarray, m: np.ndarray, amp: float, min_mm: float, max_n: int
+                       ) -> tuple[np.ndarray, dict[str, int]]:
+    """Fold small bumps and dents (smaller than min_mm across) into their surroundings and keep at most
+    max_n distinct features (the biggest, strongest), so the print stays clean, quick and sturdy.
+
+    A grey-scale opening (then closing) with a disk min_mm wide removes every bump (dent) narrower than
+    the disk while leaving bigger shapes and their edges as they were: bolts and lettering go, the cab
+    and the wheels stay."""
+    r = max(1, int(round(min_mm / GRID_MM / 2)))
+    disk = np.hypot(*np.mgrid[-r:r + 1, -r:r + 1]) <= r
+    from skimage.morphology import reconstruction
+
+    before = feat
+    # opening / closing *by reconstruction*: bumps and dents smaller than the disk vanish, everything
+    # bigger keeps its exact shape (a plain opening would leave disc-shaped marks)
+    f = feat.astype(np.float64)
+    opened = reconstruction(np.minimum(ndimage.grey_opening(f, footprint=disk), f), f, method="dilation")
+    feat = reconstruction(np.maximum(ndimage.grey_closing(opened, footprint=disk), opened), opened, method="erosion")
+    removed = (np.abs(before - feat) > 0.25 * amp) & m
+    n_small = int(ndimage.label(removed)[1])
+    strong = (np.abs(feat) > 0.35 * amp) & m
+    lab, n = ndimage.label(strong)
+    if not n:
+        return feat.astype(np.float32), {"kept": 0, "small": n_small}
+    idx = np.arange(1, n + 1)
+    area = ndimage.sum(np.ones(m.shape), lab, idx)
+    power = ndimage.sum(np.abs(feat), lab, idx)
+    small = area < (min_mm / GRID_MM) ** 2
+    order = np.argsort(-power)
+    keep = np.zeros(n + 1, bool)
+    kept = 0
+    for i in order:
+        if not small[i] and kept < max_n:
+            keep[i + 1] = True
+            kept += 1
+    drop = (lab > 0) & ~keep[lab]
+    if drop.any():  # fade them out smoothly instead of leaving a hole
+        w = ndimage.gaussian_filter(ndimage.binary_dilation(drop, iterations=2).astype(np.float32), 1.0)
+        feat = feat * (1 - np.clip(w * 1.5, 0, 1))
+    return feat.astype(np.float32), {"kept": int(kept), "small": int(n - kept) + n_small}
 
 
 def _plateau(R: np.ndarray, rim_mm: float) -> np.ndarray:
@@ -306,7 +356,8 @@ def suggest_edges(rgb: np.ndarray, mask: np.ndarray, mm_px: float) -> dict[str, 
 def heightmap(rgb: np.ndarray, mask: np.ndarray, labels: np.ndarray | None, box: tuple[int, int, int, int],
               mm_px: float, thickness: float, finish: dict[str, Any] | None = None,
               depth: np.ndarray | None = None, edges: dict[str, Any] | None = None,
-              stats: dict[str, Any] | None = None, outline_grid: np.ndarray | None = None) -> np.ndarray:
+              stats: dict[str, Any] | None = None, outline_grid: np.ndarray | None = None,
+              detail: dict[str, Any] | None = None) -> np.ndarray:
     """Height (mm) on a GRID_MM grid over the object's box (row 0 at the top). Outside the outline it
     continues the nearest inside height, so the outline prism alone decides the walls.
 
@@ -334,7 +385,9 @@ def heightmap(rgb: np.ndarray, mask: np.ndarray, labels: np.ndarray | None, box:
 
     # body: a gentle, even swell (the distance field's midline crease smoothed away)
     dome = ndimage.gaussian_filter(np.clip(d / dmax, 0, 1) ** 0.6, 1.2 / GRID_MM)
+    lvl = detail or {"min_feature_mm": 2.0, "detail_sigma_mm": 0.5, "max_features": 16, "depth": 1.0}
     feat_amp = float(min(max(MIN_FEATURE_DEPTH, 0.18 * avail), 0.3 * avail + MIN_FEATURE_DEPTH))
+    feat_amp = max(MIN_FEATURE_DEPTH, feat_amp * float(lvl.get("depth", 1.0)))
     if depth is not None:
         dg = _resample(depth.astype(np.float32), box, shape, Image.BILINEAR).astype(np.float32)
         lo, hi = np.percentile(dg[m], [2, 98])
@@ -343,15 +396,23 @@ def heightmap(rgb: np.ndarray, mask: np.ndarray, labels: np.ndarray | None, box:
         base = ndimage.gaussian_filter(dn, 2.5 / GRID_MM)
         bspan = max(float(np.ptp(base[m])), 1e-6)
         body = 0.5 * dome + 0.5 * np.tanh(2.0 * (base - float(base[m].min())) / bspan)
-        detail = denoise_tv_chambolle(dn - base, weight=0.01)  # keep the steps, lose the noise
+        # print-friendly detail: band-limit (bolts, lettering, tread ripples go), keep the steps
+        detail = ndimage.gaussian_filter(dn - base, float(lvl["detail_sigma_mm"]) / GRID_MM)
+        detail = denoise_tv_chambolle(detail, weight=0.01)
         ref = float(np.percentile(np.abs(detail[m]), 95)) or 1e-6
         feat = (np.clip(detail / ref, -1.5, 1.5) * feat_amp).astype(np.float32)
+        feat, simp = _simplify_features(feat, m, feat_amp, float(lvl["min_feature_mm"]), int(lvl["max_features"]))
+        # the features that remain are the important ones: give them the full depth again
+        top = float(np.percentile(np.abs(feat[m]), 97))
+        if top > 1e-6:
+            feat = np.clip(feat * min(feat_amp / top, RENORM_CAP), -1.5 * feat_amp, 1.5 * feat_amp).astype(np.float32)
+        stats["simplified"] = simp
         stats["source"] = "depth"
     else:
         lg = None
         if labels is not None and labels.max() >= 1:
             lg = _resample((labels + 1).astype(np.uint8), box, shape, Image.NEAREST).astype(np.int32) - 1
-        reg, signs = feature_regions(lum, m, lg)
+        reg, signs = feature_regions(lum, m, lg, float(lvl["min_feature_mm"]), int(lvl["max_features"]))
         feat = np.zeros(shape, np.float32)
         for k, sgn in enumerate(signs):
             if sgn:
@@ -359,6 +420,8 @@ def heightmap(rgb: np.ndarray, mask: np.ndarray, labels: np.ndarray | None, box:
         body = dome
         stats["source"] = "shading"
         stats["regions"] = (reg, signs)
+        n_reg = int(reg.max()) + 1 if reg.size else 0
+        stats["simplified"] = {"kept": sum(1 for x in signs if x), "small": max(0, n_reg - len(signs))}
     stats["feature_depth_mm"] = round(feat_amp, 2)
 
     # feature edges: rounded by detail_mm, independent of the body's softness
@@ -436,8 +499,8 @@ def heightfield(hgt: np.ndarray, w_mm: float, h_mm: float) -> mf.Manifold:
 
 def build(rgb: np.ndarray, mask: np.ndarray, labels: np.ndarray | None, height_mm: float,
           thickness: float, min_feature_mm: float, finish: dict[str, Any] | None = None,
-          depth: np.ndarray | None = None, edges: dict[str, Any] | None = None
-          ) -> tuple[mf.Manifold, dict[str, Any]]:
+          depth: np.ndarray | None = None, edges: dict[str, Any] | None = None,
+          detail: dict[str, Any] | None = None) -> tuple[mf.Manifold, dict[str, Any]]:
     """The relief body lying on its back (z up from the bed, picture top towards +y), centred.
     `edges` style "auto" (or missing) takes the treatment that matches the picture."""
     box, mm_px = fit(mask, height_mm)
@@ -456,7 +519,7 @@ def build(rgb: np.ndarray, mask: np.ndarray, labels: np.ndarray | None, height_m
         edges["detail_mm"] = 0.4
     stats: dict[str, Any] = {}
     hgt = heightmap(rgb, mask, labels, box, mm_px, thickness, finish, depth=depth, edges=edges, stats=stats,
-                    outline_grid=m_out)
+                    outline_grid=m_out, detail=detail)
     hgt_full = hgt
     low = float((finish or {}).get("lowpoly_mm", 0) or 0)
     if low > GRID_MM:  # faceted look: a coarse grid of flat triangles; the outline stays exact
@@ -473,6 +536,7 @@ def build(rgb: np.ndarray, mask: np.ndarray, labels: np.ndarray | None, height_m
             "relief_mm": round(thickness - plate_mm(thickness), 1), "outline": "picture",
             "outline_removed_pct": round(removed * 100, 1), "mm_per_px": mm_px,
             "features_from": stats.get("source"), "feature_depth_mm": stats.get("feature_depth_mm"),
+            "simplified": stats.get("simplified"),
             "edges_used": {"style": edges["style"], "outer_mm": round(float(edges["outer_mm"]), 1),
                            "detail_mm": round(float(edges["detail_mm"]), 2), "auto": bool(edges.get("auto"))},
             "_outline": m_out, "_box_mm": (w_mm, h_mm), "_hgt": hgt_full, "_stats": stats}

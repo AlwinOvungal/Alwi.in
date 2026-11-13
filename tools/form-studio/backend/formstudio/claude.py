@@ -155,6 +155,8 @@ STYLE_PROMPT = """Write the style definition.
 - negative_prompt: comma-separated things to avoid.
 - sculpt_guide: 2-4 sentences telling a sculptor how to build any object in this style from simple soft primitives (how chunky, roundness, what detail to drop).
 - No colours anywhere: no colour names in the prompts or guide; say "keep the object's own colours".
+- Moderate, print-friendly detail: main forms and recognisable features; fine or repetitive details (tiny
+  lettering, bolts, dense textures) simplified into broad shapes; no hair-thin or separate small parts.
 - soften_mm: 0.3 (crisp) to 2.0 (very soft, clay-like).
 - min_feature_mm: 1.2 to 3.0 (thinnest part kept).
 - finish: how the printed shape is finished: "soft" (smooth, rounded: clay, plush, toys), "voxel" (built from cubes: pixel art, voxel, Lego-like) or "faceted" (flat geometric facets: low-poly, papercraft, crystal).

@@ -552,3 +552,8 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
   no-bridge merging, raised/recessed from rim lighting); `suggest_edges`; `edge_profile`; `relief_check`; `render_front`.
 - Report keys: `features_from`, `feature_depth_mm`, `edges_used`, `relief_check`, `fidelity.relief_match/features`.
 - `printify._stl_safe`: colour parts stay watertight after the STL round trip.
+
+## Detail standard
+- `DETAIL_LEVELS` / `detail_level(params)` (core/style.py); `params.detail.level`; floors in `print_params`.
+- `relief._simplify_features` (reconstruction opening/closing + feature cap), `RENORM_CAP`; `feature_regions(min_feature_mm, max_features)`.
+- `printify._stand_edges` (edge style → soften_mm / smooth_iters for figurines); report `detail_level`, `simplified`, `changes` for all formats.

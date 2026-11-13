@@ -115,8 +115,14 @@ class StyleSpec:
         if params["flat_back"].get("enabled"):  # bas-reliefs are small volumes: afford a finer remesh
             params["geometry"]["voxel_mm"] = min(float(params["geometry"].get("voxel_mm", 0.5)), 0.4)
             params["flat_back"].setdefault("depth_from", "picture")  # or "shape": the AI 3D mesh
-            # edges of picture reliefs: auto (matched to the picture) · soft · bevel · crisp
-            params["edges"] = {"style": "auto", "outer_mm": None, "detail_mm": 0.4}
+        # every format, every style: edges matched to the picture (auto) · soft · bevel · crisp, and the
+        # balanced, print-friendly detail standard (a style never asks for hair-thin parts)
+        params["edges"] = {"style": "auto", "outer_mm": None, "detail_mm": 0.4}
+        params["detail"] = {"level": DEFAULT_DETAIL}
+        geo = params["geometry"]
+        geo["min_feature_mm"] = max(float(geo.get("min_feature_mm", 1.6) or 1.6), 1.2)
+        if geo.get("finish", "soft") in ("soft", "blender"):
+            geo["soften_mm"] = max(float(geo.get("soften_mm", 0.9) or 0), 0.4)
         return params
 
     def summary(self) -> dict[str, Any]:
@@ -476,6 +482,47 @@ FORMAT_BRIEFS: dict[str, dict[str, str]] = {
         "avoid": "flat 2D drawing, thin legs, top-heavy pose, floating parts",
     },
 }
+
+
+# How much detail a print carries: the same standard for every style, existing or future. It goes into
+# every picture prompt (pipeline._format_style) and sets the 3D step's simplification (relief, printify).
+DEFAULT_DETAIL = "balanced"
+DETAIL_LEVELS: dict[str, dict[str, Any]] = {
+    "simple": {
+        "label": "Simple",
+        "brief": ("Print-friendly, simple detail: keep only the subject's silhouette, proportions and its few most "
+                  "recognisable features as bold, broad shapes; leave out small details, lettering, patterns and "
+                  "textures entirely; no thin, fragile or separate small parts; add nothing that isn't in the photo."),
+        "avoid": "intricate detail, small details, tiny text, patterns, textures, filigree, thin spikes, many small parts",
+        "min_feature_mm": 3.0, "detail_sigma_mm": 0.8, "max_features": 8, "colour_min_mm": 2.0, "depth": 0.8,
+        "stand_min_feature_mm": 2.4,
+    },
+    "balanced": {
+        "label": "Balanced",
+        "brief": ("Print-friendly, moderate detail: keep the subject's silhouette, proportions and most recognisable "
+                  "features (for a vehicle: body, cab, wheels, windows, major accessories); simplify fine or "
+                  "repetitive details such as tiny lettering, bolts, dense tyre tread and surface textures into "
+                  "broad, clean shapes; merge small parts into larger forms; no thin, fragile or separate small "
+                  "parts; add nothing that isn't in the photo."),
+        "avoid": "intricate detail, tiny text, bolts, dense texture, filigree, thin spikes, many small parts",
+        "min_feature_mm": 2.0, "detail_sigma_mm": 0.5, "max_features": 16, "colour_min_mm": 1.5, "depth": 1.0,
+        "stand_min_feature_mm": 1.8,
+    },
+    "fine": {
+        "label": "Fine",
+        "brief": ("Print-friendly, finer detail: keep the subject's silhouette, proportions and its features, "
+                  "including smaller secondary details, as clean shapes; still simplify tiny lettering and dense "
+                  "textures; no hair-thin or fragile parts; add nothing that isn't in the photo."),
+        "avoid": "hair-thin parts, tiny text, filigree, noise",
+        "min_feature_mm": 1.2, "detail_sigma_mm": 0.25, "max_features": 40, "colour_min_mm": 1.0, "depth": 1.0,
+        "stand_min_feature_mm": 1.2,
+    },
+}
+
+
+def detail_level(params: dict[str, Any] | None) -> dict[str, Any]:
+    lvl = ((params or {}).get("detail") or {}).get("level") or DEFAULT_DETAIL
+    return {"id": lvl if lvl in DETAIL_LEVELS else DEFAULT_DETAIL, **DETAIL_LEVELS.get(lvl, DETAIL_LEVELS[DEFAULT_DETAIL])}
 
 
 def format_brief(fmt: str | None) -> dict[str, str]:

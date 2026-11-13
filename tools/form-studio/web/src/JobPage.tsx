@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Advice, api, BACKERS, Candidate, EdgeStyle, Colour, Engines, FILAMENTS, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, REFINERS, Settings, Style, useJob } from "./api";
+import { Advice, api, BACKERS, Candidate, DetailLevel, EdgeStyle, Colour, Engines, FILAMENTS, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, REFINERS, Settings, Style, useJob } from "./api";
 import { StylePicker } from "./Library";
 import { ClayFields, EnginePicker, ErrorCard, go, NeedsBlender, Progress, Slider, Switch, useBlender, useToast } from "./ui";
 
@@ -332,7 +332,7 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
                   </button>
                 ))}
               </div>
-              {job.format_brief && <span className="small muted">Every restyle is drawn for it: {job.format_brief}</span>}
+              {job.format_brief && <span className="small muted">Every restyle is drawn for it: {job.format_brief} {job.detail_brief}</span>}
             </div>
           )}
           <Switch label="Logo or text: keep the exact shapes" checked={job.kind === "logo"} onChange={setKind} disabled={busy} />
@@ -874,6 +874,12 @@ function DepthModelPrompt() {
 
 // ---------------------------------------------------------------- 4. print ----
 
+const DETAIL_OPTS: { id: DetailLevel; label: string; hint: string }[] = [
+  { id: "simple", label: "Simple", hint: "Silhouette and a few bold features only: fastest, cheapest, sturdiest." },
+  { id: "balanced", label: "Balanced", hint: "Main forms and recognisable features; tiny text, bolts and textures simplified." },
+  { id: "fine", label: "Fine", hint: "Keeps smaller secondary details too (still no hair-thin parts)." },
+];
+
 const EDGE_OPTS: { id: EdgeStyle; label: string; hint: string }[] = [
   { id: "auto", label: "Match picture", hint: "The edge the picture shows, measured from its shading." },
   { id: "soft", label: "Soft rounded", hint: "A smooth quarter-round from the outline up to the surface." },
@@ -894,9 +900,10 @@ function EdgeIcon({ id }: { id: EdgeStyle }) {
 
 /** Picture reliefs: the outline's edge (style + width) and, separately, the rounding of feature edges.
  *  Every change rebuilds the 3D shape itself. */
-function EdgeControls({ p, used, busy, set }: {
+function EdgeControls({ p, used, busy, set, figurine }: {
   p: PrintParams; used?: { style: Exclude<EdgeStyle, "auto">; outer_mm: number; detail_mm: number; auto: boolean };
   busy: boolean; set: (k: "edges", patch: Partial<NonNullable<PrintParams["edges"]>>, commit?: boolean) => void;
+  figurine?: boolean;
 }) {
   const e = p.edges ?? { style: "auto" as EdgeStyle, outer_mm: null, detail_mm: 0.4 };
   const shown: Exclude<EdgeStyle, "auto"> = e.style === "auto" ? (used?.style ?? "soft") : e.style;
@@ -920,13 +927,17 @@ function EdgeControls({ p, used, busy, set }: {
         {e.style === "auto" && used ? ` Now: ${EDGE_OPTS.find((o) => o.id === used.style)?.label.toLowerCase()}${used.outer_mm ? `, ${used.outer_mm} mm` : ""}.` : ""}
       </small>
       {shown !== "crisp" && (
-        <Slider label="Outline edge" unit=" mm" min={0.2} max={4} step={0.1} value={outer}
+        <Slider label={figurine ? "Edge softness" : "Outline edge"} unit=" mm" min={0.2} max={4} step={0.1} value={outer}
           onChange={(v) => set("edges", { style: shown, outer_mm: v })}
           onCommit={(v) => set("edges", { style: shown, outer_mm: v }, true)} disabled={busy} />
       )}
       <Slider label="Feature edges (eyes, wings…)" unit=" mm" min={0} max={1.5} step={0.05} value={e.detail_mm ?? 0.4}
         onChange={(v) => set("edges", { detail_mm: v })} onCommit={(v) => set("edges", { detail_mm: v }, true)} disabled={busy} />
-      <small className="muted">Outline and feature edges are separate: a very soft outline never smears the eyes or feathers.</small>
+      <small className="muted">
+        {figurine
+          ? "Edges round the whole figure; Feature edges sets how much the surface is smoothed after, so small features stay crisp."
+          : "Outline and feature edges are separate: a very soft outline never smears the eyes or feathers."}
+      </small>
     </div>
   );
 }
@@ -1261,7 +1272,7 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           {finish === "faceted" && (
             <Slider label="Facets" unit="" min={80} max={2000} step={20} value={p.geometry.facets ?? 400} onChange={(v) => set("geometry", { facets: v })} onCommit={(v) => set("geometry", { facets: v }, true)} disabled={busy} />
           )}
-          {finish === "soft" && (
+          {finish === "soft" && fmt !== "stand" && (
             <Slider label="Softness" unit=" mm" min={0} max={3} step={0.1} value={p.geometry.soften_mm} onChange={(v) => set("geometry", { soften_mm: v })} onCommit={(v) => set("geometry", { soften_mm: v }, true)} disabled={busy} />
           )}
           {!job.logo_parts && <Slider label="Thinnest part" unit=" mm" min={0.8} max={5} step={0.1} value={p.geometry.min_feature_mm} onChange={(v) => set("geometry", { min_feature_mm: v })} onCommit={(v) => set("geometry", { min_feature_mm: v }, true)} disabled={busy} />}
@@ -1270,8 +1281,23 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           {fmt !== "stand" && !job.logo_parts && (
             <Slider label="Thickness" unit=" mm" min={3} max={25} step={0.5} value={p.flat_back.thickness_mm} onChange={(v) => set("flat_back", { thickness_mm: v })} onCommit={(v) => set("flat_back", { thickness_mm: v }, true)} disabled={busy} />
           )}
-          {!!p.flat_back?.enabled && !job.logo_parts && p.flat_back.depth_from !== "shape" && (
-            <EdgeControls p={p} used={rep?.edges_used} busy={busy} set={set} />
+          {!job.logo_parts && (
+            <div className="field">
+              <span>Detail</span>
+              <div className="seg wide" role="radiogroup" aria-label="Level of detail">
+                {DETAIL_OPTS.map((o) => (
+                  <button key={o.id} type="button" role="radio" aria-checked={(p.detail?.level ?? "balanced") === o.id}
+                    className={(p.detail?.level ?? "balanced") === o.id ? "on" : ""} disabled={busy} title={o.hint}
+                    onClick={() => (p.detail?.level ?? "balanced") !== o.id && set("detail", { level: o.id }, true)}>
+                    {o.label}
+                  </button>
+                ))}
+              </div>
+              <small className="muted">{DETAIL_OPTS.find((o) => o.id === (p.detail?.level ?? "balanced"))?.hint} The same standard for every style; new restyles use it too.</small>
+            </div>
+          )}
+          {!job.logo_parts && (fmt === "stand" || p.flat_back.depth_from !== "shape") && (
+            <EdgeControls p={p} used={rep?.edges_used} busy={busy} set={set} figurine={fmt === "stand"} />
           )}
           {!!p.flat_back?.enabled && !job.logo_parts && (
             <>

@@ -89,6 +89,7 @@ export interface BlenderStatus {
   task?: Task | null;
 }
 
+export type DetailLevel = "simple" | "balanced" | "fine";
 export type EdgeStyle = "auto" | "soft" | "bevel" | "crisp";
 export type PrintFormat = "stand" | "magnet" | "keychain" | "ornament";
 
@@ -127,6 +128,8 @@ export interface PrintParams {
   regions?: { enabled: boolean; max_colours: number | null };
   /** picture reliefs: the outline's edge and the rounding of feature edges (real geometry) */
   edges?: { style: EdgeStyle; outer_mm: number | null; detail_mm: number };
+  /** the print-friendly detail standard (same for every style) */
+  detail?: { level: DetailLevel };
 }
 
 export type LogoBacker = "plaque" | "outline" | "bar";
@@ -164,6 +167,8 @@ export interface Report {
   relief_source?: "picture" | "shape";
   edges_used?: { style: Exclude<EdgeStyle, "auto">; outer_mm: number; detail_mm: number; auto: boolean };
   features_from?: "depth" | "shading";
+  detail_level?: DetailLevel;
+  simplified?: { kept: number; small: number };
   feature_depth_mm?: number;
 }
 
@@ -199,6 +204,8 @@ export interface Job {
   kind?: "logo" | "object";
   /** picture reliefs: is the small depth model (raised/recessed features) downloaded? */
   depth_ready?: boolean;
+  /** what every restyle is told about the detail level */
+  detail_brief?: string;
   /** what every restyle is told about the chosen object type */
   format_brief?: string;
   /** Photo step, "Reduce colours": off by default */

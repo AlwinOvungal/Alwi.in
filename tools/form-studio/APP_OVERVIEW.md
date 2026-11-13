@@ -238,6 +238,22 @@ Web UI (React + TypeScript + three.js)  web/src/  → built into backend/formstu
   numbers: outline, colour placement, how closely the relief follows the picture, features kept distinct; plus
   every printability change (feature depth, edges, pocket, trims).
 
+### One print-friendly detail standard for every style
+Whatever the style (built-in, your own, or made later by ChatGPT/Claude), every conversion aims at a
+**balanced, print-friendly level of detail** (`core/style.py: DETAIL_LEVELS`, default `balanced`):
+- **Prompts**: every restyle and refine is told to keep the photo's silhouette, proportions and most
+  recognisable features and to simplify fine or repetitive details (tiny lettering, bolts, dense tread,
+  textures) into broad shapes, with no thin or separate small parts and nothing that isn't in the photo
+  (`pipeline._format_style`, added in code at prompt time, so no style can skip it).
+- **3D step**: relief detail is band-limited and small bumps/dents are removed by morphological
+  reconstruction (bigger shapes keep their exact form); at most N distinct features are kept (the strongest);
+  colour specks merge at the level's size; figurines get a minimum part thickness (Balanced 1.8 mm).
+- **Print step → Detail**: Simple · Balanced · Fine, rebuilds the model; the review lists what was simplified
+  with **Keep more detail**.
+- **Edges for every format**: figurines get the same Edges card (Match picture / Soft / Bevel / Crisp + softness
+  + feature-edge smoothing), driving the mesh finish's real softness; the review card now shows for figurines
+  too (compare from the front / at an angle, every printability change).
+
 ### Object type shapes every picture
 What the object becomes (Magnet, Keychain, Ornament, Figurine) is asked first and is not display-only: every
 restyle, refine and Make-it-now prompt carries the type's requirements (`FORMAT_BRIEFS` in `core/style.py`,
