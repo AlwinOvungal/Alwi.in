@@ -485,9 +485,11 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
         from . import relief as relief_mod
 
         ist = Path(image_path).stat()
+        edges_p = dict(params.get("edges") or {"style": "auto"})
+        use_depth = relief_mod.depth_ready()
         kp = (("picture", f"{image_path}:{ist.st_mtime_ns}:{ist.st_size}", mask_sig, round(height, 3), round(flat_t, 3),
-               round(min_feat, 3), finish, n_paint, pal_sig, *(geo.get(k) for k in ("soften_mm", "voxel_size_mm", "facets",
-               "clay_texture_mm", "clay_grain_mm"))) if CACHE["enabled"] else None)
+               round(min_feat, 3), finish, n_paint, pal_sig, use_depth, tuple(sorted(edges_p.items())),
+               *(geo.get(k) for k in ("soften_mm", "voxel_size_mm", "facets"))) if CACHE["enabled"] else None)
         hit = _get(kp)
         if hit:
             body_m, labels, region_cols, mask_full, relief_info, w = hit
@@ -504,17 +506,21 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
                 labels, region_cols = logo_mod.regions(img, mask_full, n_paint, mm_per_px=mm_px, palette=pal_cols,
                                                        stats=cstats)
             say(0.4, "Pressing the picture into a relief")
+            # smooth and clean: no clay-grain noise on picture reliefs (it read as bumps, not texture)
             look = {"soften_mm": min(float(geo.get("soften_mm", 0.9)), 1.2)}
-            if finish == "blender":
-                look.update(clay_texture_mm=float(geo.get("clay_texture_mm", 0.25)) * 0.6,
-                            clay_grain_mm=float(geo.get("clay_grain_mm", 3.0)))
-            elif finish == "voxel":
+            if finish == "voxel":
                 look = {"terrace_mm": min(float(geo.get("voxel_size_mm", 2.5)) / 2, 1.0)}
             elif finish == "faceted":  # about `facets` flat triangles over the picture
                 look = {"lowpoly_mm": max(1.0, math.sqrt(height * height / max(int(geo.get("facets", 400)) / 2, 1)))}
             rgb = np.asarray(img.convert("RGB").resize(mask_full.shape[::-1]))
+            depth = None
+            if use_depth:
+                say(0.3, "Reading the picture's raised and recessed shapes")
+                with timing.stage("printify.depth"):
+                    depth = relief_mod.depth_for(image_path)
             with timing.stage("printify.relief", source="picture"):
-                body_m, relief_info = relief_mod.build(rgb, mask_full, labels, height, flat_t, min_feat, look)
+                body_m, relief_info = relief_mod.build(rgb, mask_full, labels, height, flat_t, min_feat, look,
+                                                       depth=depth, edges=edges_p)
             try:  # how closely the outline follows the picture (before pocket and ring, which are wanted)
                 relief_info["fidelity"] = relief_mod.fidelity(body_m, relief_info["_outline"], *relief_info["_box_mm"],
                                                               mask_full, relief_mod.fit(mask_full, height)[0])
@@ -701,18 +707,30 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
             if len(pieces) >= 2:
                 # simplify welds the booleans' duplicate edges, keeping every part watertight
                 region_cols = [region_cols[ri] for ri, _ in pieces]
-                region_parts = [(f"colour_{i + 1}", to_trimesh(m.simplify(0.01))) for i, (_, m) in enumerate(pieces)]
+                region_parts = [(f"colour_{i + 1}", _stl_safe(m)) for i, (_, m) in enumerate(pieces)]
 
     say(0.95, "Checking printability")
     body_t = to_trimesh(body_m)
     base_tm = to_trimesh(base_m) if base_m is not None else None
     report = _report(body_t, base_tm, pitch, min_feat, thin_removed, warnings)
     report.update({k: v for k, v in relief_info.items() if not k.startswith("_")})
+    if picture and relief_info.get("_hgt") is not None:
+        try:  # the print seen head-on, to set beside the approved picture
+            report["_preview"] = relief_mod.render_front(relief_info["_hgt"], relief_info["_outline"])
+        except Exception as e:
+            log.warning("front preview failed: %s", e)
     if picture:
         report["changes"] = _changes(report, params, min_feat, len(region_parts or []) or 1)
         fid = report.get("fidelity") or {}
+        rc = report.get("relief_check") or {}
+        if "relief_match" in rc:
+            fid["relief_match"] = rc["relief_match"]
+        if "features" in rc:
+            fid["features"] = rc["features"]
         if fid:
-            fid["score"] = round(100 * min(fid.get("outline_iou", 1.0), fid.get("colour_match", 1.0)), 1)
+            # the relief part: how well the surface follows the intended features (correlation 0.6 → 95%)
+            relief_part = min(1.0, 0.85 + 0.25 * max(fid["relief_match"], 0.0)) if "relief_match" in fid else 1.0
+            fid["score"] = round(100 * min(fid.get("outline_iou", 1.0), fid.get("colour_match", 1.0), relief_part), 1)
     if region_parts:
         bad = [i for i, (_, m) in enumerate(region_parts) if not m.is_watertight]
         if bad:
@@ -722,6 +740,22 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     report["format"] = params.get("format", "stand")
     say(1.0, "Ready to print")
     return PrintResult(body_t, base_tm, report, parts=region_parts)
+
+
+def _stl_safe(m: mf.Manifold) -> trimesh.Trimesh:
+    """A part that stays watertight once saved as STL: simplify welds the booleans' near-duplicate
+    vertices; if a seam would still open up after the STL round trip, weld a little harder."""
+    import io
+
+    out = None
+    for tol in (0.01, 0.02, 0.05):
+        out = to_trimesh(m.simplify(tol))
+        buf = io.BytesIO()
+        out.export(buf, file_type="stl")
+        buf.seek(0)
+        if trimesh.load(buf, file_type="stl").is_watertight:
+            return out
+    return out
 
 
 def _changes(report: dict[str, Any], params: dict[str, Any], min_feat: float, n_parts: int) -> list[dict[str, Any]]:
@@ -740,6 +774,17 @@ def _changes(report: dict[str, Any], params: dict[str, Any], min_feat: float, n_
     if n_parts > 1:
         out.append({"id": "grooves", "text": f"{n_parts} colours, each its own part with a small groove where two "
                     "meet, so they print and read cleanly.", "action": None})
+    if report.get("features_from"):
+        src = ("the depth model" if report["features_from"] == "depth" else "the picture's shading and creases")
+        fd = report.get("feature_depth_mm")
+        out.append({"id": "features", "text": f"Raised and recessed features read from {src}, made at least {fd:g} mm "
+                    "proud or deep so they show in print.", "action": None})
+    eu = report.get("edges_used") or {}
+    if eu:
+        what = {"soft": f"soft rounded ({eu['outer_mm']:g} mm)", "bevel": f"gently bevelled ({eu['outer_mm']:g} mm)",
+                "crisp": "crisp"}.get(eu["style"], eu["style"])
+        out.append({"id": "edges", "text": f"Outline edges {what}" + (", matched to the picture" if eu.get("auto") else "")
+                    + f"; feature edges rounded {eu['detail_mm']:g} mm.", "action": None})
     mag = params.get("magnet") or {}
     if mag.get("enabled"):
         pk = report.get("pocket") or {}
@@ -791,6 +836,10 @@ def run(raw_path: Path, out_dir: Path, params: dict[str, Any], progress: Progres
     st = raw_path.stat()
     res = printify(load_mesh(raw_path), params, progress, cache_key=f"{raw_path.resolve()}:{st.st_mtime_ns}:{st.st_size}",
                    mask_path=mask_path, image_path=image_path)
+    prev = res.report.pop("_preview", None)
+    (out_dir / "preview_front.png").unlink(missing_ok=True)
+    if prev is not None:
+        prev.save(out_dir / "preview_front.png")
     for stale in ["parts.json", "plaque.stl", *(f.name for f in out_dir.glob("part_*.stl"))]:
         (out_dir / stale).unlink(missing_ok=True)  # an earlier logo or picture-colours build of this object
     if res.parts:  # picture colours: one part per colour, on its own filament

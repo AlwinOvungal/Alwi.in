@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { Advice, api, BACKERS, Candidate, Colour, Engines, FILAMENTS, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, REFINERS, Settings, Style, useJob } from "./api";
+import { Advice, api, BACKERS, Candidate, EdgeStyle, Colour, Engines, FILAMENTS, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, REFINERS, Settings, Style, useJob } from "./api";
 import { StylePicker } from "./Library";
 import { ClayFields, EnginePicker, ErrorCard, go, NeedsBlender, Progress, Slider, Switch, useBlender, useToast } from "./ui";
 
@@ -817,6 +817,7 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
                 : "The 3D model guesses the back and sides from this one image. Make 3 views above for a better back. Form Studio then cleans it up for printing."}
           </p>
           {engines && <EnginePicker engines={list} value={engine} onChange={setEngine} />}
+          {flat && engine === "picture" && job.depth_ready === false && <DepthModelPrompt />}
         </div>
         <div className="card panel stack">
           {working && job.task ? (
@@ -852,11 +853,93 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
   );
 }
 
+/** Picture reliefs read raised and recessed features (eyes, beaks, wings) best with a small depth model. */
+function DepthModelPrompt() {
+  const [state, setState] = useState<"idle" | "started">("idle");
+  const toast = useToast();
+  const get = () =>
+    api.downloadModels("depth").then(() => (setState("started"), toast("Downloading the depth model (~100 MB). Rebuild the shape when it's done."))).catch((e) => toast((e as Error).message, true));
+  return (
+    <div className="note">
+      <span className="small">
+        For truer raised and recessed features (eyes, beaks, wings, feathers), get the small depth model once (~100 MB, runs on this Mac).
+        Without it, features are read from the picture's shading and creases.
+      </span>
+      <div className="row" style={{ marginTop: 6 }}>
+        <button className="btn sm" disabled={state === "started"} onClick={get}>{state === "started" ? "Downloading… (see Settings → Local AI models)" : "Get the depth model"}</button>
+      </div>
+    </div>
+  );
+}
+
 // ---------------------------------------------------------------- 4. print ----
+
+const EDGE_OPTS: { id: EdgeStyle; label: string; hint: string }[] = [
+  { id: "auto", label: "Match picture", hint: "The edge the picture shows, measured from its shading." },
+  { id: "soft", label: "Soft rounded", hint: "A smooth quarter-round from the outline up to the surface." },
+  { id: "bevel", label: "Gently bevelled", hint: "A straight chamfer around the outline." },
+  { id: "crisp", label: "Crisp", hint: "Straight walls right up to the top surface." },
+];
+
+/** The cross-section of each edge style: a quarter-round, a chamfer, a square corner. */
+function EdgeIcon({ id }: { id: EdgeStyle }) {
+  const d = id === "soft" ? "M2 18 V10 Q2 4 10 4 H22" : id === "bevel" ? "M2 18 V10 L8 4 H22" : id === "crisp" ? "M2 18 V4 H22" : "M2 18 V9 Q3 4 9 4 H22";
+  return (
+    <svg width="22" height="20" viewBox="0 0 24 20" aria-hidden className="edge-icon">
+      <path d={d} fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
+      {id === "auto" && <circle cx="18" cy="13" r="3" fill="currentColor" />}
+    </svg>
+  );
+}
+
+/** Picture reliefs: the outline's edge (style + width) and, separately, the rounding of feature edges.
+ *  Every change rebuilds the 3D shape itself. */
+function EdgeControls({ p, used, busy, set }: {
+  p: PrintParams; used?: { style: Exclude<EdgeStyle, "auto">; outer_mm: number; detail_mm: number; auto: boolean };
+  busy: boolean; set: (k: "edges", patch: Partial<NonNullable<PrintParams["edges"]>>, commit?: boolean) => void;
+}) {
+  const e = p.edges ?? { style: "auto" as EdgeStyle, outer_mm: null, detail_mm: 0.4 };
+  const shown: Exclude<EdgeStyle, "auto"> = e.style === "auto" ? (used?.style ?? "soft") : e.style;
+  const outer = e.outer_mm ?? used?.outer_mm ?? (shown === "bevel" ? 0.8 : 1.5);
+  const pick = (id: EdgeStyle) =>
+    set("edges", { style: id, outer_mm: id === "auto" ? null : id === "crisp" ? 0 : outer > 0 ? outer : id === "bevel" ? 0.8 : 1.5 }, true);
+  return (
+    <div className="field">
+      <span>Edges</span>
+      <div className="seg wide edge-seg" role="radiogroup" aria-label="Edge style">
+        {EDGE_OPTS.map((o) => (
+          <button key={o.id} type="button" role="radio" aria-checked={e.style === o.id} className={e.style === o.id ? "on" : ""}
+            disabled={busy} onClick={() => e.style !== o.id && pick(o.id)} title={o.hint}>
+            <EdgeIcon id={o.id} />
+            <span>{o.label}</span>
+          </button>
+        ))}
+      </div>
+      <small className="muted">
+        {EDGE_OPTS.find((o) => o.id === e.style)?.hint}
+        {e.style === "auto" && used ? ` Now: ${EDGE_OPTS.find((o) => o.id === used.style)?.label.toLowerCase()}${used.outer_mm ? `, ${used.outer_mm} mm` : ""}.` : ""}
+      </small>
+      {shown !== "crisp" && (
+        <Slider label="Outline edge" unit=" mm" min={0.2} max={4} step={0.1} value={outer}
+          onChange={(v) => set("edges", { style: shown, outer_mm: v })}
+          onCommit={(v) => set("edges", { style: shown, outer_mm: v }, true)} disabled={busy} />
+      )}
+      <Slider label="Feature edges (eyes, wings…)" unit=" mm" min={0} max={1.5} step={0.05} value={e.detail_mm ?? 0.4}
+        onChange={(v) => set("edges", { detail_mm: v })} onCommit={(v) => set("edges", { detail_mm: v }, true)} disabled={busy} />
+      <small className="muted">Outline and feature edges are separate: a very soft outline never smears the eyes or feathers.</small>
+    </div>
+  );
+}
 
 /** Before export: how close the print is to the approved picture, and everything printing changed. */
 function ReviewCard({ job, busy, onApply }: { job: Job; busy: boolean; onApply: (o: Record<string, unknown>) => void }) {
   const rep = job.report!;
+  // the 3D view's own shortcuts: 1 = front, 0 = three-quarter
+  const view = (key: string) => {
+    const el = document.querySelector<HTMLElement>(".viewer-wrap");
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    el?.dispatchEvent(new KeyboardEvent("keydown", { key, bubbles: true }));
+  };
   const f = rep.fidelity ?? {};
   const score = f.score ?? (f.outline_iou != null ? Math.round(f.outline_iou * 1000) / 10 : null);
   const good = score != null && score >= 95;
@@ -872,8 +955,18 @@ function ReviewCard({ job, busy, onApply }: { job: Job; busy: boolean; onApply: 
           </span>
         )}
       </div>
+      {job.files.includes("05_print/preview_front.png") && job.files.includes("03_confirmed.png") && (
+        <div className="compare">
+          <figure><img src={fileUrl(job, "03_confirmed.png")} alt="The approved picture" /><figcaption className="small muted">Approved picture</figcaption></figure>
+          <figure><img src={fileUrl(job, "05_print/preview_front.png")} alt="The print from the front" /><figcaption className="small muted">The print, from the front</figcaption></figure>
+        </div>
+      )}
+      <div className="row" style={{ gap: 6 }}>
+        <button className="btn sm" onClick={() => view(job.print_params?.flat_back?.enabled ? "7" : "1")}>Compare from the front</button>
+        <button className="btn sm" onClick={() => view("0")}>Compare at an angle</button>
+      </div>
       <div className="review-body">
-        {job.files.includes("03_confirmed.png") && (
+        {job.files.includes("03_confirmed.png") && !job.files.includes("05_print/preview_front.png") && (
           <img className="review-pic" src={fileUrl(job, "03_confirmed.png")} alt="The approved picture" />
         )}
         <div className="stack" style={{ gap: 8 }}>
@@ -881,6 +974,8 @@ function ReviewCard({ job, busy, onApply }: { job: Job; busy: boolean; onApply: 
             <div className="stats">
               <div><span className="label">Outline</span><b>{pct(f.outline_iou)}</b></div>
               <div><span className="label">Colour placement</span><b>{pct(f.colour_match)}</b></div>
+              {f.relief_match != null && <div><span className="label">Relief follows picture</span><b>{pct(Math.max(f.relief_match, 0))}</b></div>}
+              {f.features && <div><span className="label">Features kept distinct</span><b>{f.features.distinct} of {f.features.found}</b></div>}
             </div>
           )}
           {parts.length > 1 && (
@@ -1174,6 +1269,9 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           <div className="divider" />
           {fmt !== "stand" && !job.logo_parts && (
             <Slider label="Thickness" unit=" mm" min={3} max={25} step={0.5} value={p.flat_back.thickness_mm} onChange={(v) => set("flat_back", { thickness_mm: v })} onCommit={(v) => set("flat_back", { thickness_mm: v }, true)} disabled={busy} />
+          )}
+          {!!p.flat_back?.enabled && !job.logo_parts && p.flat_back.depth_from !== "shape" && (
+            <EdgeControls p={p} used={rep?.edges_used} busy={busy} set={set} />
           )}
           {!!p.flat_back?.enabled && !job.logo_parts && (
             <>

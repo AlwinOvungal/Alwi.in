@@ -89,6 +89,7 @@ export interface BlenderStatus {
   task?: Task | null;
 }
 
+export type EdgeStyle = "auto" | "soft" | "bevel" | "crisp";
 export type PrintFormat = "stand" | "magnet" | "keychain" | "ornament";
 
 export interface PrintParams {
@@ -124,6 +125,8 @@ export interface PrintParams {
   };
   /** Picture colours (AMS): the picture reduced to at most max_colours, one part per colour */
   regions?: { enabled: boolean; max_colours: number | null };
+  /** picture reliefs: the outline's edge and the rounding of feature edges (real geometry) */
+  edges?: { style: EdgeStyle; outer_mm: number | null; detail_mm: number };
 }
 
 export type LogoBacker = "plaque" | "outline" | "bar";
@@ -155,10 +158,13 @@ export interface Report {
   overhang_pct: number;
   warnings: string[];
   /** flat formats built from the picture: how close the print is to it */
-  fidelity?: { outline_iou?: number; colour_match?: number; score?: number };
+  fidelity?: { outline_iou?: number; colour_match?: number; score?: number; relief_match?: number; features?: { found: number; distinct: number } };
   /** what printing changed from the picture, each with a way back where there is one */
   changes?: { id: string; text: string; action: { label: string; params: Record<string, unknown> } | null }[];
   relief_source?: "picture" | "shape";
+  edges_used?: { style: Exclude<EdgeStyle, "auto">; outer_mm: number; detail_mm: number; auto: boolean };
+  features_from?: "depth" | "shading";
+  feature_depth_mm?: number;
 }
 
 export interface PaletteColour { hex: string; name: string; original: string }
@@ -191,6 +197,8 @@ export interface Job {
   colours_custom?: boolean;
   /** "logo": built exactly from the artwork; "object": AI restyle and 3D */
   kind?: "logo" | "object";
+  /** picture reliefs: is the small depth model (raised/recessed features) downloaded? */
+  depth_ready?: boolean;
   /** what every restyle is told about the chosen object type */
   format_brief?: string;
   /** Photo step, "Reduce colours": off by default */

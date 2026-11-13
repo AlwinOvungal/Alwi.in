@@ -545,3 +545,10 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
 - `FORMAT_BRIEFS` / `format_brief()` (core/style.py); `pipeline._format_style`, `set_format`, `job_format`;
   `POST /api/jobs/{id}/format`; view key `format_brief`.
 - Report keys (picture reliefs): `pocket {x, y, wall_mm}`, `own_loop {x, y, diameter_mm}`.
+
+## Picture relief fidelity
+- `relief.depth_ready/depth_for` (Depth Anything V2 small; cache `<picture>_depth.npy`); pack `depth` in models.py.
+- `relief.heightmap(..., depth=, edges=, stats=, outline_grid=)`; `feature_regions` (watershed on creases,
+  no-bridge merging, raised/recessed from rim lighting); `suggest_edges`; `edge_profile`; `relief_check`; `render_front`.
+- Report keys: `features_from`, `feature_depth_mm`, `edges_used`, `relief_check`, `fidelity.relief_match/features`.
+- `printify._stl_safe`: colour parts stay watertight after the STL round trip.

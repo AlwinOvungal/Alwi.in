@@ -4,6 +4,7 @@ import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import * as THREE from "three";
 import { GLTFLoader } from "three/examples/jsm/loaders/GLTFLoader.js";
 import { STLLoader } from "three/examples/jsm/loaders/STLLoader.js";
+import { toCreasedNormals } from "three/examples/jsm/utils/BufferGeometryUtils.js";
 
 export type ViewerPart = { url: string; color: string };
 
@@ -33,9 +34,9 @@ type ViewId = keyof typeof VIEWS;
 function Part({ url, color }: { url: string; color: string }) {
   const geom = useLoader(STLLoader, url);
   const g = useMemo(() => {
-    const c = geom.clone();
-    c.computeVertexNormals();
-    return c;
+    // creased normals: smooth across gentle curves, sharp across real edges (wall to top), so walls read
+    // flat and tops smooth instead of showing vertical stripes where normals were averaged across the edge
+    return toCreasedNormals(geom.clone(), (35 * Math.PI) / 180);
   }, [geom]);
   return (
     <mesh geometry={g} castShadow receiveShadow>
@@ -88,12 +89,14 @@ function Model({ parts, rawUrl, mode, rawColor }: Pick<Props, "parts" | "rawUrl"
 
 /** Turns the camera to a named view of the whole model. Goes through <Bounds>, which animates the camera
  * itself (moving the camera directly would be undone by its own animation). */
-function ViewSnap({ view, nonce }: { view: ViewId | null; nonce: number }) {
+function ViewSnap({ view, nonce, flat }: { view: ViewId | null; nonce: number; flat?: boolean }) {
   const bounds = useBounds();
   useEffect(() => {
     if (!view) return;
     const { center, distance } = bounds.refresh().getSize();
-    const dir = new THREE.Vector3(...VIEWS[view].dir).normalize();
+    // a print lying on its back: its "3/4" is from above at an angle, so the relief reads
+    const d3 = flat && view === "iso" ? ([0.42, 0.82, 0.55] as const) : VIEWS[view].dir;
+    const dir = new THREE.Vector3(...d3).normalize();
     // looking straight down or up, "up" on screen is the model's back / front
     const up: [number, number, number] = view === "top" ? [0, 0, -1] : view === "bottom" ? [0, 0, 1] : [0, 1, 0];
     bounds.moveTo(center.clone().add(dir.multiplyScalar(distance))).lookAt({ target: center, up });
@@ -210,7 +213,7 @@ export default function Viewer({ parts, rawUrl, mode, rawColor, flat }: Props) {
           <Suspense fallback={null}>
             <Bounds fit clip observe margin={1.5}>
               {model}
-              <ViewSnap view={view.id} nonce={view.n} />
+              <ViewSnap view={view.id} nonce={view.n} flat={lookDown} />
             </Bounds>
           </Suspense>
           <BedGrid />

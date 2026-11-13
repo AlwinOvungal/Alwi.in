@@ -220,6 +220,24 @@ Web UI (React + TypeScript + three.js)  web/src/  → built into backend/formstu
     **Let Claude write the style words**.
 - **Editor:** Look (pictures) · Words · Preview · Draft with Claude · 3D shape; a sticky Save bar.
 
+### Picture reliefs follow the picture: features, edges, review
+- **Raised and recessed features.** With the small depth model (Depth Anything V2 small, ~100 MB, local; it
+  comes with the SDXL download or on its own: Settings → Local AI models → "Relief depth", or the button in the
+  Shape step) the picture's depth is split into a broad swell (compressed) and its detail (kept), so eyes sink,
+  beaks and wings stand out, feather and panel boundaries show. Without it, features are read from the picture's
+  creases (thin shadow + highlight lines) and shading (a raised shape's lit rim is bright, a recess's is dark).
+  Features are made at least 0.5 mm proud/deep (more on thicker prints) so they print. `core/relief.py:
+  depth_for`, `feature_regions`, `heightmap`.
+- **Clean surfaces.** No clay-grain noise on picture reliefs; edge-preserving smoothing; the outline is traced
+  sub-pixel and corner-rounded (no staircase walls); the viewer uses creased normals (no vertical stripes).
+- **Edge styles (real geometry).** Print step → Edges: Match picture (default, measured from the picture's
+  shading near its outline) · Soft rounded · Gently bevelled · Crisp, an Outline edge width, and a separate
+  Feature edges rounding so a soft outline never smears eyes or feathers (`params.edges`).
+- **Review** shows the approved picture beside a rendering of the print from the front
+  (`05_print/preview_front.png`), buttons to compare from the front / at an angle in the 3D view, and the
+  numbers: outline, colour placement, how closely the relief follows the picture, features kept distinct; plus
+  every printability change (feature depth, edges, pocket, trims).
+
 ### Object type shapes every picture
 What the object becomes (Magnet, Keychain, Ornament, Figurine) is asked first and is not display-only: every
 restyle, refine and Make-it-now prompt carries the type's requirements (`FORMAT_BRIEFS` in `core/style.py`,

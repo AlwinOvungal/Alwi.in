@@ -47,6 +47,13 @@ PACKS: dict[str, dict[str, Any]] = {
             "depth-anything/Depth-Anything-V2-Small-hf": ["config.json", "preprocessor_config.json", "model.safetensors"],
         },
     },
+    "depth": {
+        "label": "Relief depth · Depth Anything V2 (small)",
+        "used_by": "Magnets, keychains, ornaments: raised and recessed features read from the picture",
+        "repos": {
+            "depth-anything/Depth-Anything-V2-Small-hf": ["config.json", "preprocessor_config.json", "model.safetensors"],
+        },
+    },
     "sdxl-turbo": {
         "label": "Lightest restyle · SDXL-Turbo",
         "used_by": "Lightest quality for the local restyle (8 GB Macs)",

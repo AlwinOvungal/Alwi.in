@@ -166,11 +166,13 @@ def test_picture_relief_keeps_outline_and_colours(tree_picture, tmp_path, finish
     assert trunk.bounds[0][1] < parts[0].bounds[0][1]  # the trunk is the lowest part of the picture
     size = np.array(rep["size_mm"])
     # Object height is the picture's height; the pointed tree-top is trimmed to a printable 1.6 mm
-    assert size[1] == pytest.approx(35, abs=1.0) and size[2] == pytest.approx(THICK, abs=0.3)
+    # low-poly averages the top into flat facets, so its highest point sits a little lower
+    assert size[1] == pytest.approx(35, abs=1.0) and size[2] == pytest.approx(THICK, abs=0.3 if finish != "faceted" else 0.8)
 
 
-def test_picture_relief_groove_and_bed(tree_picture):
-    """Colours meet in a small groove, the plate lies flat on the bed, the top reaches full thickness."""
+def test_picture_relief_feature_step_and_bed(tree_picture):
+    """Where two colours meet, the features are distinct (a step the one-colour version doesn't have);
+    with crisp edges the plate lies flat on the bed and the top reaches full thickness."""
     from formstudio.core import logo, relief
 
     _, mask, pic = tree_picture
@@ -179,15 +181,16 @@ def test_picture_relief_groove_and_bed(tree_picture):
     box, mm_px = relief.fit(m, 35)
     labels, cols = logo.regions(img, m, None, mm_per_px=mm_px)
     assert len(cols) == 2
-    h = relief.heightmap(np.asarray(img), m, labels, box, mm_px, THICK)
-    assert h.max() == pytest.approx(THICK, abs=0.05) and h.min() >= relief.plate_mm(THICK) - 1e-3
-    # where canopy meets trunk (picture row 400, centre column) the surface dips: a groove that the
-    # one-colour version (no regions) doesn't have
-    flat = relief.heightmap(np.asarray(img), m, None, box, mm_px, THICK)
+    crisp = {"style": "crisp", "outer_mm": 0, "detail_mm": 0.2}
+    h = relief.heightmap(np.asarray(img), m, labels, box, mm_px, THICK, edges=crisp)
+    g = relief._resample(m, box, h.shape, Image.BILINEAR) > 127
+    inner = ndimage.binary_erosion(g, iterations=3)  # crisp keeps only a hairline round-over at the very edge
+    assert h.max() == pytest.approx(THICK, abs=0.05) and h[inner].min() >= relief.plate_mm(THICK) - 1e-3
+    flat = relief.heightmap(np.asarray(img), m, None, box, mm_px, THICK, edges=crisp)
     col = h.shape[1] // 2
     row = round((400 - box[0]) * mm_px / relief.GRID_MM)
-    dip = (h - flat)[row - 1:row + 2, col].min() - (h - flat)[row - 10, col]
-    assert dip < -0.2
+    diff = h - flat
+    assert abs(float(diff[row + 8, col] - diff[row - 8, col])) >= 0.4  # trunk and canopy are separate shapes
 
 
 def test_picture_relief_keychain_and_pocket(tree_picture, tmp_path):

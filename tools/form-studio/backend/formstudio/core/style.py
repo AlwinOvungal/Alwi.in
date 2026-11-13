@@ -115,6 +115,8 @@ class StyleSpec:
         if params["flat_back"].get("enabled"):  # bas-reliefs are small volumes: afford a finer remesh
             params["geometry"]["voxel_mm"] = min(float(params["geometry"].get("voxel_mm", 0.5)), 0.4)
             params["flat_back"].setdefault("depth_from", "picture")  # or "shape": the AI 3D mesh
+            # edges of picture reliefs: auto (matched to the picture) · soft · bevel · crisp
+            params["edges"] = {"style": "auto", "outer_mm": None, "detail_mm": 0.4}
         return params
 
     def summary(self) -> dict[str, Any]:

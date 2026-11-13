@@ -100,6 +100,10 @@ def _view(job: Job) -> dict[str, Any]:
     d["kind"] = job.manifest.get("kind") or "object"
     d["logo_parts"] = pipeline.logo_parts(job)
     d["format_brief"] = style_mod.format_brief(pipeline.job_format(job))["brief"]  # what restyles are told
+    if pipeline.is_flat(job):  # picture reliefs read raised/recessed features best with the small depth model
+        from ..core import relief as relief_mod
+
+        d["depth_ready"] = relief_mod.depth_ready()
     t = worker.tasks.get(job.id)
     d["task"] = t.public() if t else None
     return d
