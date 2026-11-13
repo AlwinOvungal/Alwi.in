@@ -528,3 +528,11 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
 3. Pick a P0 item. Change the backend with tests, then the UI. Check with Playwright at 1320 px and 390 px. Run
    `pytest` and `npm run build`.
 4. Update `APP_OVERVIEW.md` when the behaviour changes.
+
+## Guided flow (latest)
+- `core/relief.py`: flat formats from the picture (heightmap → heightfield ∩ outline prism); `fidelity()`.
+- `core/logo.py: regions(img, mask, n=None, mm_per_px, min_mm, palette, stats)`: paints not light.
+- `core/advice.py`: print-scale design suggestions. `pipeline.refine/advice/set_palette`.
+- Routes: `POST /api/jobs` (`format`), `/palette`, `/refine`, `GET /advice?candidate=`.
+- MCP tools: `set_palette`, `design_advice`, `refine_look`; snapshot has `likeness_pct`, `changes_for_printing`, `options`.
+- Report keys (flat, picture): `relief_source`, `fidelity{outline_iou, colour_match, score}`, `changes[]`.

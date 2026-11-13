@@ -43,7 +43,7 @@ def _deep_merge(base: dict, over: dict) -> dict:
     return out
 
 
-def create(photo: Path, name: str, subject: str, style_id: str) -> Job:
+def create(photo: Path, name: str, subject: str, style_id: str, fmt: str | None = None) -> Job:
     if photo.suffix.lower() == ".heic":
         try:
             import pillow_heif  # type: ignore
@@ -56,7 +56,9 @@ def create(photo: Path, name: str, subject: str, style_id: str) -> Job:
     dest = job.path(f"00_input{photo.suffix.lower()}")
     shutil.copyfile(photo, dest)
     job.manifest["input"] = dest.name
-    job.manifest["print_params"] = style.print_params()
+    if fmt and fmt not in style.formats:
+        raise ValueError(f"Unknown format '{fmt}'")
+    job.manifest["print_params"] = style.print_params(fmt or "stand")  # what it becomes guides every step
     job.save()
     log.info("%s: created from %s", job.id, photo.name)
     try:
@@ -388,7 +390,8 @@ def _snap_to_palette(job: Job, report: dict[str, Any]) -> None:
 
 
 def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], progress: Progress,
-            on_candidate: Callable[[], None] | None = None) -> None:
+            on_candidate: Callable[[], None] | None = None, *, source: Path | None = None,
+            look_override: Any = None, extra: dict[str, Any] | None = None) -> None:
     """Make more options. They're added to the ones already there, and each appears as soon as it's ready.
 
     Engines that make several pictures in one request (batch) get all seeds at once; cloud engines that
@@ -406,10 +409,12 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
     look = _logo_style(style) if is_logo(job) and not getattr(engine, "logo_only", False) else style
     if (pal := _palette_hexes(job)) and not is_logo(job):
         look = _palette_style(look, pal)
+    if look_override is not None:
+        look = look_override
     log.info("%s: restyling with %s (%s), seeds %s", job.id, engine_id, style.id, seeds)
     out_dir = job.path(CANDIDATES)
     out_dir.mkdir(parents=True, exist_ok=True)
-    cut = job.path(REDUCED) if _palette_hexes(job) and not is_logo(job) else job.path(CUTOUT)
+    cut = source or (job.path(REDUCED) if _palette_hexes(job) and not is_logo(job) else job.path(CUTOUT))
     mask_of_cut = job.path(CUTOUT).with_name(Path(CUTOUT).stem + "_mask.png")
     n = len(seeds)
     t0 = time.perf_counter()
@@ -441,7 +446,7 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
             except Exception as e:
                 log.warning("%s: sheet check on option %d failed: %s", job.id, num, e)
         job.manifest.setdefault("candidates", []).append({
-            **r, "n": num, "file": f"{CANDIDATES}/{name}", "engine": engine_id,
+            **r, **(extra or {}), "n": num, "file": f"{CANDIDATES}/{name}", "engine": engine_id,
             "style_id": style.id, "style_name": style.name,
             "created": time.strftime("%Y-%m-%dT%H:%M:%S"),
         })
@@ -502,6 +507,64 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
                        first_option=round(first[0], 1) if first else None)
             job.save()
     log.info("%s: %d new options (%d in total)", job.id, made[0], len(job.manifest["candidates"]))
+
+
+REFINERS = ("openai-image", "fal-nano-banana", "fal-kontext")  # engines that edit a picture from words
+
+
+def refine_engine(job: Job, ctx: EngineContext, index: int) -> str | None:
+    """The engine to refine an option with: the one that made it if it can edit by words, else the
+    first that's set up."""
+    cands = job.manifest.get("candidates") or []
+    made_by = cands[index].get("engine") if 0 <= index < len(cands) else None
+    for eid in ([made_by] if made_by in REFINERS else []) + list(REFINERS):
+        e = STYLIZERS.get(eid)
+        if e is not None and e.available(ctx)[0]:
+            return eid
+    return None
+
+
+def refine(job: Job, ctx: EngineContext, index: int, message: str, progress: Progress,
+           on_candidate: Callable[[], None] | None = None) -> None:
+    """Change one option by asking in words ("make the trunk thicker"). The result is a new option
+    next to it, linked to the one it came from, so the conversation can go on from either."""
+    cands = job.manifest.get("candidates") or []
+    if not 0 <= index < len(cands):
+        raise IndexError("No such option")
+    message = " ".join(message.split())[:600]
+    if not message:
+        raise ValueError("Say what to change.")
+    eid = refine_engine(job, ctx, index)
+    if not eid:
+        raise RuntimeError("Refining in words needs an OpenAI or fal.ai key (Settings → Keys). "
+                           "You can also make new options, or chat with Form Studio from ChatGPT.")
+    import dataclasses
+
+    style = get_style(job.manifest["style"]["id"])
+    pal = _palette_hexes(job)
+    keep = (" Keep only these colours: " + ", ".join(f"{c['name'].lower()} ({c['hex']})" for c in pal) + ".") if pal else ""
+    fmt = (job.manifest.get("print_params") or {}).get("format", "stand")
+    use = {"magnet": "a fridge magnet", "keychain": "a keychain", "ornament": "a hanging ornament"}.get(fmt, "a figurine")
+    edit = (f"Change only this: {message}. Keep everything else exactly as in the first image: the same {{subject}}, "
+            f"its shape, pose, colours and style.{keep} It will be 3D printed as {use}, so keep shapes bold and "
+            "chunky with no tiny details. One object, centred, on a plain white background.")
+    look = dataclasses.replace(style, references=[], edit_prompt=edit, prompt=f"{{subject}}, {message}, {style.prompt}")
+    seed = int(cands[index].get("seed") or 0) + 101
+    log.info("%s: refining option %s with %s: %s", job.id, cands[index].get("n"), eid, message)
+    stylize(job, ctx, eid, [seed], progress, on_candidate, source=job.path(cands[index]["file"]),
+            look_override=look, extra={"parent": cands[index].get("n", index + 1), "message": message})
+
+
+def advice(job: Job, index: int) -> list[dict[str, Any]]:
+    """Design suggestions for one option, at the size and type this object will be printed."""
+    from .core import advice as advice_mod
+
+    cands = job.manifest.get("candidates") or []
+    if not 0 <= index < len(cands):
+        raise IndexError("No such option")
+    params = job.manifest.get("print_params") or get_style(job.manifest["style"]["id"]).print_params()
+    pal = palette_state(job)
+    return advice_mod.advise(job.path(cands[index]["file"]), params, pal["max"] if pal["enabled"] else None)
 
 
 def _handle_sheet(job: Job, src: Path) -> dict[str, Any]:

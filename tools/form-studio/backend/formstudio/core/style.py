@@ -82,8 +82,15 @@ class StyleSpec:
 
     @property
     def formats(self) -> dict[str, dict[str, Any]]:
+        """What the object can become. Every style offers all four (a style's own settings win), so
+        styles made before a format existed still have it."""
         f = self.raw.get("formats") or {}
-        return f if "stand" in f else {"stand": {"label": "Stand"}, **f}
+        out = {"stand": f.get("stand") or {"label": "Stand"}}
+        for k, v in FORMAT_DEFAULTS.items():
+            out[k] = f.get(k) or copy.deepcopy(v)
+        for k, v in f.items():
+            out.setdefault(k, v)
+        return out
 
     def print_params(self, fmt: str = "stand") -> dict[str, Any]:
         """Default printify parameters for a format (the sliders in the Print step start here)."""
@@ -397,6 +404,20 @@ def _neutral_raw(edit: "StyleEdit") -> dict[str, Any]:
                          "ring": {"enabled": True, "outer_radius_mm": 4.5, "hole_mm": 4.5, "thickness_mm": 3.5}},
         },
     }
+
+
+FORMAT_DEFAULTS: dict[str, dict[str, Any]] = {
+    "magnet": {"label": "Magnet", "geometry": {"height_mm": 35}, "base": {"enabled": False},
+               "magnet": {"enabled": True, "diameter_mm": 10, "depth_mm": 2},
+               "flat_back": {"enabled": True, "thickness_mm": 9}},
+    "keychain": {"label": "Keychain", "geometry": {"height_mm": 40}, "base": {"enabled": False},
+                 "magnet": {"enabled": False}, "flat_back": {"enabled": True, "thickness_mm": 7},
+                 "ring": {"enabled": True, "outer_radius_mm": 4.5, "hole_mm": 4.5, "thickness_mm": 3.5}},
+    # a hanging decoration: thinner, a little bigger, a small loop for a ribbon or hook
+    "ornament": {"label": "Ornament", "geometry": {"height_mm": 60}, "base": {"enabled": False},
+                 "magnet": {"enabled": False}, "flat_back": {"enabled": True, "thickness_mm": 5},
+                 "ring": {"enabled": True, "outer_radius_mm": 3.5, "hole_mm": 3.0, "thickness_mm": 2.5}},
+}
 
 
 def create_style(edit: StyleEdit) -> StyleSpec:

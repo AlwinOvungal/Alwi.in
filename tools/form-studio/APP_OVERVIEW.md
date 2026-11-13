@@ -59,20 +59,40 @@ extruded together. Now:
 - Restyle prompts now also say "one object, one view, no sheets, no labels" (and the SDXL negative prompt
   forbids turnaround sheets), so new options are less likely to be sheets at all.
 
-### Magnets & keychains: bas-reliefs of your picture, in its own colours
+### The guided flow: what to make → clean-up & colours → refine in words → review → print
 
-Flat formats no longer slice the AI mesh (which blurred deep meshes into blobs and cut recessed parts — a
-tree's trunk — away). Instead `core/printify.py` builds a **bas-relief**: the mesh's whole front surface is
-pressed smoothly (tanh, no flat plateau) into the chosen thickness, on a plate whose outline is the **confirmed
-picture's own silhouette** — nothing the picture shows can go missing, and the outline matches it (IoU-checked;
-falls back to the mesh's outline when they disagree). Finishes, magnet pocket and key ring apply as before.
+1. **What do you want to make?** is asked first (Library → New object): Magnet, Keychain, Ornament (thin
+   hanging relief with a small loop) or Figurine (stands on a base). The choice sets size, thickness,
+   attachment and printability limits from the start (`POST /api/jobs` takes `format`; every style offers all
+   four via `FORMAT_DEFAULTS` in `core/style.py`, so older custom styles have them too).
+2. **Photo step → Colours**: every colour of the picture prints on its own filament. **Reduce colours** is
+   **off by default**; on, it keeps at most 2–8 of the picture's own paints (`pipeline.set_palette`,
+   `POST /api/jobs/{id}/palette`, MCP `set_palette`), shows the reduced picture beside the cut-out
+   (`02_reduced.png`), and every colour can be recoloured or restored. Restyles then start from the reduced
+   picture and are told to keep to those colours; the print's colour parts use exactly the approved colours.
+3. **Style step → Refine in words**: on any option, a chat thread ("make the trunk thicker") makes a new
+   option linked to the one it came from (`pipeline.refine`, `POST /api/jobs/{id}/refine`, OpenAI / Nano
+   Banana / Kontext). **Suggestions** come from measuring the option at print size (`core/advice.py`): parts
+   thinner than the minimum, more colours than one AMS holds, details under 1.2 mm; each explains why and
+   pre-fills a message. MCP: `design_advice`, `refine_look`.
+4. **Shape → From the picture** (magnet / keychain / ornament): no AI 3D model needed (`engines/offline.py:
+   PictureRelief`, `core/relief.py`). The picture becomes a relief: its exact outline (vertical walls, holes
+   kept), a rounded dome, a soft pillow per colour with a small groove where colours meet, and the picture's
+   line detail from a high-pass of its lightness (so tiers and creases show, shading doesn't). Seconds instead
+   of minutes. Picking an AI 3D engine instead takes the relief's depth from its mesh (outline and colours
+   still from the picture).
+5. **Print → Review before printing**: a likeness score (outline IoU and colour placement vs the approved
+   picture; target ≥ 95%), the list of every change made for printing (thin points trimmed, specks merged,
+   colour grooves, magnet pocket, loop) with a one-click way back where there is one, and colours labelled by
+   **AMS slot**. "Print in one colour" merges the parts.
 
-**Picture colours (AMS)** — the Print step's new control for magnets and keychains, **off by default**. On, the
-picture is reduced to at most 2–4 colours (`core/logo.py: regions`, chunky regions, every pixel assigned) and
-the body is split into one watertight part per colour (`split_by_regions`: shared straight walls, no overlaps,
-parts key together exactly). Each part gets its own colour card and filament (AMS slots 1..N in card order),
-colours editable per part, "From the picture" restores the artwork's own; the 3MF carries every part with its
-extruder and hex. Off keeps today's single body.
+Colour regions are **paints, not light** (`core/logo.py: regions`): the picture is smoothed, clustered with
+lightness down-weighted, and clusters that are the same paint in different light (same hue, similar chroma,
+a soft boundary between them) merge, so a shaded one-colour clay object stays one colour. Each region's
+colour is its lit paint (not its shadows). Regions narrower than 1.2 mm at print size join their neighbours.
+
+The 3D viewer's shadow camera now covers the whole object (three's default 10 × 10 box drew a square of
+self-shadow speckle on prints — the "diamond" patch).
 
 ## 2. Where things live
 

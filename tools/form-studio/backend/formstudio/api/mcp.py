@@ -17,7 +17,7 @@ from typing import Any
 log = logging.getLogger(__name__)
 
 MAX_IMAGE_MB = 24
-WHAT = ("stand", "magnet", "keychain")
+WHAT = ("stand", "magnet", "keychain", "ornament")
 
 try:
     from mcp.server.mcpserver import Image, MCPServer
@@ -57,6 +57,10 @@ def _snapshot(job_id: str) -> dict[str, Any]:
         "parts": [{"part": p["id"], "colour": p["name"], "hex": p["hex"], "filament": p["filament"]}
                   for p in j.get("parts") or []],
         "size_mm": (j.get("report") or {}).get("size_mm"),
+        "likeness_pct": ((j.get("report") or {}).get("fidelity") or {}).get("score"),
+        "changes_for_printing": [c["text"] for c in (j.get("report") or {}).get("changes") or []],
+        "options": [{"option": i + 1, **({"refined_from": c["parent"], "asked": c.get("message")} if c.get("parent") else {})}
+                    for i, c in enumerate(j.get("candidates") or [])],
         "exports": j.get("exports") or [],
     }
 
@@ -111,7 +115,7 @@ def build() -> "MCPServer":
     srv = MCPServer(
         "Form Studio",
         instructions=(
-            "Form Studio turns a picture into a 3D-printable stand toy, fridge magnet or keychain on this "
+            "Form Studio turns a picture into a 3D-printable figurine, fridge magnet, keychain or ornament on this "
             "person's Mac. make_object starts the whole journey and waits; the result says what was made, "
             "its parts and their filament colours. Flat artwork (logos, text) is built exactly as drawn. "
             "Files stay on the Mac; export_print_files tells the person where they are."
@@ -119,7 +123,8 @@ def build() -> "MCPServer":
         version="0.1.0",
     )
 
-    @srv.tool(description="Turn a picture into a printable object: a stand toy, fridge magnet or keychain. "
+    @srv.tool(description="Turn a picture into a printable object: a stand (figurine), fridge magnet, keychain or "
+                          "ornament. "
                           "Pass the picture one way: image_url (preferred), image_base64, or image_path (a file "
                           "already on this Mac). Starts the whole journey and waits up to wait_s seconds; if it's "
                           "still working, check again with object_status. Returns the object's parts and colours.")
@@ -188,6 +193,29 @@ def build() -> "MCPServer":
         with api._job_locks[object_id]:
             pal = pipeline.set_palette(Job.load(object_id), enabled, max_colours, colours, restore)
         return {**_snapshot(object_id), "palette": pal}
+
+    @srv.tool(description="Design advice for one restyled option (option = its number in object_status, from 1): "
+                          "what would print badly at the chosen size and type, each with a ready-made change to ask for.")
+    def design_advice(object_id: str, option: int) -> list[dict[str, Any]]:
+        from .. import pipeline
+        from ..core.job import Job
+
+        return pipeline.advice(Job.load(object_id), option - 1)
+
+    @srv.tool(description="Change one restyled option by asking in words, e.g. 'make the trunk thicker'. The result is "
+                          "a new option linked to it (needs an OpenAI or fal.ai key in Form Studio). Waits up to wait_s.")
+    def refine_look(object_id: str, option: int, message: str, wait_s: float = 180) -> dict[str, Any]:
+        api = _api()
+        from .. import pipeline
+        from ..core.job import Job
+
+        job = Job.load(object_id)
+        ctx = api.settings_mod.context()
+        if not pipeline.refine_engine(job, ctx, option - 1):
+            raise ValueError("Refining in words needs an OpenAI or fal.ai key in Form Studio's Settings.")
+        api._queue(job, "stylize", lambda p: pipeline.refine(job, ctx, option - 1, message, p,
+                                                             on_candidate=lambda: api._publish_state(job)))
+        return _wait(object_id, wait_s)
 
     @srv.tool(description="Write the print files (3mf for multi-colour printing, stl, step) and say where they "
                           "are on this Mac, ready for the slicer.")

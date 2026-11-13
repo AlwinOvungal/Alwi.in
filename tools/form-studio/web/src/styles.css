@@ -526,3 +526,20 @@ button.link { border: none; background: none; padding: 0; font: inherit; color: 
 .changes { margin: 0; padding: 0; list-style: none; display: grid; gap: 8px; }
 .changes li { display: flex; gap: 10px; align-items: center; justify-content: space-between; }
 @media (max-width: 560px) { .review-body { grid-template-columns: 1fr; } .changes li { flex-direction: column; align-items: start; } }
+
+/* New object: what it becomes, asked first */
+.type-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+.type-grid button { border: 1px solid var(--line); background: var(--card); border-radius: 10px; padding: 8px 10px; cursor: pointer; font-size: 13px; color: var(--ink-2); }
+.type-grid button.on { background: var(--ink); color: var(--paper); border-color: var(--ink); }
+
+/* Style step: refine in words */
+.refine .thread { display: flex; gap: 12px; overflow-x: auto; padding-bottom: 4px; }
+.refine .turn { display: flex; flex-direction: column; gap: 6px; min-width: 150px; max-width: 180px; }
+.refine .bubble { border: 1px solid var(--line); border-radius: 12px; padding: 8px 10px; background: var(--card); }
+.refine .bubble.you { background: var(--ink); color: var(--paper); font-size: 13px; align-self: flex-start; }
+.refine .bubble.look { display: flex; flex-direction: column; gap: 4px; }
+.refine .bubble.look img { width: 100%; aspect-ratio: 1; object-fit: contain; background: #fff; border-radius: 8px; }
+.refine .skeleton-line { min-width: 150px; display: grid; place-items: center; color: var(--ink-2); font-size: 13px; }
+.advice { display: flex; gap: 10px; align-items: center; justify-content: space-between; border-left: 3px solid var(--line); padding-left: 10px; }
+.advice.fix { border-left-color: #C77D2B; }
+@media (max-width: 560px) { .advice { flex-direction: column; align-items: start; } }

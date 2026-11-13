@@ -205,3 +205,19 @@ def test_picture_relief_keychain_and_pocket(tree_picture, tmp_path):
     off = pf.run(glb, tmp_path / "off", p, mask_path=mask, image_path=pic)
     cut = (off["body_volume_cm3"] - on["body_volume_cm3"]) * 1000
     assert cut == pytest.approx(math.pi * 4.15 ** 2 * 2, rel=0.15)
+
+
+def test_ornament_format_everywhere(tree_picture, tmp_path):
+    """Every style offers the ornament (styles made before it too): a thin relief with a hanging loop."""
+    from formstudio.core.style import get_style, list_styles
+
+    for st in list_styles():
+        assert list(st.formats)[:4] == ["stand", "magnet", "keychain", "ornament"]
+    p = get_style("soft-clay").print_params("ornament")
+    assert p["flat_back"]["enabled"] and p["ring"]["enabled"] and not p["magnet"]["enabled"]
+    assert p["regions"]["enabled"] and p["flat_back"]["depth_from"] == "picture"
+    glb, mask, pic = tree_picture
+    rep = pf.run(glb, tmp_path, p, mask_path=mask, image_path=pic)
+    assert rep["size_mm"][2] == pytest.approx(5.0, abs=0.2)
+    assert rep["size_mm"][1] > 60  # the picture's height plus the loop
+    assert {c["id"] for c in rep["changes"]} >= {"ring"}

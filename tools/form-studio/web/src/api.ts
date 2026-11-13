@@ -48,7 +48,13 @@ export interface Candidate {
   style_id?: string;
   style_name?: string;
   quality?: Quality;
+  /** refined in words from option `parent` (its n), asking `message` */
+  parent?: number;
+  message?: string;
 }
+
+export interface Advice { id: string; kind: "fix" | "idea"; text: string; message: string }
+export const REFINERS = ["openai-image", "fal-nano-banana", "fal-kontext"];
 
 export type Finish = "soft" | "voxel" | "faceted" | "blender";
 export const FINISHES: { id: Finish; label: string; hint: string }[] = [
@@ -83,7 +89,7 @@ export interface BlenderStatus {
   task?: Task | null;
 }
 
-export type PrintFormat = "stand" | "magnet" | "keychain";
+export type PrintFormat = "stand" | "magnet" | "keychain" | "ornament";
 
 export interface PrintParams {
   format: PrintFormat;
@@ -478,15 +484,19 @@ export const api = {
   rebuildRecipe: (id: string) => req<Job>("POST", `/api/jobs/${id}/rebuild-recipe`),
   jobs: () => req<Job[]>("GET", "/api/jobs"),
   job: (id: string) => req<Job>("GET", `/api/jobs/${id}`),
-  create: (photo: File, subject: string, style: string) => {
+  create: (photo: File, subject: string, style: string, format?: string) => {
     const f = new FormData();
     f.append("photo", photo);
     f.append("subject", subject);
     f.append("style", style);
+    if (format) f.append("format", format);
     return req<Job>("POST", "/api/jobs", f);
   },
   rename: (id: string, patch: { name?: string; subject?: string }) => req<Job>("PATCH", `/api/jobs/${id}`, patch),
   remove: (id: string) => req<{ ok: boolean }>("DELETE", `/api/jobs/${id}`),
+  refine: (id: string, candidate: number, message: string) =>
+    req<Job>("POST", `/api/jobs/${id}/refine`, { candidate, message }),
+  advice: (id: string, candidate: number) => req<Advice[]>("GET", `/api/jobs/${id}/advice?candidate=${candidate}`),
   stylize: (id: string, engine?: string, seed?: number, n?: number, quality?: Quality) =>
     req<Job>("POST", `/api/jobs/${id}/stylize`, { engine, seed, n, quality }),
   setColours: (id: string, colours: Record<string, { hex: string; name?: string }>) =>

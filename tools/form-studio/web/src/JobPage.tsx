@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
-import { api, BACKERS, Candidate, Colour, Engines, FILAMENTS, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, Settings, Style, useJob } from "./api";
+import { Advice, api, BACKERS, Candidate, Colour, Engines, FILAMENTS, fileUrl, Finish, FINISHES, formatSeconds, Job, PrintFormat, PrintParams, Quality, QUALITIES, reached, REFINERS, Settings, Style, useJob } from "./api";
 import { StylePicker } from "./Library";
 import { ClayFields, EnginePicker, ErrorCard, go, NeedsBlender, Progress, Slider, Switch, useBlender, useToast } from "./ui";
 
@@ -323,7 +323,7 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
               )}
             </div>
           </label>
-          <span className="small muted">Want a keychain, magnet or stand? Choose that in the Print step.</span>
+          <span className="small muted">Figurine, magnet, keychain or ornament: change it any time in the Print step.</span>
           <Switch label="Logo or text: keep the exact shapes" checked={job.kind === "logo"} onChange={setKind} disabled={busy} />
           <p className="small muted" style={{ margin: 0 }}>
             {job.kind === "logo"
@@ -359,6 +359,83 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
         </div>
       </div>
     </>
+  );
+}
+
+/** Style step: change one option by asking in words, with design advice for printing it. */
+function RefinePanel({ job, index, busy, canRefine, run, onClose, onNew }: {
+  job: Job; index: number; busy: boolean; canRefine: boolean; run: (p: Promise<Job>) => void;
+  onClose: () => void; onNew: (i: number) => void;
+}) {
+  const cands = job.candidates;
+  const c = cands[index];
+  const [msg, setMsg] = useState("");
+  const [advice, setAdvice] = useState<Advice[] | null>(null);
+  const toast = useToast();
+  const count = useRef(cands.length);
+  useEffect(() => {
+    setAdvice(null);
+    api.advice(job.id, index).then(setAdvice).catch(() => setAdvice([]));
+  }, [job.id, index, c?.file]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {  // the answer arrived: carry the conversation on from it
+    if (cands.length > count.current && cands[cands.length - 1].parent === c?.n) onNew(cands.length - 1);
+    count.current = cands.length;
+  }, [cands.length]); // eslint-disable-line react-hooks/exhaustive-deps
+  // the conversation so far: this option and the ones it was refined from
+  const thread: Candidate[] = [];
+  for (let x: Candidate | undefined = c; x; x = x.parent ? cands.find((y) => y.n === x!.parent) : undefined) {
+    thread.unshift(x);
+    if (thread.length > 12) break;
+  }
+  const working = busy && job.task?.kind === "stylize";
+  const send = (text: string) => {
+    if (!text.trim()) return;
+    api.refine(job.id, index, text.trim()).then((j) => (run(Promise.resolve(j)), setMsg(""))).catch((e) => toast((e as Error).message, true));
+  };
+  return (
+    <div className="card panel stack refine">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <h3>Refine option {c.n ?? index + 1}</h3>
+        <button className="btn sm ghost" onClick={onClose}>Close</button>
+      </div>
+      <div className="thread">
+        {thread.map((t) => (
+          <div key={t.file} className="turn">
+            {t.message && <div className="bubble you">{t.message}</div>}
+            <div className="bubble look">
+              <img src={fileUrl(job, t.file)} alt={`Option ${t.n}`} />
+              <span className="small muted">Option {t.n}</span>
+            </div>
+          </div>
+        ))}
+        {working && <div className="bubble look skeleton-line">Redrawing…</div>}
+      </div>
+      {advice === null ? (
+        <span className="small muted">Checking how it will print…</span>
+      ) : advice.length > 0 && (
+        <div className="stack" style={{ gap: 6 }}>
+          <span className="small muted">
+            Suggestions for printing it as {{ stand: "a figurine", magnet: "a magnet", keychain: "a keychain", ornament: "an ornament" }[job.print_params?.format ?? "stand"]}:
+          </span>
+          {advice.map((a) => (
+            <div key={a.id} className={`advice ${a.kind}`}>
+              <span className="small">{a.text}</span>
+              <button className="btn sm" disabled={busy || !canRefine} onClick={() => setMsg(a.message)}>Ask for this</button>
+            </div>
+          ))}
+        </div>
+      )}
+      {canRefine ? (
+        <div className="row" style={{ flexWrap: "nowrap" }}>
+          <input className="input grow" value={msg} placeholder="What should change? e.g. make the trunk thicker"
+            onChange={(e) => setMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send(msg)} disabled={busy} />
+          <button className="btn olive" disabled={busy || !msg.trim()} onClick={() => send(msg)}>Refine</button>
+        </div>
+      ) : (
+        <span className="small muted">Refining in words needs an OpenAI or fal.ai key (Settings → Keys). You can also chat with Form Studio from ChatGPT (Settings → Chat assistants).</span>
+      )}
+      <span className="small muted">Each answer is a new option next to this one; use whichever you like best.</span>
+    </div>
   );
 }
 
@@ -424,11 +501,13 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
   const [count, setCount] = useState(settings?.candidates ?? 4);
   const [asked, setAsked] = useState<{ before: number; n: number } | null>(null);
   const [zoom, setZoom] = useState<number | null>(null);
+  const [refining, setRefining] = useState<number | null>(null);
   const [quality, setQuality] = useState<Quality>(settings?.sdxl_quality ?? "best");
   useEffect(() => {
     if (settings) setQuality(settings.sdxl_quality);
   }, [settings]);
   const stylizers = useMemo(() => fitKind(engines?.stylize, job), [engines, job.kind]); // eslint-disable-line react-hooks/exhaustive-deps
+  const canRefine = job.kind !== "logo" && !!engines?.stylize.some((e) => REFINERS.includes(e.id) && e.available);
   useEffect(() => setEngine((e) => e || pickAvailable(stylizers, job.candidates[job.candidates.length - 1]?.engine ?? (job.kind === "logo" ? "logo" : settings?.engines.stylize))), [engines, settings, stylizers]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     if (!working) setAsked(null);
@@ -524,6 +603,11 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
         </div>
       )}
 
+      {refining !== null && cands[refining] && (
+        <RefinePanel job={job} index={refining} busy={busy} canRefine={canRefine} run={run}
+          onClose={() => setRefining(null)} onNew={(i) => setRefining(i)} />
+      )}
+
       <div className="cands">
         {cands.map((c, i) => (
           <div key={c.file} className={`card cand ${chosen(c) ? "sel" : ""}`}>
@@ -548,6 +632,12 @@ function StyleStep({ job, busy, styles, engines, settings, run }: StepProps & { 
               <button className="btn sm views-btn" disabled={busy && !working} onClick={() => views(i)} title="Use this option and draw its front, side and back">
                 3 views · front, side, back
               </button>
+              {job.kind !== "logo" && (
+                <button className={`btn sm ${refining === i ? "olive" : "ghost"}`} disabled={busy} onClick={() => setRefining(refining === i ? null : i)}
+                  title="Change this option by asking in words, with suggestions for printing">
+                  {c.parent ? `Refined from ${c.parent} · refine more` : "Refine in words"}
+                </button>
+              )}
             </div>
           </div>
         ))}
@@ -899,6 +989,7 @@ const FORMAT_HINT: Record<PrintFormat, string> = {
   stand: "Stands upright on a round base in the second colour.",
   magnet: "Flat back with a magnet pocket. Prints lying down, no supports.",
   keychain: "Flat back with a key-ring loop on top. Prints lying down, no supports.",
+  ornament: "A thinner hanging relief with a small loop for a ribbon or hook. Prints lying down, no supports.",
 };
 
 type Overrides = { [K in keyof PrintParams]?: PrintParams[K] extends object ? Partial<PrintParams[K]> : PrintParams[K] };

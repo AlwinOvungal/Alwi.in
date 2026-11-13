@@ -32,8 +32,8 @@ export default function Library() {
           <span className="label">Photo → house style → print</span>
           <h1>Your objects</h1>
           <p className="lede">
-            Drop in a photo of anything. Form Studio restyles it in your house style, builds a 3D shape and
-            prepares a two-colour print file.
+            Drop in a photo of anything. Form Studio restyles it in your house style, turns it into a magnet,
+            keychain, ornament or figurine, and prepares a multi-colour print file for your AMS.
           </p>
         </div>
         <a className="card panel ref" href="#/styles" style={{ maxWidth: 360, textDecoration: "none" }}>
@@ -83,9 +83,10 @@ export function StylePicker({ styles, value, onChange }: { styles: Style[]; valu
 }
 
 const MAKE_AS = [
-  { id: "stand", label: "Stand toy" },
-  { id: "magnet", label: "Magnet" },
-  { id: "keychain", label: "Keychain" },
+  { id: "magnet", label: "Magnet", hint: "Fridge magnet: flat, with a pocket for a magnet in the back." },
+  { id: "keychain", label: "Keychain", hint: "Flat, with a key-ring loop on top." },
+  { id: "ornament", label: "Ornament", hint: "A thin hanging relief with a small loop for a ribbon." },
+  { id: "stand", label: "Figurine", hint: "Stands on a round base; its 3D shape is made by an AI 3D model." },
 ];
 
 function NewObject({ styles, claude }: { styles: Style[]; claude: boolean }) {
@@ -115,7 +116,7 @@ function NewObject({ styles, claude }: { styles: Style[]; claude: boolean }) {
     if (!file) return;
     setBusy(auto ? "auto" : "steps");
     try {
-      const job = await api.create(file, subject.trim() || (claude ? "" : "object"), styleId || styles[0]?.id || "clay-minimal");
+      const job = await api.create(file, subject.trim() || (claude ? "" : "object"), styleId || styles[0]?.id || "clay-minimal", fmt);
       if (auto) await api.autoMake(job.id, fmt).catch(() => {}); // the job page shows any problem
       go(`/job/${job.id}`);
     } catch (e) {
@@ -128,6 +129,17 @@ function NewObject({ styles, claude }: { styles: Style[]; claude: boolean }) {
     return (
       <div className="card panel stack" style={{ alignContent: "start" }}>
         <img src={preview} alt="" style={{ aspectRatio: "1", objectFit: "contain", background: "#fff", borderRadius: 10, border: "1px solid var(--line)" }} />
+        <div className="field">
+          <span>What do you want to make?</span>
+          <div className="type-grid" role="radiogroup" aria-label="What it becomes">
+            {MAKE_AS.map((m) => (
+              <button key={m.id} type="button" role="radio" aria-checked={fmt === m.id} className={fmt === m.id ? "on" : ""} onClick={() => setFmt(m.id)}>
+                {m.label}
+              </button>
+            ))}
+          </div>
+          <span className="small muted">{MAKE_AS.find((m) => m.id === fmt)?.hint}</span>
+        </div>
         <label className="field">
           <span>What is the object?</span>
           <input
@@ -139,16 +151,6 @@ function NewObject({ styles, claude }: { styles: Style[]; claude: boolean }) {
             onKeyDown={(e) => e.key === "Enter" && create(true)}
           />
         </label>
-        <div className="field">
-          <span>Make it into</span>
-          <div className="seg wide" role="radiogroup" aria-label="What it becomes">
-            {MAKE_AS.map((m) => (
-              <button key={m.id} type="button" role="radio" aria-checked={fmt === m.id} className={fmt === m.id ? "on" : ""} onClick={() => setFmt(m.id)}>
-                {m.label}
-              </button>
-            ))}
-          </div>
-        </div>
         {styles.length > 1 && (
           <div className="field">
             <span>Style</span>

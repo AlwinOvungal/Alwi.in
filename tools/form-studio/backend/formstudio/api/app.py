@@ -737,6 +737,7 @@ def create_job(
     subject: str = Form(""),
     name: str = Form(""),
     style: str = Form(""),
+    format: str = Form(""),  # what it becomes: stand · magnet · keychain · ornament (asked first)
 ) -> dict[str, Any]:
     suffix = Path(photo.filename or "photo.jpg").suffix.lower() or ".jpg"
     if suffix not in pipeline.PHOTO_TYPES:
@@ -747,7 +748,8 @@ def create_job(
         blank = not subject.strip()
         subject = subject.strip() or Path(photo.filename or "object").stem.replace("_", " ").replace("-", " ")
         try:
-            job = pipeline.create(tmp, name.strip() or subject, subject, style or style_mod.default_style_id())
+            job = pipeline.create(tmp, name.strip() or subject, subject, style or style_mod.default_style_id(),
+                                  fmt=format or None)
         except (KeyError, ValueError, OSError) as e:
             raise _bad(e)
     if blank:  # let Claude name it, when there's a key
@@ -813,6 +815,38 @@ def stylize(job_id: str, body: StylizeBody) -> dict[str, Any]:
     return _queue(job, "stylize", lambda p: pipeline.stylize(job, ctx, engine, seeds, p,
                                                              on_candidate=lambda: _publish_state(job)),
                   meta={"engine": engine, "n": n, "quality": q, "device": ctx.device}, eta_s=_eta("stylize", engine, n, q))
+
+
+class RefineBody(BaseModel):
+    candidate: int  # the option's index in the list
+    message: str  # what to change, in words
+
+
+@app.post("/api/jobs/{job_id}/refine")
+def refine_option(job_id: str, body: RefineBody) -> dict[str, Any]:
+    """Style step, "Refine this look": change one option by asking in words; the result is a new option."""
+    job = _job(job_id)
+    ctx = settings_mod.context()
+    if not body.message.strip():
+        raise HTTPException(400, "Say what to change.")
+    if not 0 <= body.candidate < len(job.manifest.get("candidates") or []):
+        raise HTTPException(404, "No such option")
+    eid = pipeline.refine_engine(job, ctx, body.candidate)
+    if not eid:
+        raise HTTPException(400, "Refining in words needs an OpenAI or fal.ai key (Settings → Keys).")
+    return _queue(job, "stylize", lambda p: pipeline.refine(job, ctx, body.candidate, body.message, p,
+                                                           on_candidate=lambda: _publish_state(job)),
+                  meta={"engine": eid, "n": 1, "refine": True}, eta_s=_eta("stylize", eid, 1, None))
+
+
+@app.get("/api/jobs/{job_id}/advice")
+def option_advice(job_id: str, candidate: int) -> list[dict[str, Any]]:
+    """What would print badly in this option at the chosen size and type, with a message to fix it."""
+    job = _job(job_id)
+    try:
+        return pipeline.advice(job, candidate)
+    except IndexError:
+        raise HTTPException(404, "No such option")
 
 
 @app.post("/api/jobs/{job_id}/cancel")

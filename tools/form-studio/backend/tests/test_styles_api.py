@@ -229,5 +229,5 @@ def test_a_new_style_starts_from_your_inputs_only():
     assert "glossy translucent candy" in words and "cherry" in words and "facets" in words
     assert "olive" not in words and "clay" not in words  # nothing from Clay Minimal
     assert s["geometry"]["finish"] == "faceted" and s["geometry"]["height_mm"] == 40 and s["references"] == 0
-    assert {f["id"] for f in s["formats"]} == {"stand", "magnet", "keychain"}
+    assert {f["id"] for f in s["formats"]} == {"stand", "magnet", "keychain", "ornament"}
     c.delete(f"/api/styles/{s['id']}")
