@@ -18,7 +18,7 @@ import httpx
 from PIL import Image
 
 from ..core.ingest import remove_background
-from .base import ONE_OBJECT, EngineContext, EngineError, Progress, ReconstructInput, StylizeInput
+from .base import OWN_COLOURS, ONE_OBJECT, EngineContext, EngineError, Progress, ReconstructInput, StylizeInput
 
 FAL_KEYS = ("Open fal.ai keys", "https://fal.ai/dashboard/keys")
 FAL_BILLING = ("Open fal.ai billing", "https://fal.ai/dashboard/billing")
@@ -174,10 +174,10 @@ class FalNanoBanana(_FalEngine):
         images = [_data_uri(inp.cutout)] + [_data_uri(p) for p in refs]
         lead = (
             "The first image is the object. "
-            + (f"The other {len(refs)} image(s) show the target style; match their look, materials and colours, "
-               "but do not copy their objects. " if refs else "")
+            + (f"The other {len(refs)} image(s) show the target style; match their shape language, materials, "
+               "surface and level of detail, but not their colours and not their objects. " if refs else "")
         )
-        prompt = lead + ONE_OBJECT + inp.style.edit_prompt_for(inp.subject)
+        prompt = lead + ONE_OBJECT + OWN_COLOURS + inp.style.edit_prompt_for(inp.subject)
         n = len(inp.seeds)
         out = []
         for i, seed in enumerate(inp.seeds):
@@ -209,7 +209,7 @@ class FalKontext(_FalEngine):
         out = []
         for i, seed in enumerate(inp.seeds):
             res = client.run(endpoint, {
-                "prompt": ONE_OBJECT + inp.style.edit_prompt_for(inp.subject),
+                "prompt": ONE_OBJECT + OWN_COLOURS + inp.style.edit_prompt_for(inp.subject),
                 "image_url": _data_uri(inp.cutout),
                 "seed": int(seed),
                 "num_images": 1,

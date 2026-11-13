@@ -375,10 +375,6 @@ class LocalSDXL:
                 # every run: one style's strength and routing must not carry over to the next
                 pipe.set_ip_adapter_scale(ip_adapter_scale_config(ip_scale, str(cfg.get("reference_mode", "style"))))
             prompt = inp.style.prompt_for(inp.subject)
-            if quick:  # no guidance in Quick: spell out the main colour so the words still hold
-                body = (inp.style.palette.get("body") or {}).get("name")
-                if body and body.lower() not in prompt.lower():
-                    prompt += f", {body.lower()} colour"
             with timing.stage("restyle_image", engine=self.id, device=ctx.device, quality=q, size=size,
                               steps=steps, warm=warm):
                 if fast:

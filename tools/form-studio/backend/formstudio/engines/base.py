@@ -78,6 +78,9 @@ VIEW_NAMES = ("front", "left", "back")
 # AI image models love to answer with a product sheet; the 3D step needs one object in one view
 ONE_OBJECT = ("Exactly one object, shown once in a single view - never a turnaround or product sheet, "
               "no labels, arrows, measurements or callout circles. ")
+# styles never set colours: the object keeps its own (they're mapped to filaments in the Print step)
+OWN_COLOURS = ("Keep the object's own colours from the first image, in the same places: the style changes "
+               "shape, surface, texture and level of detail, never the colours. ")
 SHEET_NEGATIVE = "multiple views, turnaround sheet, product sheet, annotations, measurements, dimension lines, text"
 VIEW_LABELS = {"front": "Front", "left": "Side", "back": "Back"}
 

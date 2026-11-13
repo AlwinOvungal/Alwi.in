@@ -116,9 +116,6 @@ export default function JobPage({ id }: { id: string }) {
         <div className="row">
           {style && (
             <span className="chip" title={`Style hash ${job.style.hash}`}>
-              <span className="swatches">
-                {Object.values(style.palette).map((c) => <span key={c.hex} className="swatch" style={{ background: c.hex, width: 10, height: 10 }} />)}
-              </span>
               {style.name} v{style.version}
             </span>
           )}
@@ -323,7 +320,21 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
               )}
             </div>
           </label>
-          <span className="small muted">Figurine, magnet, keychain or ornament: change it any time in the Print step.</span>
+          {job.kind !== "logo" && (
+            <div className="field">
+              <span>What you're making</span>
+              <div className="seg wide" role="radiogroup" aria-label="What it becomes">
+                {([["magnet", "Magnet"], ["keychain", "Keychain"], ["ornament", "Ornament"], ["stand", "Figurine"]] as const).map(([id, label]) => (
+                  <button key={id} type="button" role="radio" aria-checked={(job.print_params?.format ?? "stand") === id}
+                    className={(job.print_params?.format ?? "stand") === id ? "on" : ""} disabled={busy}
+                    onClick={() => (job.print_params?.format ?? "stand") !== id && run(api.setFormat(job.id, id))}>
+                    {label}
+                  </button>
+                ))}
+              </div>
+              {job.format_brief && <span className="small muted">Every restyle is drawn for it: {job.format_brief}</span>}
+            </div>
+          )}
           <Switch label="Logo or text: keep the exact shapes" checked={job.kind === "logo"} onChange={setKind} disabled={busy} />
           <p className="small muted" style={{ margin: 0 }}>
             {job.kind === "logo"
@@ -979,7 +990,7 @@ function ColoursCard({ job, busy, run }: { job: Job; busy: boolean; run: (p: Pro
         <button className="btn sm" disabled={busy} onClick={fromPicture}>From the picture</button>
         {job.colours_custom && (
           <button className="btn sm ghost" disabled={busy} onClick={() => run(api.resetColours(job.id))}>
-            {job.logo_parts ? "Artwork colours" : "Style colours"}
+            {job.logo_parts ? "Artwork colours" : "Default colours"}
           </button>
         )}
       </div>
@@ -1029,7 +1040,7 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
   const rep = job.report;
   const parts = job.parts ?? [];
   const multi = parts.length > 1;
-  const rawColor = parts[0]?.hex ?? job.colours?.body?.hex ?? style?.palette.body.hex ?? "#5E6B2E";
+  const rawColor = parts[0]?.hex ?? job.colours?.body?.hex ?? "#8A8A85";
   const exported = job.stage === "exported";
   const slicer = settings?.slicer ?? "bambu";
   const slicerName = { bambu: "Bambu Studio", orca: "OrcaSlicer", prusa: "PrusaSlicer" }[slicer];

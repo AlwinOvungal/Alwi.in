@@ -1,13 +1,13 @@
-# Soft Clay: puffy pastel clay toys.
+# Soft Clay: puffy clay toys.
 id: soft-clay
 name: Soft Clay
 version: 1
-description: Puffy pastel clay toys with rounded, slightly squashed, cute proportions.
+description: Puffy clay toys with rounded, slightly squashed, cute proportions.
 references: []
 
 prompt: >-
   a {subject} as a cute puffy soft clay toy, inflated rounded forms, slightly squashed
-  chubby proportions, pastel peach colour, smooth matte surface with soft subsurface glow,
+  chubby proportions, smooth matte surface with soft subsurface glow,
   no text, no fine detail, kawaii designer toy, studio product photo, centered,
   whole object in frame, plain white background, soft diffuse light
 negative_prompt: >-
@@ -17,7 +17,7 @@ edit_prompt: >-
   Completely redraw this {subject} as a cute puffy soft clay toy. Keep only its overall
   silhouette and recognisable parts; inflate every form so it looks soft and rounded,
   make the proportions slightly squashed and chubby, remove all fine detail and text,
-  and give it a smooth matte pastel peach clay surface. Show the whole object centred
+  and give it a smooth matte clay surface. Show the whole object centred
   on a plain white background with soft diffuse light.
 
 sculpt_guide: >-
@@ -34,9 +34,6 @@ stylize:
   ip_adapter_scale: 0.6   # how strongly reference.png steers the look
   controlnet_scale: 0.55  # how strongly the photo's shape is kept
 
-palette:
-  body: {name: Peach, hex: "#F2A98B"}
-  base: {name: Cream, hex: "#FBF3E6"}
 
 geometry:
   finish: soft

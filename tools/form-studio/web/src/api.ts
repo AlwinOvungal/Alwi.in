@@ -191,6 +191,8 @@ export interface Job {
   colours_custom?: boolean;
   /** "logo": built exactly from the artwork; "object": AI restyle and 3D */
   kind?: "logo" | "object";
+  /** what every restyle is told about the chosen object type */
+  format_brief?: string;
   /** Photo step, "Reduce colours": off by default */
   palette?: Palette;
   /** the shape is one part per logo colour plus a plaque */
@@ -227,7 +229,6 @@ export interface Style {
   version: number;
   description: string;
   hash: string;
-  palette: Record<"body" | "base", { name: string; hex: string }>;
   seeds: number[];
   formats: { id: PrintFormat; label: string }[];
   has_reference: boolean;
@@ -274,7 +275,6 @@ export interface StyleEdit {
   edit_prompt?: string;
   negative_prompt?: string;
   sculpt_guide?: string;
-  palette?: { body: Colour; base: Colour };
   geometry?: StyleGeometry;
   based_on?: string;
   reference_mode?: "style" | "full";
@@ -287,12 +287,20 @@ export interface StyleDraft {
   edit_prompt: string;
   negative_prompt: string;
   sculpt_guide: string;
-  body: Colour;
-  base: Colour;
   soften_mm: number;
   min_feature_mm: number;
   finish: Finish;
 }
+
+/** New style by conversation with ChatGPT */
+export interface StyleChatMessage { role: "user" | "assistant"; text: string; questions?: string[]; image?: string }
+export interface StyleProposal {
+  name: string; description: string; shape_language: string; surface: string; texture: string; detail: string;
+  finish: Finish; soften_mm: number; min_feature_mm: number; prompt: string; edit_prompt: string;
+  negative_prompt: string; sculpt_guide: string; image_prompt: string;
+}
+export interface StyleChat { id: string; messages: StyleChatMessage[]; proposal: StyleProposal | null; images: string[]; chosen: number | null; saved_style?: string }
+export const styleChatImageUrl = (id: string, name: string) => `/api/style-chats/${id}/images/${name}`;
 
 export const styleRefUrl = (s: Pick<Style, "id" | "version">, n: number) => `/api/styles/${s.id}/references/${n}?v=${s.version}`;
 
@@ -458,6 +466,11 @@ export const api = {
   testKey: (service: "fal" | "anthropic" | "openai" | "meshy") => req<{ ok: boolean; message: string }>("POST", `/api/settings/test-key?service=${service}`),
   style: (id: string) => req<StyleDetail>("GET", `/api/styles/${id}`),
   createStyle: (s: StyleEdit) => req<StyleDetail>("POST", "/api/styles", s),
+  styleChatStart: (message: string) => req<StyleChat>("POST", "/api/style-chats", { message }),
+  styleChatSay: (id: string, message: string) => req<StyleChat>("POST", `/api/style-chats/${id}/messages`, { message }),
+  styleChatImage: (id: string) => req<StyleChat>("POST", `/api/style-chats/${id}/image`),
+  styleChatChoose: (id: string, i: number) => req<StyleChat>("POST", `/api/style-chats/${id}/choose/${i}`),
+  styleChatSave: (id: string, name?: string) => req<StyleDetail>("POST", `/api/style-chats/${id}/save`, { name }),
   updateStyle: (id: string, s: StyleEdit) => req<StyleDetail>("PUT", `/api/styles/${id}`, s),
   deleteStyle: (id: string) => req<{ ok: boolean }>("DELETE", `/api/styles/${id}`),
   removedStyles: () => req<{ builtins: number; deleted: number }>("GET", "/api/styles/removed"),
@@ -470,11 +483,6 @@ export const api = {
     return req<StyleDetail>("POST", `/api/styles/${id}/references`, f);
   },
   makeReferenceFirst: (id: string, n: number) => req<StyleDetail>("POST", `/api/styles/${id}/references/${n}/first`),
-  suggestColours: (opts: { files?: File[]; style?: string }) => {
-    const f = new FormData();
-    (opts.files ?? []).forEach((file) => f.append("image", file));
-    return req<{ body: Colour; base: Colour }>("POST", `/api/styles/suggest-colours${opts.style ? `?style=${opts.style}` : ""}`, f);
-  },
   removeCandidate: (id: string, index: number) => req<Job>("DELETE", `/api/jobs/${id}/candidates/${index}`),
   clearCandidates: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/candidates`),
   removeReference: (id: string, n: number) => req<StyleDetail>("DELETE", `/api/styles/${id}/references/${n}`),
@@ -503,6 +511,7 @@ export const api = {
     req<Job>("POST", `/api/jobs/${id}/colours`, colours),
   resetColours: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/colours`),
   suggestJobColours: (id: string) => req<Record<string, Colour>>("POST", `/api/jobs/${id}/colours/suggest`),
+  setFormat: (id: string, format: PrintFormat) => req<Job>("POST", `/api/jobs/${id}/format`, { format }),
   setKind: (id: string, kind: "logo" | "object") => req<Job>("POST", `/api/jobs/${id}/kind`, { kind }),
   setPalette: (id: string, body: { enabled: boolean; max_colours?: number; colours?: (string | null)[]; restore?: boolean }) =>
     req<Job>("POST", `/api/jobs/${id}/palette`, body),

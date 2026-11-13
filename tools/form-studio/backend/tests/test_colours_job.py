@@ -25,7 +25,7 @@ def test_choose_colours_export_and_reset(mug_photo):
         c.post(f"/api/jobs/{jid}/confirm", json={"candidate": None})
         c.post(f"/api/jobs/{jid}/reconstruct", json={"engine": "lathe"})
         j = _wait(c, jid)
-        assert j["colours"]["body"]["name"] == "Olive" and not j["colours_custom"]  # the style's to begin with
+        assert j["colours"]["body"]["name"] == "Grey" and not j["colours_custom"]  # neutral until you choose
         c.post(f"/api/jobs/{jid}/export", json={"formats": ["3mf"]})
         j = c.get(f"/api/jobs/{jid}").json()
         assert j["stage"] == "exported"
@@ -52,6 +52,6 @@ def test_choose_colours_export_and_reset(mug_photo):
         assert sug["body"]["hex"].startswith("#") and sug["base"]["hex"].startswith("#")
 
         j = c.delete(f"/api/jobs/{jid}/colours").json()
-        assert j["colours"]["body"]["name"] == "Olive" and not j["colours_custom"]
+        assert j["colours"]["body"]["name"] == "Grey" and not j["colours_custom"]
         assert c.post(f"/api/jobs/{jid}/colours", json={"body": {"hex": "orange"}}).status_code == 422
         c.delete(f"/api/jobs/{jid}")

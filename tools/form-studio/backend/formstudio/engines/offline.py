@@ -1,7 +1,7 @@
 """Offline engines: no AI, no downloads, instant. Good for testing the flow,
 and genuinely useful for simple shapes:
 
-- Palette preview: recolours the cutout in the style palette (a quick look, not a restyle)
+- Quick preview: your photo simplified in its own colours (a quick look, not a restyle)
 - Lathe: spins the silhouette around its centre line (cups, vases, bottles, lamps)
 - Extrude: pushes the silhouette into a thick rounded slab (logos, flat objects, 2D art)
 - Picture relief: magnets, keychains, ornaments made from the picture itself (exact outline, its colours)
@@ -27,27 +27,26 @@ def _hex(h: str) -> tuple[int, int, int]:
 
 class PalettePreview:
     id = "preview"
-    label = "Palette preview (offline)"
+    label = "Quick preview (offline)"
     kind = "offline"
-    note = "Instant. Recolours your photo in the style palette, no AI restyle."
+    note = "Instant. A simplified, softened look at your photo in its own colours, no AI restyle."
 
     def available(self, ctx: EngineContext) -> tuple[bool, str]:
         return True, ""
 
     def stylize(self, inp: StylizeInput, ctx: EngineContext, progress: Progress) -> list[dict]:
-        img = Image.open(inp.cutout).convert("L")
+        img = Image.open(inp.cutout).convert("RGB")
         mask = Image.open(inp.mask).convert("L")
         out = []
-        body = _hex(inp.style.palette["body"]["hex"])
         for i, seed in enumerate(inp.seeds):
             progress(i / len(inp.seeds), f"Candidate {i + 1} of {len(inp.seeds)}")
             rng = np.random.default_rng(seed)
-            blur = 2 + int(rng.integers(0, 6))
-            shade = ImageOps.autocontrast(img.filter(ImageFilter.GaussianBlur(blur)))
-            shade = ImageEnhance.Contrast(shade).enhance(0.45 + rng.random() * 0.2)
-            tinted = ImageOps.colorize(shade, black=tuple(int(c * 0.45) for c in body), white=tuple(min(255, int(c * 1.6)) for c in body))
+            # the object's own colours, simplified: fewer tones, softened detail (styles never set colours)
+            soft = img.filter(ImageFilter.MedianFilter(3 + 2 * int(rng.integers(0, 3))))
+            soft = ImageOps.posterize(soft, 3 + int(rng.integers(0, 2)))
+            soft = ImageEnhance.Contrast(soft).enhance(0.9 + rng.random() * 0.15)
             canvas = Image.new("RGB", img.size, (255, 255, 255))
-            canvas.paste(tinted, (0, 0), mask.filter(ImageFilter.GaussianBlur(1.5)))
+            canvas.paste(soft, (0, 0), mask.filter(ImageFilter.GaussianBlur(1.5)))
             name = f"candidate_{i + 1}.png"
             canvas.save(inp.out_dir / name)
             out.append({"file": name, "seed": seed})
@@ -184,7 +183,7 @@ class LogoPreview:
         progress(0.2, "Reading the logo's colours and shapes")
         data = logo_mod.layers_cached(_logo_source(inp))
         progress(0.6, "Drawing it in clay")
-        plaque = (inp.style.palette.get("base") or {}).get("hex", "#F2F0EA")
+        plaque = "#F2F0EA"  # the preview's plaque; its print colour is chosen in the Print step
         img = logo_mod.preview(data, logo_mod.palette(data), plaque)
         name = "candidate_1.png"
         img.save(inp.out_dir / name)

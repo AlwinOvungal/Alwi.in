@@ -536,3 +536,12 @@ Unavailable engines show `reason` in the UI, and Settings maps them to a "Connec
 - Routes: `POST /api/jobs` (`format`), `/palette`, `/refine`, `GET /advice?candidate=`.
 - MCP tools: `set_palette`, `design_advice`, `refine_look`; snapshot has `likeness_pct`, `changes_for_printing`, `options`.
 - Report keys (flat, picture): `relief_source`, `fidelity{outline_iou, colour_match, score}`, `changes[]`.
+
+## Colour-free styles, ChatGPT style chat, object type
+- Styles have no `palette` (`StyleSpec` field removed; `_decolour` cleans old YAML). Print defaults: `pipeline.PART_DEFAULTS`.
+- `engines/base.py: OWN_COLOURS` in every restyle; reference pictures give look, not colours.
+- `core/style_chat.py` + routes `/api/style-chats` (start), `/{id}` (get), `/{id}/messages`, `/{id}/image`,
+  `/{id}/choose/{n}`, `/{id}/images/{name}`, `/{id}/save`. Chats live in `~/FormStudio/style_chats/<id>/`.
+- `FORMAT_BRIEFS` / `format_brief()` (core/style.py); `pipeline._format_style`, `set_format`, `job_format`;
+  `POST /api/jobs/{id}/format`; view key `format_brief`.
+- Report keys (picture reliefs): `pocket {x, y, wall_mm}`, `own_loop {x, y, diameter_mm}`.

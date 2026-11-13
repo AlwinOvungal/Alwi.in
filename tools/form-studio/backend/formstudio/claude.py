@@ -137,8 +137,6 @@ class StyleDraft(BaseModel):
     edit_prompt: str
     negative_prompt: str
     sculpt_guide: str
-    body: Colour
-    base: Colour
     soften_mm: float
     min_feature_mm: float
     finish: Literal["soft", "voxel", "faceted"]
@@ -146,8 +144,8 @@ class StyleDraft(BaseModel):
 
 STYLE_SYSTEM = """You are an art director defining a house style for a series of 3D-printed miniatures.
 From the reference pictures, describe the style so that any everyday object can be redrawn and rebuilt in it consistently.
-Be concrete about form (how chunky, how rounded, how much detail), surface (matte, glossy), colour and mood.
-The objects are printed in two filament colours: one for the object (body) and one for its base."""
+Be concrete about shape language (how chunky, how rounded), surface finish (matte, glossy), texture and level of detail.
+A style never sets colours: every object keeps its own colours, chosen later when it is printed. Never mention colours."""
 
 STYLE_PROMPT = """Write the style definition.
 - name: 2-3 words.
@@ -156,7 +154,7 @@ STYLE_PROMPT = """Write the style definition.
 - edit_prompt: an instruction for an image-editing model that receives a photo of the object: "Turn this {{subject}} into ..." (keep {{subject}}), keeping the pose and silhouette, on a plain white background.
 - negative_prompt: comma-separated things to avoid.
 - sculpt_guide: 2-4 sentences telling a sculptor how to build any object in this style from simple soft primitives (how chunky, roundness, what detail to drop).
-- body / base: filament colours as names and #RRGGBB hex taken from the references.
+- No colours anywhere: no colour names in the prompts or guide; say "keep the object's own colours".
 - soften_mm: 0.3 (crisp) to 2.0 (very soft, clay-like).
 - min_feature_mm: 1.2 to 3.0 (thinnest part kept).
 - finish: how the printed shape is finished: "soft" (smooth, rounded: clay, plush, toys), "voxel" (built from cubes: pixel art, voxel, Lego-like) or "faceted" (flat geometric facets: low-poly, papercraft, crystal).
@@ -176,9 +174,6 @@ def draft_style(key: str | None, model: str | None, references: list[Path], note
     for field in ("prompt", "edit_prompt"):
         if "{subject}" not in getattr(draft, field):
             setattr(draft, field, "a {subject}, " + getattr(draft, field))
-    for c in (draft.body, draft.base):
-        h = c.hex.strip().lstrip("#")
-        c.hex = "#" + (h.upper() if len(h) == 6 and all(ch in "0123456789abcdefABCDEF" for ch in h) else "808080")
     draft.soften_mm = float(min(max(draft.soften_mm, 0.0), 3.0))
     draft.min_feature_mm = float(min(max(draft.min_feature_mm, 0.8), 5.0))
     return draft

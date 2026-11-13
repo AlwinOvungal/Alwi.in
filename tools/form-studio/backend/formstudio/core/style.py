@@ -40,7 +40,6 @@ class StyleSpec:
     sculpt_guide: str
     seeds: list[int]
     stylize: dict[str, Any]
-    palette: dict[str, dict[str, str]]
     geometry: dict[str, Any]
     base: dict[str, Any]
     magnet: dict[str, Any]
@@ -125,7 +124,6 @@ class StyleSpec:
             "version": self.version,
             "description": self.description,
             "hash": self.hash,
-            "palette": self.palette,
             "seeds": self.seeds,
             "editable": self.editable,
             "builtin": self.builtin,
@@ -159,8 +157,39 @@ class StyleSpec:
         }
 
 
+# Styles describe the look (shape language, surface, texture, detail), never colours: colours belong to
+# the object (its picture) and are mapped to filaments in the Print step. Older styles carried a
+# two-colour palette and colour words; they're cleaned when read.
+_COLOUR_PHRASES = [
+    r",?\s*mainly [a-z]+(?: [a-z]+)?(?=[,.])",  # the old new-style template: "…, mainly olive, …"
+    r",?\s*single (?:muted |matte |pastel )*[a-z]+(?: green| blue| red)? colour(?=[,.])",
+]
+
+
+def _decolour(raw: dict[str, Any]) -> bool:
+    """Drop an older style's palette and template colour words. True if anything changed."""
+    changed = raw.pop("palette", None) is not None
+    for key in ("prompt", "edit_prompt"):
+        text = raw.get(key)
+        if isinstance(text, str):
+            new = text
+            for pat in _COLOUR_PHRASES:
+                new = re.sub(pat, "", new)
+            if new != text:
+                raw[key] = new
+                changed = True
+    return changed
+
+
 def load_style(folder: Path) -> StyleSpec:
     raw = yaml.safe_load((folder / "style.yaml").read_text())
+    if _decolour(raw) and paths.home() / "styles" in folder.parents:  # your own styles: saved without colours
+        try:
+            tmp = folder / "style.yaml.tmp"
+            tmp.write_text(yaml.safe_dump(raw, sort_keys=False, allow_unicode=True))
+            tmp.replace(folder / "style.yaml")
+        except OSError:
+            pass
     refs = raw.get("references")
     if refs is None:
         refs = [raw["reference"]] if raw.get("reference") else []
@@ -176,7 +205,6 @@ def load_style(folder: Path) -> StyleSpec:
         sculpt_guide=(raw.get("sculpt_guide") or raw.get("description") or "").strip(),
         seeds=[int(s) for s in raw.get("seeds", [11, 23, 37, 51])],
         stylize=raw.get("stylize", {}),
-        palette=raw["palette"],
         geometry=raw.get("geometry", {}),
         base=raw.get("base", {"enabled": False}),
         magnet=raw.get("magnet", {"enabled": False}),
@@ -279,11 +307,6 @@ class Colour(BaseModel):
     hex: str = Field(pattern=r"^#[0-9A-Fa-f]{6}$")
 
 
-class StylePalette(BaseModel):
-    body: Colour
-    base: Colour
-
-
 class StyleGeometry(BaseModel):
     height_mm: float = Field(ge=10, le=300)
     soften_mm: float = Field(ge=0, le=3)
@@ -304,7 +327,6 @@ class StyleEdit(BaseModel):
     edit_prompt: str | None = None
     negative_prompt: str | None = None
     sculpt_guide: str | None = None
-    palette: StylePalette | None = None
     geometry: StyleGeometry | None = None
     based_on: str | None = None  # create only: start from this style's words, finish and formats
     reference_mode: Literal["style", "full"] | None = None
@@ -344,8 +366,6 @@ def _apply(raw: dict[str, Any], edit: StyleEdit) -> None:
             if key in ("prompt", "edit_prompt") and "{subject}" not in value:
                 value = "a {subject}, " + value
             raw[key] = value
-    if edit.palette:
-        raw["palette"] = edit.palette.model_dump()
     if edit.geometry:
         raw.setdefault("geometry", {}).update(edit.geometry.model_dump())
     if edit.reference_mode:
@@ -361,16 +381,16 @@ def _require_editable(style: StyleSpec) -> None:
 
 FINISH_WORDS = {
     "soft": "soft rounded forms, smooth matte surface",
-    "voxel": "made of visible cubes like 3D pixel art, flat colours",
+    "voxel": "made of visible cubes like 3D pixel art, flat unshaded faces",
     "faceted": "low-poly with crisp flat facets",
     "blender": "soft rounded clay forms with a fine hand-made surface texture",
 }
 
 
 def _neutral_raw(edit: "StyleEdit") -> dict[str, Any]:
-    """A new style built only from what you gave it: your words, main colour and finish. Nothing from another style."""
+    """A new style built only from what you gave it: your words and finish. Nothing from another style, and
+    no colours: the restyle keeps each object's own."""
     desc = edit.description.strip()
-    body = (edit.palette.body.name if edit.palette else "Grey").lower()
     finish = edit.geometry.finish if edit.geometry else "soft"
     look = FINISH_WORDS.get(finish, FINISH_WORDS["soft"])
     feel = f", {desc}" if desc else ""
@@ -379,17 +399,16 @@ def _neutral_raw(edit: "StyleEdit") -> dict[str, Any]:
         "version": 1,
         "description": desc,
         "references": [],
-        "prompt": (f"a {{subject}} as a small 3D-printable figurine{feel}, {look}, simplified chunky shapes, mainly {body}, "
+        "prompt": (f"a {{subject}} as a small 3D-printable figurine{feel}, {look}, simplified chunky shapes, "
                    "no text, no fine detail, whole object in frame, centered, plain white background, soft diffuse light"),
         "edit_prompt": (f"Redraw this {{subject}} as a small 3D-printable figurine{feel}: {look}, simplified chunky shapes, "
-                        f"mainly {body}, no text or fine detail. Show the whole object centred on a plain white background "
+                        "no text or fine detail. Show the whole object centred on a plain white background "
                         "with soft diffuse light."),
         "negative_prompt": "photograph, text, logo, pattern, decals, multiple objects, cluttered background, cropped, thin wires",
         "sculpt_guide": desc or f"Simplified, chunky forms; {look}.",
         "seeds": [11, 23, 37, 51],
         "stylize": {"size": 1024, "steps": 30, "guidance": 6.0, "ip_adapter_scale": 0.6, "controlnet_scale": 0.55,
                     "reference_mode": "style"},
-        "palette": {"body": {"name": "Grey", "hex": "#8A8A85"}, "base": {"name": "White", "hex": "#F4F4F1"}},
         "geometry": {"finish": finish, "height_mm": 50, "voxel_mm": 0.5, "soften_mm": 0.9, "min_feature_mm": 1.6,
                      "smooth_iters": 8, "target_faces": 60000, "flat_cut": 0.03, "voxel_size_mm": 2.5, "facets": 400},
         "base": {"enabled": True, "margin_mm": 3, "thickness_mm": 3, "fillet_mm": 1.2},
@@ -418,6 +437,47 @@ FORMAT_DEFAULTS: dict[str, dict[str, Any]] = {
                  "magnet": {"enabled": False}, "flat_back": {"enabled": True, "thickness_mm": 5},
                  "ring": {"enabled": True, "outer_radius_mm": 3.5, "hole_mm": 3.0, "thickness_mm": 2.5}},
 }
+
+
+# What the object becomes shapes the picture from the start: every restyle, refine and view prompt
+# carries the chosen type's requirements, and the 3D step builds to them (pocket, loop, base).
+FORMAT_BRIEFS: dict[str, dict[str, str]] = {
+    "magnet": {
+        "label": "fridge magnet",
+        "brief": ("Design it as a fridge magnet: a front-facing design for a flat-backed magnet, shown straight from "
+                  "the front as shallow relief or a low-profile 3D form. The back is completely flat (a recessed "
+                  "magnet pocket goes into the back, never a through-hole), so keep a compact, solid body with "
+                  "enough material in the middle and no thin parts sticking out."),
+        "short": "front-facing low-profile shallow relief fridge magnet design, flat back, compact solid shape",
+        "avoid": "side view, perspective, deep 3D, thin protruding parts, holes through the body",
+    },
+    "keychain": {
+        "label": "keychain",
+        "brief": ("Design it as a keychain: a compact, sturdy, front-facing shape with an integrated, reinforced "
+                  "loop or attachment hole at the top, joined solidly to the main body. Avoid thin, fragile details."),
+        "short": "compact sturdy keychain charm with a reinforced attachment loop at the top, front view",
+        "avoid": "thin fragile details, separate or detached loop, chains, side view",
+    },
+    "ornament": {
+        "label": "hanging ornament",
+        "brief": ("Design it as a hanging ornament: a lightweight decorative design seen from the front, with an "
+                  "integrated sturdy hanging loop or hole at the top. Keep the hanging feature solid and the "
+                  "intended look clear from the front."),
+        "short": "lightweight decorative hanging ornament with a sturdy hanging loop at the top, front view",
+        "avoid": "string, hook, chain, thin fragile hanging loop, side view",
+    },
+    "stand": {
+        "label": "figurine",
+        "brief": ("Design it as a figurine: a volumetric 3D character or object with coherent front, back and side "
+                  "forms, stable proportions and a pose or base that lets it stand and print reliably."),
+        "short": "volumetric 3D figurine with stable proportions that stands on its own, three-quarter view",
+        "avoid": "flat 2D drawing, thin legs, top-heavy pose, floating parts",
+    },
+}
+
+
+def format_brief(fmt: str | None) -> dict[str, str]:
+    return FORMAT_BRIEFS.get(fmt or "stand", FORMAT_BRIEFS["stand"])
 
 
 def create_style(edit: StyleEdit) -> StyleSpec:

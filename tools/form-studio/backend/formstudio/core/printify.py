@@ -533,8 +533,12 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
         thin_removed = relief_info["outline_removed_pct"] / 100
         pitch = relief_mod.GRID_MM
         if ring_p.get("enabled"):
-            say(0.8, "Adding the key-ring loop")
-            body_m = add_ring(body_m, ring_p, warnings)
+            own = relief_mod.picture_loop(relief_info["_outline"], min_hole_mm=max(2.5, float(ring_p.get("hole_mm", 4.5)) * 0.6))
+            if own:  # the design already has its loop / hole (asked for in the restyle): use it, don't add a second
+                relief_info["own_loop"] = own
+            else:
+                say(0.8, "Adding the key-ring loop")
+                body_m = add_ring(body_m, ring_p, warnings)
     else:
         relief_info: dict[str, Any] = {}
         hit3 = _get(k3)
@@ -654,11 +658,23 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
         say(0.9, "Cutting the magnet pocket")
         cutter = magnet_cutter(float(mag["diameter_mm"]), float(mag["depth_mm"]), float(mag.get("clearance_mm", 0.15)))
         needed = float(mag["depth_mm"]) + 0.8
+        if picture:  # a recessed pocket (never a through-hole) where the shape is widest: the most material around it
+            r_pocket = float(mag["diameter_mm"]) / 2 + float(mag.get("clearance_mm", 0.15))
+            px, py, room = relief_mod.pocket_spot(relief_info["_outline"], r_pocket)
+            wall = room - r_pocket
+            relief_info["pocket"] = {"x": round(px, 1), "y": round(py, 1), "wall_mm": round(wall, 1)}
+            if wall < 1.5:
+                fits = max(0, int(2 * (room - 1.5 - float(mag.get("clearance_mm", 0.15)))))
+                warnings.append(f"The widest spot leaves only {max(wall, 0):.1f} mm of material around a "
+                                f"{mag['diameter_mm']:g} mm magnet; use a {fits} mm magnet or make the object bigger.")
+            cutter = cutter.translate((px, py, 0))
         if base_m is not None and base_t >= needed:
             base_m = base_m - cutter
         elif base_m is None:
             # the pocket plus 0.8 mm of roof must sit inside the body
             probe = magnet_cutter(float(mag["diameter_mm"]), needed, float(mag.get("clearance_mm", 0.15)))
+            if picture:
+                probe = probe.translate((relief_info["pocket"]["x"], relief_info["pocket"]["y"], 0))
             if (body_m ^ probe).volume() < 0.97 * probe.volume():
                 warnings.append("The body is thin or narrow where the magnet goes; check the pocket in the slicer.")
             body_m = body_m - cutter
@@ -726,10 +742,15 @@ def _changes(report: dict[str, Any], params: dict[str, Any], min_feat: float, n_
                     "meet, so they print and read cleanly.", "action": None})
     mag = params.get("magnet") or {}
     if mag.get("enabled"):
-        out.append({"id": "pocket", "text": f"A pocket for a {mag.get('diameter_mm')} × {mag.get('depth_mm')} mm "
-                    "magnet in the back.", "action": None})
+        pk = report.get("pocket") or {}
+        where = (f" at the widest spot, with {pk['wall_mm']:g} mm of material around it" if pk else "")
+        out.append({"id": "pocket", "text": f"A recessed pocket for a {mag.get('diameter_mm')} × {mag.get('depth_mm')} mm "
+                    f"magnet in the flat back{where} (not a through-hole).", "action": None})
     if (params.get("ring") or {}).get("enabled"):
-        out.append({"id": "ring", "text": "A key-ring loop on top.", "action": None})
+        own = report.get("own_loop")
+        what = "hanging loop" if params.get("format") == "ornament" else "key-ring loop"
+        out.append({"id": "ring", "text": (f"Uses the design's own {what} (a {own['diameter_mm']:g} mm hole at the top)."
+                                           if own else f"A reinforced {what} joined to the top."), "action": None})
     return out
 
 

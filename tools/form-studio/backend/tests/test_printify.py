@@ -74,7 +74,8 @@ def test_no_base_option(style, mug_glb, tmp_path):
 
 def test_3mf_has_two_parts_on_two_filaments(printed, style):
     out, _, _ = printed
-    written = export.export(out, "Coffee mug", style.palette, ["3mf"])
+    pal = {"body": {"name": "Olive", "hex": "#5E6B2E"}, "base": {"name": "Bone", "hex": "#F2F0EA"}}  # the Print step's
+    written = export.export(out, "Coffee mug", pal, ["3mf"])
     assert "model.3mf" in written
     with zipfile.ZipFile(out / "model.3mf") as z:
         names = set(z.namelist())
@@ -86,7 +87,7 @@ def test_3mf_has_two_parts_on_two_filaments(printed, style):
     comps = model.findall(".//m:components/m:component", NS)
     assert [c.get("objectid") for c in comps] == ["1", "2"]
     colours = [b.get("displaycolor") for b in model.findall(".//m:basematerials/m:base", NS)]
-    assert colours == [style.palette["body"]["hex"].upper() + "FF", style.palette["base"]["hex"].upper() + "FF"]
+    assert colours == [pal["body"]["hex"].upper() + "FF", pal["base"]["hex"].upper() + "FF"]
     parts = cfg.findall("./object/part")
     extruders = [p.find("./metadata[@key='extruder']").get("value") for p in parts]
     assert extruders == ["1", "2"]

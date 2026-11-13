@@ -203,21 +203,33 @@ Web UI (React + TypeScript + three.js)  web/src/  → built into backend/formstu
    - every slider rebuilds in seconds (no AI)
 
 ### 4.3 Styles (`#/styles`, `#/styles/<id>`)
-- **Cards:** equal heights, nothing cut off; thumbnail is a collage of the reference pictures or a two-colour block
-  with the finish; colour dots; Built-in / Yours tag. **Customize** on built-ins (makes your copy), **Edit** /
-  **Delete** on yours. A dashed **+ New style** card and a **New style** button.
-- **New style (`#/styles/new`):**
-  - name and a one-line "what should it feel like"
-  - reference pictures (up to 4; drop, click or paste) **before** creating; **make first** / remove
-  - **Start from** any existing style (copies its words, 3D finish and shape settings)
-  - print colours, auto-suggested from the pictures (free, no AI), with **Suggest from pictures** to redo
-  - 3D finish (Soft / Pixel-voxel / Low-poly) with its sliders
-  - optional **Let Claude write the style words** (with an Anthropic key)
-  - **Create style** shows progress (creating → uploading pictures → Claude) and opens the editor
-- **Editor:** sections Look (pictures) · Words · Preview · Draft with Claude · Print colours · 3D shape; pictures
-  save immediately; a sticky **Discard / Save** bar while there are changes (Save bumps the version); a warning if
-  you leave with unsaved changes.
-- Built-in styles open read-only with **Customize this style**.
+- **Styles are looks, never colours.** A style sets shape language, surface, texture and level of detail (plus
+  the 3D finish). It has no palette: every object keeps its own colours (each restyle is told so, and reference
+  pictures pass on their look but not their colours), and colours are mapped to filaments only in the Print
+  step. Older styles are cleaned automatically when read (`_decolour` in `core/style.py`).
+- **Cards:** equal heights; thumbnail is a collage of the reference pictures or a neutral block with the finish;
+  Built-in / Yours tag. **Customize** on built-ins, **Edit** / **Delete** on yours; a **+ New style** card.
+- **New style (`#/styles/new`)** offers two ways:
+  - **Create it with ChatGPT** (OpenAI key): describe the look; ChatGPT answers with a draft (shapes, surface,
+    texture, detail, 3D finish) and asks follow-up questions when useful; **Draw the style picture** makes an
+    illustration (three sample objects in a neutral tone); refine by chatting, draw again, pick a picture,
+    name it and **Save style**: its words, finish and picture are saved (no colours) and it appears with the
+    others. Backend: `core/style_chat.py`, `/api/style-chats…` (chat model `gpt-5-mini`, falls back to
+    `gpt-4.1-mini`; Settings `openai.chat_model` overrides).
+  - **Fill it in yourself:** name, "what should it feel like", up to 4 reference pictures, 3D finish, optional
+    **Let Claude write the style words**.
+- **Editor:** Look (pictures) · Words · Preview · Draft with Claude · 3D shape; a sticky Save bar.
+
+### Object type shapes every picture
+What the object becomes (Magnet, Keychain, Ornament, Figurine) is asked first and is not display-only: every
+restyle, refine and Make-it-now prompt carries the type's requirements (`FORMAT_BRIEFS` in `core/style.py`,
+added by `pipeline._format_style`), e.g. a magnet is a front-facing low-profile design with a flat back and a
+recessed (never through) pocket; a keychain has an integrated reinforced loop; a figurine is volumetric and
+stands; an ornament has a sturdy hanging loop at the top. The Photo step shows the type and its brief and can
+change it (`POST /api/jobs/{id}/format`; a shape built for another type is cleared). The print follows through:
+the magnet pocket goes where the shape is widest with ≥ 1.5 mm of material around it (else a warning naming a
+magnet size that fits); a keychain/ornament uses the loop or hole the design already has, or gets a reinforced
+loop added.
 
 ### 4.4 Settings (`#/settings`)
 - **Summary at the top:** the default restyle engine, the default 3D engine, and how many cloud accounts are connected.

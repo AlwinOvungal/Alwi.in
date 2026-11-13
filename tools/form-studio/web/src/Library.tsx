@@ -39,7 +39,7 @@ export default function Library() {
         <a className="card panel ref" href="#/styles" style={{ maxWidth: 360, textDecoration: "none" }}>
           <span className="swatch-stack">
             {styles.slice(0, 4).map((st) =>
-              st.references > 0 ? <img key={st.id} src={styleRefUrl(st, 0)} alt="" /> : <span key={st.id} className="dot2" style={{ background: st.palette.body.hex }} />,
+              st.references > 0 ? <img key={st.id} src={styleRefUrl(st, 0)} alt="" /> : <span key={st.id} className="dot2 finish" title={st.finish}>{st.name.slice(0, 1)}</span>,
             )}
           </span>
           <span className="stack" style={{ gap: 4 }}>
@@ -74,7 +74,7 @@ export function StylePicker({ styles, value, onChange }: { styles: Style[]; valu
     <div className="style-pick" role="radiogroup" aria-label="Style">
       {styles.map((s) => (
         <button key={s.id} type="button" role="radio" aria-checked={value === s.id} className={value === s.id ? "on" : ""} onClick={() => onChange(s.id)}>
-          {s.references > 0 ? <img src={styleRefUrl(s, 0)} alt="" /> : <span className="dot2" style={{ background: s.palette.body.hex }} />}
+          {s.references > 0 ? <img src={styleRefUrl(s, 0)} alt="" /> : <span className="dot2 finish">{s.name.slice(0, 1)}</span>}
           {s.name}
         </button>
       ))}

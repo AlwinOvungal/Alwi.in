@@ -39,7 +39,7 @@ def test_style_lifecycle():
         s = c.post("/api/styles", json=EDIT).json()
         sid = s["id"]
         assert sid == "glossy-toy" and s["editable"] and s["version"] == 1 and s["references"] == 0
-        assert s["palette"]["body"]["hex"] == "#E5533D" and s["geometry"]["height_mm"] == 45
+        assert "palette" not in s and s["geometry"]["height_mm"] == 45  # styles never carry colours
 
         r = c.post(f"/api/styles/{sid}/references", files={"image": ("a.png", _img((200, 40, 30)), "image/png")})
         assert r.status_code == 200 and r.json()["references"] == 1 and r.json()["version"] == 2
@@ -48,8 +48,8 @@ def test_style_lifecycle():
 
         s = c.put(f"/api/styles/{sid}", json={**EDIT, "name": "Glossy Toy II", "prompt": "glossy toy"}).json()
         assert s["name"] == "Glossy Toy II" and s["version"] == 3 and "{subject}" in s["prompt"]
-        assert c.put(f"/api/styles/{sid}", json={**EDIT, "palette": {"body": {"name": "x", "hex": "red"},
-                                                                    "base": EDIT["palette"]["base"]}}).status_code == 422
+        assert c.put(f"/api/styles/{sid}", json={**EDIT, "geometry": {"height_mm": 1, "soften_mm": 0.6,
+                                                                     "min_feature_mm": 2.0}}).status_code == 422
 
         dup = c.post("/api/styles/clay-minimal/duplicate").json()
         assert dup["editable"] and dup["references"] == 1 and dup["id"] != "clay-minimal"
@@ -75,7 +75,7 @@ def test_object_uses_its_style_and_can_switch(mug_photo):
 
         with zipfile.ZipFile(Job.load(jid).path("05_print", "model.3mf")) as z:
             model = z.read("3D/3dmodel.model").decode()
-        assert "#E5533DFF" in model and "#1B1B18FF" in model
+        assert "#E5533DFF" not in model and "#8A8A85FF" in model  # the style's old colours never reach the print
 
         job = c.post(f"/api/jobs/{jid}/style", json={"style": "clay-minimal"}).json()
         assert job["style"]["id"] == "clay-minimal" and job["stage"] == "cutout"
@@ -126,7 +126,7 @@ def test_rebuild_from_recipe(mug_photo, monkeypatch):
             c.put("/api/settings", json={"anthropic_key": ""})
 
 
-def test_new_style_from_another_with_pictures_and_colours():
+def test_new_style_from_another_with_pictures():
     with TestClient(app) as c:
         s = c.post("/api/styles", json={"name": "Brick Toys", "description": "", "based_on": "pixel-voxel"}).json()
         sid = s["id"]
@@ -147,10 +147,7 @@ def test_new_style_from_another_with_pictures_and_colours():
         s = c.post(f"/api/styles/{sid}/references/2/first").json()
         first = c.get(f"/api/styles/{sid}/references/0").content
         assert Image.open(io.BytesIO(first)).getpixel((5, 5)) == (20, 90, 200)
-        cols = c.post("/api/styles/suggest-colours", files=[("image", ("rc.png", red_cream.getvalue(), "image/png"))]).json()
-        assert cols["body"]["name"] in ("Red", "Tomato") and cols["base"]["name"] in ("Cream", "Bone White", "Sand")
-        assert c.post("/api/styles/suggest-colours").status_code == 400
-        assert c.post("/api/styles/suggest-colours", params={"style": "clay-minimal"}).json()["body"]["name"] in ("Olive", "Moss", "Brown")
+        assert c.post("/api/styles/suggest-colours").status_code in (404, 405)  # styles don't pick colours any more
         c.delete(f"/api/styles/{sid}")
 
 
@@ -226,7 +223,8 @@ def test_a_new_style_starts_from_your_inputs_only():
         "geometry": {"height_mm": 40, "soften_mm": 0.9, "min_feature_mm": 1.6, "finish": "faceted"},
     }).json()
     words = " ".join([s["prompt"], s["edit_prompt"], s["sculpt_guide"]]).lower()
-    assert "glossy translucent candy" in words and "cherry" in words and "facets" in words
+    assert "glossy translucent candy" in words and "facets" in words
+    assert "cherry" not in words and "mainly" not in words and "palette" not in s  # colours never get in
     assert "olive" not in words and "clay" not in words  # nothing from Clay Minimal
     assert s["geometry"]["finish"] == "faceted" and s["geometry"]["height_mm"] == 40 and s["references"] == 0
     assert {f["id"] for f in s["formats"]} == {"stand", "magnet", "keychain", "ornament"}

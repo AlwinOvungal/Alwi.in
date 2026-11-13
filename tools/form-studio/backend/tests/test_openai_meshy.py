@@ -60,7 +60,8 @@ def test_openai_restyle_sends_photo_and_style_references(cutout, tmp_path):
     assert len(body["images"]) == 1 + len(style.reference_paths)
     assert all(i["image_url"].startswith("data:image/png;base64,") for i in body["images"])
     assert "coffee mug" in body["prompt"] and "Completely redraw" in body["prompt"]
-    assert "never copy the objects" in body["prompt"]
+    assert "never the objects" in body["prompt"] and "never their colours" in body["prompt"]  # look, not colours
+    assert "own colours" in body["prompt"]
     assert [r["file"] for r in res] == ["candidate_1.png", "candidate_2.png", "candidate_3.png"]
     img = Image.open(out / "candidate_1.png")
     assert img.size == (1024, 1024) and img.mode == "RGB" and img.getpixel((5, 5)) == (255, 255, 255)

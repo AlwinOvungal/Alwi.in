@@ -7,7 +7,7 @@ references: []
 
 prompt: >-
   a {subject} as a low-poly 3D model, flat-shaded triangular facets, crisp geometric
-  planes, papercraft feel, single matte terracotta colour, no smooth curves, no text,
+  planes, papercraft feel, matte surface, no smooth curves, no text,
   studio product render, centered, whole object in frame, plain white background,
   soft diffuse light
 negative_prompt: >-
@@ -16,8 +16,8 @@ negative_prompt: >-
 edit_prompt: >-
   Completely redraw this {subject} as a low-poly 3D model made of a few hundred flat
   triangular facets, like papercraft. Keep only its overall silhouette and recognisable
-  parts; replace every curve with crisp flat planes, use a single matte terracotta
-  colour, no fine detail and no text. Show the whole object centred on a plain white
+  parts; replace every curve with crisp flat planes with a matte surface,
+  no fine detail and no text. Show the whole object centred on a plain white
   background with soft diffuse light.
 
 sculpt_guide: >-
@@ -33,9 +33,6 @@ stylize:
   ip_adapter_scale: 0.6   # how strongly reference.png steers the look
   controlnet_scale: 0.55  # how strongly the photo's shape is kept
 
-palette:
-  body: {name: Terracotta, hex: "#C8643B"}
-  base: {name: Sand, hex: "#EFE6D8"}
 
 geometry:
   finish: faceted        # reduce to flat facets

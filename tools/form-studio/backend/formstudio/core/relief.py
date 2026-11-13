@@ -15,6 +15,7 @@ Everything happens on a height grid, so it takes seconds and the result matches 
 """
 from __future__ import annotations
 
+import math
 from typing import Any
 
 import manifold3d as mf
@@ -245,3 +246,49 @@ def fidelity(body: mf.Manifold, m_out: np.ndarray, w_mm: float, h_mm: float, mas
     pic = _resample(mask, box, (h, w), Image.BILINEAR) > 127
     iou = (acc & pic).sum() / max((acc | pic).sum(), 1)
     return {"outline_iou": round(float(iou), 4)}
+
+
+def _grid_xy(m: np.ndarray, row: float, col: float) -> tuple[float, float]:
+    h, w = m.shape
+    return (col + 0.5 - w / 2) * OUTLINE_MM, (h / 2 - row - 0.5) * OUTLINE_MM
+
+
+def pocket_spot(m_out: np.ndarray, radius_mm: float, wall_mm: float = 1.5) -> tuple[float, float, float]:
+    """Where a magnet pocket fits best: the point deepest inside the outline (the widest part of the
+    shape), so the most material surrounds it. Returns (x, y, room): room is the distance to the edge."""
+    d = ndimage.distance_transform_edt(np.pad(m_out, 1))[1:-1, 1:-1]
+    # prefer the middle among equally deep points: a pocket off to one side looks and grips worse
+    h, w = m_out.shape
+    yy, xx = np.mgrid[:h, :w]
+    centre = np.hypot(yy - h / 2, xx - w / 2)
+    score = d - 1e-3 * centre
+    r, c = np.unravel_index(int(np.argmax(score)), score.shape)
+    x, y = _grid_xy(m_out, r, c)
+    return x, y, float(d[r, c] * OUTLINE_MM)
+
+
+def picture_loop(m_out: np.ndarray, min_hole_mm: float = 2.5, wall_mm: float = 1.2) -> dict | None:
+    """A hanging/attachment hole the picture already has near its top (keychains, ornaments). Then the
+    print uses it instead of adding a second loop. None if there isn't a usable one."""
+    holes = ndimage.binary_fill_holes(m_out) & ~m_out
+    lab, n = ndimage.label(holes)
+    if not n:
+        return None
+    ys, _ = np.nonzero(m_out)
+    top, height = ys.min(), ys.max() - ys.min() + 1
+    best = None
+    for i in range(1, n + 1):
+        hole = lab == i
+        area = hole.sum() * OUTLINE_MM ** 2
+        diam = 2 * math.sqrt(area / math.pi)
+        hy, hx = np.nonzero(hole)
+        if diam < min_hole_mm or hy.mean() > top + 0.3 * height:
+            continue
+        # the ring of material around the hole must be thick enough to hold a key ring or ribbon
+        ring = ndimage.binary_dilation(hole, iterations=max(1, int(wall_mm / OUTLINE_MM))) & ~hole
+        if (ring & m_out).sum() < 0.95 * ring.sum():
+            continue
+        if best is None or diam > best["diameter_mm"]:
+            x, y = _grid_xy(m_out, hy.mean(), hx.mean())
+            best = {"x": round(x, 2), "y": round(y, 2), "diameter_mm": round(diam, 1)}
+    return best

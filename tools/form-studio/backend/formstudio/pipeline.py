@@ -187,9 +187,7 @@ def auto(job: Job, ctx: EngineContext, settings: dict[str, Any], fmt: str | None
     if fmt:
         if fmt not in style.formats:
             raise ValueError(f"Unknown format '{fmt}'")
-        if (job.manifest.get("print_params") or {}).get("format") != fmt:
-            job.manifest["print_params"] = style.print_params(fmt)
-            job.save()
+        set_format(job, fmt)  # the type shapes the restyle prompt from the first picture
     ensure_cutout(job)
 
     def part(a: float, b: float) -> Progress:
@@ -363,6 +361,44 @@ def _palette_hexes(job: Job) -> list[dict[str, str]]:
     return list(palette_state(job)["colours"]) if palette_active(job) else []
 
 
+def job_format(job: Job) -> str:
+    return (job.manifest.get("print_params") or {}).get("format") or "stand"
+
+
+def _format_style(style, fmt: str):
+    """The chosen object type's requirements go into every picture prompt (not a display-only choice)."""
+    import dataclasses
+
+    from .core.style import format_brief
+
+    b = format_brief(fmt)
+    neg = ", ".join(x for x in (style.negative_prompt, b["avoid"]) if x)
+    return dataclasses.replace(style, prompt=f"{style.prompt}, {b['short']}",
+                               edit_prompt=f"{style.edit_prompt} {b['brief']}", negative_prompt=neg)
+
+
+def set_format(job: Job, fmt: str) -> None:
+    """Choose what the object becomes before (or after) restyling. Restyles from now on are made for it;
+    options already made stay. The colours you chose are kept."""
+    style = get_style(job.manifest["style"]["id"])
+    if fmt not in style.formats:
+        raise ValueError(f"Unknown format '{fmt}'")
+    cur = job.manifest.get("print_params") or {}
+    if cur.get("format") == fmt:
+        return
+    params = style.print_params(fmt)
+    if cur.get("colours"):
+        params["colours"] = cur["colours"]
+    pal = palette_state(job)
+    if pal["enabled"]:
+        params["regions"]["max_colours"] = pal["max"]
+        params["regions"]["palette"] = [{"hex": c["hex"], "name": c["name"]} for c in pal["colours"]]
+    job.manifest["print_params"] = params
+    if job.reached("reconstructed"):  # the shape was built for the old type: rebuild it from the chosen look
+        job.reset_after("confirmed")
+    job.save()
+
+
 def _palette_style(style, colours: list[dict[str, str]]):
     """Restyles keep to the approved palette."""
     import dataclasses
@@ -409,6 +445,8 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
     look = _logo_style(style) if is_logo(job) and not getattr(engine, "logo_only", False) else style
     if (pal := _palette_hexes(job)) and not is_logo(job):
         look = _palette_style(look, pal)
+    if not is_logo(job):  # the object type shapes the picture from the first restyle
+        look = _format_style(look, job_format(job))
     if look_override is not None:
         look = look_override
     log.info("%s: restyling with %s (%s), seeds %s", job.id, engine_id, style.id, seeds)
@@ -543,11 +581,12 @@ def refine(job: Job, ctx: EngineContext, index: int, message: str, progress: Pro
     style = get_style(job.manifest["style"]["id"])
     pal = _palette_hexes(job)
     keep = (" Keep only these colours: " + ", ".join(f"{c['name'].lower()} ({c['hex']})" for c in pal) + ".") if pal else ""
-    fmt = (job.manifest.get("print_params") or {}).get("format", "stand")
-    use = {"magnet": "a fridge magnet", "keychain": "a keychain", "ornament": "a hanging ornament"}.get(fmt, "a figurine")
+    from .core.style import format_brief
+
+    brief = format_brief(job_format(job))
     edit = (f"Change only this: {message}. Keep everything else exactly as in the first image: the same {{subject}}, "
-            f"its shape, pose, colours and style.{keep} It will be 3D printed as {use}, so keep shapes bold and "
-            "chunky with no tiny details. One object, centred, on a plain white background.")
+            f"its shape, pose, colours and style.{keep} It will be 3D printed as a {brief['label']}: {brief['brief']} "
+            "Keep shapes bold and chunky with no tiny details. One object, centred, on a plain white background.")
     look = dataclasses.replace(style, references=[], edit_prompt=edit, prompt=f"{{subject}}, {message}, {style.prompt}")
     seed = int(cands[index].get("seed") or 0) + 101
     log.info("%s: refining option %s with %s: %s", job.id, cands[index].get("n"), eid, message)
@@ -875,10 +914,13 @@ def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | No
     return report
 
 
+PART_DEFAULTS = {"body": {"name": "Grey", "hex": "#8A8A85"}, "base": {"name": "White", "hex": "#F4F4F1"}}
+
+
 def colours_of(job: Job) -> dict[str, dict[str, str]]:
     """Each part's filament colour, in filament order: the ones you chose, else the defaults.
-    Objects: body and base (the style's colours). Logos: each logo colour (the artwork's own) and the plaque."""
-    palette = get_style(job.manifest["style"]["id"]).palette
+    Objects: body and base (neutral until you choose). Logos: each logo colour (the artwork's own) and the plaque."""
+    palette = PART_DEFAULTS  # styles carry no colours: you choose them here, in the Print step
     params = job.manifest.get("print_params") or {}
     chosen = params.get("colours") or {}
     defaults: list[tuple[str, str, dict[str, str]]] = []

@@ -2,12 +2,12 @@
 id: pixel-voxel
 name: Pixel Voxel
 version: 1
-description: 3D pixel art. Every object is rebuilt from visible cubes with flat colours.
+description: 3D pixel art. Every object is rebuilt from visible cubes with flat, unshaded faces.
 references: []
 
 prompt: >-
   a {subject} as 3D voxel pixel art, built entirely from visible equal-sized cubes,
-  blocky stepped silhouette, limited palette of flat solid colours, isometric toy look,
+  blocky stepped silhouette, flat unshaded cube faces, isometric toy look,
   no smooth curves, no text, studio product render, centered, whole object in frame,
   plain white background, soft diffuse light
 negative_prompt: >-
@@ -16,7 +16,7 @@ negative_prompt: >-
 edit_prompt: >-
   Completely redraw this {subject} as 3D voxel pixel art, as if built from Lego-like
   equal-sized cubes. Keep only its overall silhouette and recognisable parts; turn every
-  curve into stepped blocks, use a few flat solid colours, no gradients, no fine detail
+  curve into stepped blocks, flat cube faces with no gradients, no fine detail
   and no text. Show the whole object centred on a plain white background with soft
   diffuse light, in a slight isometric view.
 
@@ -33,9 +33,6 @@ stylize:
   ip_adapter_scale: 0.6   # how strongly reference.png steers the look
   controlnet_scale: 0.55  # how strongly the photo's shape is kept
 
-palette:
-  body: {name: Pixel Blue, hex: "#3A6FD8"}
-  base: {name: Charcoal, hex: "#2B2B2B"}
 
 geometry:
   finish: voxel          # rebuild the shape from cubes

@@ -5,13 +5,13 @@
 id: clay-minimal
 name: Clay Minimal
 version: 1
-description: Matte clay miniatures with chunky, softened forms in muted olive on a bone-white base.
+description: Matte clay miniatures with chunky, softened forms and a smooth uniform surface.
 reference: reference.png
 
 # {subject} is replaced with what you type in the app (e.g. "coffee mug").
 prompt: >-
   a {subject} as a small handmade matte clay figurine, chunky simplified shapes,
-  soft rounded edges, smooth uniform matte surface, single muted olive green colour,
+  soft rounded edges, smooth uniform matte surface,
   no text, no fine detail, toy-like proportions, studio product photo, centered,
   whole object in frame, plain white background, soft diffuse light
 negative_prompt: >-
@@ -21,7 +21,7 @@ negative_prompt: >-
 edit_prompt: >-
   Completely redraw this {subject} as a small handmade matte clay figurine. Keep only
   its overall silhouette and recognisable parts; make the shapes chunky and simplified
-  with soft rounded edges, a smooth uniform matte surface in a single muted olive green,
+  with soft rounded edges, a smooth uniform matte surface,
   and no text or fine detail. Show the whole object centred on a plain white background
   with soft diffuse light.
 
@@ -39,9 +39,6 @@ stylize:
   ip_adapter_scale: 0.6   # how strongly reference.png steers the look
   controlnet_scale: 0.55  # how strongly the photo's shape is kept
 
-palette:
-  body: {name: Olive, hex: "#5E6B2E"}
-  base: {name: Bone White, hex: "#F2F0EA"}
 
 geometry:
   finish: soft           # soft | voxel (pixel cubes) | faceted (low-poly)

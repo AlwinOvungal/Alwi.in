@@ -99,6 +99,7 @@ def _view(job: Job) -> dict[str, Any]:
         d["style_name"], d["style_removed"] = job.manifest["style"]["id"], True
     d["kind"] = job.manifest.get("kind") or "object"
     d["logo_parts"] = pipeline.logo_parts(job)
+    d["format_brief"] = style_mod.format_brief(pipeline.job_format(job))["brief"]  # what restyles are told
     t = worker.tasks.get(job.id)
     d["task"] = t.public() if t else None
     return d
@@ -248,26 +249,6 @@ def first_style_reference(style_id: str, index: int) -> dict[str, Any]:
     return _style_call(style_mod.make_reference_first, style_id, index)
 
 
-@app.post("/api/styles/suggest-colours")
-def suggest_colours(style: str | None = None, image: list[UploadFile] | None = File(None)) -> dict[str, Any]:
-    """The two print colours, picked from pictures (uploaded, or a style's references). Free, no AI."""
-    from PIL import Image as PILImage
-
-    from ..core import colours
-
-    pics: list[Any] = []
-    if style:
-        pics += _style(style).reference_paths
-    for f in image or []:
-        try:
-            pics.append(PILImage.open(io.BytesIO(f.file.read())))
-        except Exception:
-            raise HTTPException(400, "One of the files isn't an image.")
-    if not pics:
-        raise HTTPException(400, "Add a reference picture first.")
-    return colours.suggest(pics)
-
-
 @app.delete("/api/styles/{style_id}/references/{index}")
 def remove_style_reference(style_id: str, index: int) -> dict[str, Any]:
     return _style_call(style_mod.remove_reference, style_id, index)
@@ -292,7 +273,7 @@ class DraftBody(BaseModel):
 
 @app.post("/api/styles/{style_id}/draft")
 def draft_style(style_id: str, body: DraftBody) -> dict[str, Any]:
-    """Claude reads the style's reference images and drafts its words, colours and shape settings."""
+    """Claude reads the style's reference images and drafts its words and shape settings (never colours)."""
     from .. import claude
 
     style = _style(style_id)
@@ -303,6 +284,90 @@ def draft_style(style_id: str, body: DraftBody) -> dict[str, Any]:
     except claude.ClaudeError as e:
         raise HTTPException(400, str(e))
     return draft.model_dump()
+
+
+# ---- new style by conversation with ChatGPT -----------------------------------------
+
+class StyleChatBody(BaseModel):
+    message: str
+
+
+class StyleChatSave(BaseModel):
+    name: str | None = None
+
+
+def _chat_call(fn, *a):
+    from ..engines.base import EngineError
+
+    try:
+        return fn(*a)
+    except FileNotFoundError:
+        raise HTTPException(404, "No such conversation")
+    except (PermissionError, ValueError, IndexError) as e:
+        raise HTTPException(400, str(e))
+    except EngineError as e:
+        raise HTTPException(400, str(e) + (f" ({e.detail[:200]})" if e.detail else ""))
+    except httpx.HTTPError as e:
+        raise HTTPException(502, f"Couldn't reach OpenAI ({e.__class__.__name__}). Check the internet connection.")
+
+
+def _chat_view(state: dict[str, Any]) -> dict[str, Any]:
+    return {**state, "messages": [{k: v for k, v in m.items() if k != "raw"} for m in state["messages"]]}
+
+
+@app.post("/api/style-chats")
+def style_chat_start(body: StyleChatBody) -> dict[str, Any]:
+    """Start designing a style with ChatGPT: describe the look; it answers with a draft and maybe a question."""
+    from ..core import style_chat
+
+    return _chat_view(_chat_call(style_chat.say, settings_mod.context(), None, body.message))
+
+
+@app.get("/api/style-chats/{chat_id}")
+def style_chat_get(chat_id: str) -> dict[str, Any]:
+    from ..core import style_chat
+
+    return _chat_view(_chat_call(style_chat.load, chat_id))
+
+
+@app.post("/api/style-chats/{chat_id}/messages")
+def style_chat_say(chat_id: str, body: StyleChatBody) -> dict[str, Any]:
+    from ..core import style_chat
+
+    return _chat_view(_chat_call(style_chat.say, settings_mod.context(), chat_id, body.message))
+
+
+@app.post("/api/style-chats/{chat_id}/image")
+def style_chat_image(chat_id: str) -> dict[str, Any]:
+    """A style picture for the current draft (ChatGPT images)."""
+    from ..core import style_chat
+
+    return _chat_view(_chat_call(style_chat.make_image, settings_mod.context(), chat_id))
+
+
+@app.post("/api/style-chats/{chat_id}/choose/{index}")
+def style_chat_choose(chat_id: str, index: int) -> dict[str, Any]:
+    from ..core import style_chat
+
+    return _chat_view(_chat_call(style_chat.choose_image, chat_id, index))
+
+
+@app.get("/api/style-chats/{chat_id}/images/{name}")
+def style_chat_file(chat_id: str, name: str):
+    from ..core import style_chat
+
+    try:
+        return FileResponse(style_chat.image_path(chat_id, name), media_type="image/png")
+    except FileNotFoundError:
+        raise HTTPException(404, "Not found")
+
+
+@app.post("/api/style-chats/{chat_id}/save")
+def style_chat_save(chat_id: str, body: StyleChatSave) -> dict[str, Any]:
+    """Save the approved draft as a style (its words, finish and picture; never colours)."""
+    from ..core import style_chat
+
+    return _chat_call(style_chat.save, chat_id, body.name).detail()
 
 
 @app.get("/api/engines")
@@ -1017,6 +1082,22 @@ def set_job_kind(job_id: str, body: KindBody) -> dict[str, Any]:
     """Logo or text (built exactly from the artwork) or an object (AI restyle and 3D)."""
     with _locked(job_id) as job:
         pipeline.set_kind(job, body.kind)
+    return _view(job)
+
+
+class FormatBody(BaseModel):
+    format: str  # stand (figurine) · magnet · keychain · ornament
+
+
+@app.post("/api/jobs/{job_id}/format")
+def set_job_format(job_id: str, body: FormatBody) -> dict[str, Any]:
+    """What the object becomes. It shapes every restyle from now on (the prompt carries the type's
+    requirements) and the 3D build; a shape built for another type is cleared."""
+    with _locked(job_id) as job:
+        try:
+            pipeline.set_format(job, body.format)
+        except ValueError as e:
+            raise HTTPException(400, str(e))
     return _view(job)
 
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, Colour, Finish, FINISHES, Settings, Style, StyleDetail, StyleEdit, StyleGeometry, styleRefUrl } from "./api";
+import { api, Finish, FINISHES, Settings, Style, StyleChat, styleChatImageUrl, StyleDetail, StyleEdit, StyleGeometry, styleRefUrl } from "./api";
 import { ClayFields, go, NeedsBlender, Slider, useBlender, useToast } from "./ui";
 
 const FINISH_LABEL: Record<Finish, string> = { soft: "Soft", voxel: "Pixel / voxel", faceted: "Low-poly", blender: "Blender clay" };
@@ -7,8 +7,8 @@ const MAX_REFS = 4;
 
 // ---------------------------------------------------------------- shared pieces ----
 
-/** The style card thumbnail: up to 3 reference pictures, or a two-colour block. */
-function StyleThumb({ s, srcs }: { s: Pick<Style, "palette" | "finish">; srcs: string[] }) {
+/** The style card thumbnail: up to 3 reference pictures, or its finish (styles have no colours). */
+function StyleThumb({ s, srcs }: { s: Pick<Style, "finish">; srcs: string[] }) {
   if (srcs.length) {
     return (
       <div className={`collage n${Math.min(srcs.length, 3)}`}>
@@ -17,28 +17,10 @@ function StyleThumb({ s, srcs }: { s: Pick<Style, "palette" | "finish">; srcs: s
     );
   }
   return (
-    <div className="colour-thumb" style={{ background: s.palette.base.hex }}>
-      <span className="blob" style={{ background: s.palette.body.hex }} />
+    <div className="colour-thumb neutral">
+      <span className="blob" />
       <span className="chip">{FINISH_LABEL[s.finish ?? "soft"]}</span>
     </div>
-  );
-}
-
-function ColourFields({ palette, onChange, disabled }: { palette: { body: Colour; base: Colour }; onChange: (p: { body: Colour; base: Colour }) => void; disabled?: boolean }) {
-  return (
-    <>
-      {(["body", "base"] as const).map((which) => (
-        <div key={which} className="colour-row">
-          <input type="color" value={palette[which].hex} disabled={disabled} aria-label={`${which} colour`}
-            onChange={(e) => onChange({ ...palette, [which]: { ...palette[which], hex: e.target.value.toUpperCase() } })} />
-          <label className="field grow">
-            <span>{which === "body" ? "Object · filament 1" : "Base · filament 2"}</span>
-            <input className="input" value={palette[which].name} readOnly={disabled}
-              onChange={(e) => onChange({ ...palette, [which]: { ...palette[which], name: e.target.value } })} />
-          </label>
-        </div>
-      ))}
-    </>
   );
 }
 
@@ -175,8 +157,8 @@ export function StylesList() {
           <span className="label">Styles</span>
           <h1>Your house styles</h1>
           <p className="lede">
-            A style is the look every object gets: reference pictures, two print colours, a 3D finish and a few words.
-            Make your own from pictures you like.
+            A style is the look every object gets: shape language, surface, texture and detail, from reference pictures, a 3D finish and a few words. Colours stay with each object.
+            Make your own by chatting with ChatGPT or from pictures you like.
           </p>
         </div>
         <a className="btn primary" href="#/styles/new">+ New style</a>
@@ -185,7 +167,7 @@ export function StylesList() {
         <a className="card style-card new-card" href="#/styles/new">
           <span className="plus" aria-hidden="true">+</span>
           <strong>New style</strong>
-          <span className="small muted">From your own reference pictures</span>
+          <span className="small muted">Chat with ChatGPT, or use your own pictures</span>
         </a>
         {styles?.map((s) => (
           <div key={s.id} className="card style-card">
@@ -195,9 +177,6 @@ export function StylesList() {
             <div className="style-meta">
               <div className="style-title">
                 <strong title={s.name}>{s.name}</strong>
-                <span className="swatches">
-                  {Object.values(s.palette).map((c) => <span key={c.hex + c.name} className="swatch" style={{ background: c.hex }} title={c.name} />)}
-                </span>
               </div>
               <p className="clamp2 small muted">{s.description || "No description yet"}</p>
               <div className="style-foot">
@@ -245,48 +224,193 @@ function confirmDelete(s: Pick<Style, "name" | "editable">) {
 
 // ---------------------------------------------------------------- new style ----
 
-// A new style starts from nothing but what you give it: no other style's words, colours or finish.
+// A new style starts from nothing but what you give it: no other style's words or finish, and never colours
+// (each object keeps its own; they're mapped to filaments in the Print step).
 const NEUTRAL_GEOMETRY: StyleGeometry = { height_mm: 50, soften_mm: 0.9, min_feature_mm: 1.6, finish: "soft", voxel_size_mm: 2.5, facets: 400 };
-const NEUTRAL_PALETTE = { body: { name: "Grey", hex: "#8A8A85" }, base: { name: "White", hex: "#F4F4F1" } };
 
 export function NewStyle() {
   const [settings, setSettings] = useState<Settings | null>(null);
+  const [mode, setMode] = useState<"choose" | "chat" | "form">("choose");
+  useEffect(() => {
+    api.settings().then(setSettings).catch(() => {});
+  }, []);
+  const chatReady = !!settings?.openai?.has_key;
+  return (
+    <div className="page narrow">
+      <div className="stack" style={{ gap: 8, marginBottom: 24 }}>
+        <a href="#/styles" className="label" style={{ textDecoration: "none" }}>← Styles</a>
+        <h1>New style</h1>
+        <p className="lede">
+          A style is the look: shape language, surface, texture and how much detail. It never sets colours: every object keeps its own, and you map them to filaments when you print.
+        </p>
+      </div>
+      {mode === "choose" && (
+        <div className="choice-grid">
+          <button className="card panel choice" onClick={() => setMode("chat")}>
+            <strong>Create it with ChatGPT</strong>
+            <span className="small muted">Describe the look in your own words. ChatGPT asks what it needs, draws a style picture, and you refine it together before saving.</span>
+            {!chatReady && settings && <span className="small warn-text">Needs your OpenAI API key (Settings → Cloud accounts).</span>}
+          </button>
+          <button className="card panel choice" onClick={() => setMode("form")}>
+            <strong>Fill it in yourself</strong>
+            <span className="small muted">Name it, add reference pictures and choose the 3D finish.</span>
+          </button>
+        </div>
+      )}
+      {mode === "chat" && <StyleChatPanel ready={chatReady} onBack={() => setMode("choose")} />}
+      {mode === "form" && <NewStyleForm settings={settings} onBack={() => setMode("choose")} />}
+    </div>
+  );
+}
+
+const FINISH_NAME: Record<Finish, string> = { soft: "Soft", voxel: "Pixel / voxel", faceted: "Low-poly", blender: "Blender clay" };
+
+/** New style by conversation with ChatGPT: describe, answer, see the style picture, refine, save. */
+function StyleChatPanel({ ready, onBack }: { ready: boolean; onBack: () => void }) {
+  const [chat, setChat] = useState<StyleChat | null>(null);
+  const [msg, setMsg] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [name, setName] = useState("");
+  const toast = useToast();
+  const end = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "nearest" }); // braces: newer browsers return a promise here, not a cleanup
+  }, [chat?.messages.length, busy]);
+  useEffect(() => {
+    if (chat?.proposal && !name) setName(chat.proposal.name);
+  }, [chat?.proposal]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const act = async (label: string, p: () => Promise<StyleChat>) => {
+    setBusy(label);
+    try {
+      setChat(await p());
+    } catch (e) {
+      toast((e as Error).message, true);
+    } finally {
+      setBusy(null);
+    }
+  };
+  const send = (text: string) => {
+    const t = text.trim();
+    if (!t) return;
+    setMsg("");
+    act("ChatGPT is thinking…", () => (chat ? api.styleChatSay(chat.id, t) : api.styleChatStart(t)));
+  };
+  const save = async () => {
+    if (!chat) return;
+    setBusy("Saving…");
+    try {
+      const s = await api.styleChatSave(chat.id, name.trim() || undefined);
+      toast(`“${s.name}” is ready to use`);
+      go(`/styles/${s.id}`);
+    } catch (e) {
+      toast((e as Error).message, true);
+      setBusy(null);
+    }
+  };
+  const p = chat?.proposal;
+  const pic = chat && chat.chosen != null ? chat.images[chat.chosen] : null;
+  if (!ready) {
+    return (
+      <div className="card panel stack">
+        <p className="small" style={{ margin: 0 }}>Creating a style with ChatGPT needs your OpenAI API key. Add it in Settings → Cloud accounts → OpenAI, then come back.</p>
+        <div className="row"><a className="btn" href="#/settings">Open Settings</a><button className="btn ghost" onClick={onBack}>Back</button></div>
+      </div>
+    );
+  }
+  return (
+    <div className="style-chat">
+      <section className="card panel stack chat-col">
+        <div className="chat-log">
+          {!chat && (
+            <div className="bubble look">
+              What look would you like? For example: “chunky wooden toys with visible grain”, “glossy vinyl designer toys”, “knitted plush”. I'll ask a question or two and draw it for you.
+            </div>
+          )}
+          {chat?.messages.map((m, i) => (
+            <div key={i} className={`bubble ${m.role === "user" ? "you" : "look"}`}>
+              {m.image ? <img src={styleChatImageUrl(chat.id, m.image)} alt="Style picture" /> : m.text}
+              {!!m.questions?.length && (
+                <div className="row" style={{ gap: 6, marginTop: 8, flexWrap: "wrap" }}>
+                  {m.questions.map((q) => <span key={q} className="chip">{q}</span>)}
+                </div>
+              )}
+            </div>
+          ))}
+          {busy && <div className="bubble look skeleton-line">{busy}</div>}
+          <div ref={end} />
+        </div>
+        <div className="row" style={{ flexWrap: "nowrap" }}>
+          <input className="input grow" autoFocus value={msg} disabled={!!busy}
+            placeholder={chat ? "Answer, or say what to change…" : "Describe the look…"}
+            onChange={(e) => setMsg(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send(msg)} />
+          <button className="btn olive" disabled={!!busy || !msg.trim()} onClick={() => send(msg)}>Send</button>
+        </div>
+        <button className="btn sm ghost" style={{ alignSelf: "start" }} onClick={onBack} disabled={!!busy}>← Other ways</button>
+      </section>
+
+      <section className="card panel stack">
+        <span className="label">The style so far</span>
+        {p ? (
+          <>
+            <strong>{p.name}</strong>
+            <p className="small" style={{ margin: 0 }}>{p.description}</p>
+            <dl className="style-facts small">
+              <dt>Shapes</dt><dd>{p.shape_language || "–"}</dd>
+              <dt>Surface</dt><dd>{p.surface || "–"}</dd>
+              <dt>Texture</dt><dd>{p.texture || "–"}</dd>
+              <dt>Detail</dt><dd>{p.detail || "–"}</dd>
+              <dt>3D finish</dt><dd>{FINISH_NAME[p.finish]}</dd>
+            </dl>
+            {pic ? (
+              <img className="style-pic" src={styleChatImageUrl(chat!.id, pic)} alt="Style picture" />
+            ) : (
+              <div className="style-pic empty small muted">No style picture yet</div>
+            )}
+            {chat!.images.length > 1 && (
+              <div className="row" style={{ gap: 6 }}>
+                {chat!.images.map((im, i) => (
+                  <button key={im} className={`thumb-btn ${chat!.chosen === i ? "on" : ""}`} onClick={() => act("Choosing…", () => api.styleChatChoose(chat!.id, i))}>
+                    <img src={styleChatImageUrl(chat!.id, im)} alt={`Picture ${i + 1}`} />
+                  </button>
+                ))}
+              </div>
+            )}
+            <button className="btn" disabled={!!busy} onClick={() => act("Drawing the style picture…", () => api.styleChatImage(chat!.id))}>
+              {chat!.images.length ? "Draw it again" : "Draw the style picture"}
+            </button>
+            <label className="field">
+              <span>Name</span>
+              <input className="input" value={name} onChange={(e) => setName(e.target.value)} />
+            </label>
+            <button className="btn olive" disabled={!!busy || !name.trim()} onClick={save}>Save style</button>
+            <span className="small muted">Saved with its words, 3D finish and the chosen picture; no colours.</span>
+          </>
+        ) : (
+          <span className="small muted">Describe the look and a draft appears here.</span>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function NewStyleForm({ settings, onBack }: { settings: Settings | null; onBack: () => void }) {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [files, setFiles] = useState<File[]>([]);
-  const [palette, setPalette] = useState<{ body: Colour; base: Colour }>(NEUTRAL_PALETTE);
   const [geo, setGeo] = useState<StyleGeometry>(NEUTRAL_GEOMETRY);
   const [useClaude, setUseClaude] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
   const toast = useToast();
   const previews = useMemo(() => files.map((f) => URL.createObjectURL(f)), [files]);
-
-  useEffect(() => {
-    api.settings().then(setSettings).catch(() => {});
-  }, []);
-  const [coloursTouched, setColoursTouched] = useState(false);
-
-  const suggest = async (fs = files) => {
-    if (!fs.length) return;
-    try {
-      setPalette(await api.suggestColours({ files: fs }));
-      setColoursTouched(true);
-    } catch (e) {
-      toast((e as Error).message, true);
-    }
-  };
-  const addFiles = (fs: File[]) => {
-    const next = [...files, ...fs].slice(0, MAX_REFS);
-    setFiles(next);
-    if (!coloursTouched) suggest(next); // first pictures: suggest colours straight away
-  };
+  const addFiles = (fs: File[]) => setFiles([...files, ...fs].slice(0, MAX_REFS));
   const claudeReady = !!settings?.claude.has_key;
 
   const create = async () => {
     if (!name.trim()) return toast("Give the style a name first.", true);
     try {
       setBusy("Creating…");
-      const s = await api.createStyle({ name: name.trim(), description: description.trim(), palette, geometry: geo });
+      const s = await api.createStyle({ name: name.trim(), description: description.trim(), geometry: geo });
       if (files.length) {
         setBusy(`Uploading ${files.length} picture${files.length === 1 ? "" : "s"}…`);
         await api.addReferences(s.id, files);
@@ -297,7 +421,7 @@ export function NewStyle() {
           const d = await api.draftStyle(s.id, description);
           await api.updateStyle(s.id, {
             name: name.trim(), description: description.trim() || d.description, prompt: d.prompt, edit_prompt: d.edit_prompt,
-            negative_prompt: d.negative_prompt, sculpt_guide: d.sculpt_guide, palette,
+            negative_prompt: d.negative_prompt, sculpt_guide: d.sculpt_guide,
             geometry: { ...geo, soften_mm: d.soften_mm, min_feature_mm: d.min_feature_mm },
           });
         } catch (e) {
@@ -312,63 +436,47 @@ export function NewStyle() {
   };
 
   return (
-    <div className="page narrow">
-      <div className="stack" style={{ gap: 8, marginBottom: 24 }}>
-        <a href="#/styles" className="label" style={{ textDecoration: "none" }}>← Styles</a>
-        <h1>New style</h1>
-        <p className="lede">Show Form Studio what you like. Your new style starts empty and is built only from your words, pictures, colours and finish.</p>
-      </div>
+    <div className="stack" style={{ gap: 20 }}>
+      <section className="card panel stack">
+        <span className="label">1 · Name</span>
+        <label className="field">
+          <span>Name</span>
+          <input className="input" autoFocus placeholder="e.g. Glossy toy" value={name} onChange={(e) => setName(e.target.value)} />
+        </label>
+        <label className="field">
+          <span>What should it feel like? (optional)</span>
+          <input className="input" placeholder="e.g. shiny vinyl designer toys, bold and rounded" value={description} onChange={(e) => setDescription(e.target.value)} />
+        </label>
+      </section>
 
-      <div className="stack" style={{ gap: 20 }}>
-        <section className="card panel stack">
-          <span className="label">1 · Name</span>
-          <label className="field">
-            <span>Name</span>
-            <input className="input" autoFocus placeholder="e.g. Glossy toy" value={name} onChange={(e) => setName(e.target.value)} />
-          </label>
-          <label className="field">
-            <span>What should it feel like? (optional)</span>
-            <input className="input" placeholder="e.g. shiny vinyl designer toys, bold and rounded" value={description} onChange={(e) => setDescription(e.target.value)} />
-          </label>
-        </section>
-
-        <section className="card panel stack">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className="label">2 · Reference pictures</span>
-            <span className="small muted">{files.length} of {MAX_REFS}</span>
-          </div>
-          <p className="small muted" style={{ margin: 0 }}>Pictures of the look you want: material, colours, how chunky. Objects in them aren't copied, only the style.</p>
-          <PicturePicker srcs={previews} onAdd={addFiles} onRemove={(i) => setFiles(files.filter((_, j) => j !== i))} onFirst={(i) => setFiles([files[i], ...files.filter((_, j) => j !== i)])} />
-        </section>
-
-        <section className="card panel stack">
-          <div className="row" style={{ justifyContent: "space-between" }}>
-            <span className="label">3 · Print colours</span>
-            <button className="btn sm" disabled={!files.length} onClick={() => suggest()} title={files.length ? "" : "Add pictures first"}>Suggest from pictures</button>
-          </div>
-          <ColourFields palette={palette} onChange={(p) => (setPalette(p), setColoursTouched(true))} />
-        </section>
-
-        <section className="card panel stack">
-          <span className="label">4 · 3D shape</span>
-          <FinishFields g={geo} onChange={setGeo} />
-        </section>
-
-        {claudeReady && (
-          <label className="switch card panel">
-            <span>
-              <strong style={{ fontWeight: 500 }}>Let Claude write the style words from my pictures</strong>
-              <br />
-              <span className="small muted">The restyle instructions and sculpt guide. You can edit them afterwards. About 1¢.</span>
-            </span>
-            <input type="checkbox" checked={useClaude && files.length > 0} disabled={!files.length} onChange={(e) => setUseClaude(e.target.checked)} />
-          </label>
-        )}
-
-        <div className="row" style={{ justifyContent: "flex-end" }}>
-          <a className="btn ghost" href="#/styles">Cancel</a>
-          <button className="btn olive" disabled={!!busy || !name.trim()} onClick={create}>{busy ?? "Create style"}</button>
+      <section className="card panel stack">
+        <div className="row" style={{ justifyContent: "space-between" }}>
+          <span className="label">2 · Reference pictures</span>
+          <span className="small muted">{files.length} of {MAX_REFS}</span>
         </div>
+        <p className="small muted" style={{ margin: 0 }}>Pictures of the look you want: material, surface, how chunky. Their objects and colours aren't copied, only the treatment.</p>
+        <PicturePicker srcs={previews} onAdd={addFiles} onRemove={(i) => setFiles(files.filter((_, j) => j !== i))} onFirst={(i) => setFiles([files[i], ...files.filter((_, j) => j !== i)])} />
+      </section>
+
+      <section className="card panel stack">
+        <span className="label">3 · 3D shape</span>
+        <FinishFields g={geo} onChange={setGeo} />
+      </section>
+
+      {claudeReady && (
+        <label className="switch card panel">
+          <span>
+            <strong style={{ fontWeight: 500 }}>Let Claude write the style words from my pictures</strong>
+            <br />
+            <span className="small muted">The restyle instructions and sculpt guide. You can edit them afterwards. About 1¢.</span>
+          </span>
+          <input type="checkbox" checked={useClaude && files.length > 0} disabled={!files.length} onChange={(e) => setUseClaude(e.target.checked)} />
+        </label>
+      )}
+
+      <div className="row" style={{ justifyContent: "flex-end" }}>
+        <button className="btn ghost" onClick={onBack}>Back</button>
+        <button className="btn olive" disabled={!!busy || !name.trim()} onClick={create}>{busy ?? "Create style"}</button>
       </div>
     </div>
   );
@@ -376,8 +484,7 @@ export function NewStyle() {
 
 // ---------------------------------------------------------------- editor ----
 
-type Form = Required<Omit<StyleEdit, "palette" | "geometry" | "based_on">> & {
-  palette: NonNullable<StyleEdit["palette"]>;
+type Form = Required<Omit<StyleEdit, "geometry" | "based_on">> & {
   geometry: StyleGeometry;
 };
 
@@ -389,7 +496,6 @@ const toForm = (s: StyleDetail): Form => ({
   negative_prompt: s.negative_prompt,
   sculpt_guide: s.sculpt_guide,
   reference_mode: s.reference_mode ?? "style",
-  palette: { body: { ...s.palette.body }, base: { ...s.palette.base } },
   geometry: {
     height_mm: s.geometry.height_mm ?? 50,
     soften_mm: s.geometry.soften_mm ?? 0.9,
@@ -452,7 +558,7 @@ export function StyleEditor({ id }: { id: string }) {
   const refsCall = async (fn: () => Promise<StyleDetail>) => {
     try {
       const s = await fn();
-      setStyle(s); // pictures save straight away; your unsaved words and colours stay as they are
+      setStyle(s); // pictures save straight away; your unsaved words stay as they are
     } catch (e) {
       toast((e as Error).message, true);
     }
@@ -463,7 +569,7 @@ export function StyleEditor({ id }: { id: string }) {
       const d = await api.draftStyle(style.id, notes);
       set({
         description: form.description || d.description, prompt: d.prompt, edit_prompt: d.edit_prompt,
-        negative_prompt: d.negative_prompt, sculpt_guide: d.sculpt_guide, palette: { body: d.body, base: d.base },
+        negative_prompt: d.negative_prompt, sculpt_guide: d.sculpt_guide,
         geometry: { ...form.geometry, soften_mm: d.soften_mm, min_feature_mm: d.min_feature_mm, finish: d.finish },
       });
       toast("Claude drafted the style. Review it, then save.");
@@ -471,14 +577,6 @@ export function StyleEditor({ id }: { id: string }) {
       toast((e as Error).message, true);
     } finally {
       setDrafting(false);
-    }
-  };
-  const suggest = async () => {
-    try {
-      const p = await api.suggestColours({ style: style.id });
-      set({ palette: p });
-    } catch (e) {
-      toast((e as Error).message, true);
     }
   };
   const customize = async () => {
@@ -559,7 +657,7 @@ export function StyleEditor({ id }: { id: string }) {
               </div>
               <small className="muted">
                 {form.reference_mode === "style"
-                  ? "Colour, material and surface carry over; the objects in the picture don't get copied. Recommended."
+                  ? "Material, surface and shape language carry over; the objects (and colours) in the picture don't get copied. Recommended."
                   : "Follows the picture more closely, but can paste its objects (like a small pot or cactus) into your result."}
               </small>
             </div>
@@ -582,11 +680,10 @@ export function StyleEditor({ id }: { id: string }) {
           <section className="card panel stack">
             <span className="label">Preview</span>
             <div className="card style-card preview">
-              <div className="style-thumb"><StyleThumb s={{ palette: form.palette, finish: form.geometry.finish }} srcs={refs.slice(0, 3)} /></div>
+              <div className="style-thumb"><StyleThumb s={{ finish: form.geometry.finish }} srcs={refs.slice(0, 3)} /></div>
               <div className="style-meta">
                 <div className="style-title">
                   <strong>{form.name || "Untitled"}</strong>
-                  <span className="swatches">{Object.values(form.palette).map((c, i) => <span key={i} className="swatch" style={{ background: c.hex }} />)}</span>
                 </div>
                 <p className="clamp2 small muted">{form.description || "No description yet"}</p>
               </div>
@@ -596,7 +693,7 @@ export function StyleEditor({ id }: { id: string }) {
           {!ro && (
             <section className="card panel stack">
               <h3>Draft with Claude</h3>
-              <p className="small muted" style={{ margin: 0 }}>Claude looks at the reference pictures and writes the words, colours, softness and finish. You review before saving.</p>
+              <p className="small muted" style={{ margin: 0 }}>Claude looks at the reference pictures and writes the words, softness and finish (never colours: each object keeps its own). You review before saving.</p>
               <textarea className="input textarea" rows={2} placeholder="Optional notes, e.g. 'make it feel like vintage enamel'" value={notes} onChange={(e) => setNotes(e.target.value)} />
               <button className="btn" disabled={drafting || style.references === 0 || !settings?.claude.has_key} onClick={draft}>
                 {drafting ? "Claude is looking…" : "Draft from pictures"}
@@ -606,13 +703,9 @@ export function StyleEditor({ id }: { id: string }) {
             </section>
           )}
 
-          <section className="card panel stack">
-            <div className="row" style={{ justifyContent: "space-between" }}>
-              <h3>Print colours</h3>
-              {!ro && <button className="btn sm" disabled={!style.references} onClick={suggest}>Suggest from pictures</button>}
-            </div>
-            <ColourFields palette={form.palette} disabled={ro} onChange={(p) => set({ palette: p })} />
-          </section>
+          <p className="small muted" style={{ margin: 0 }}>
+            Styles set the look (shapes, surface, texture, detail), never colours. Each object keeps its picture's colours; you map them to filaments in the Print step.
+          </p>
 
           <section className="card panel stack">
             <h3>3D shape</h3>
