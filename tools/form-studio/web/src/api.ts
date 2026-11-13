@@ -148,6 +148,11 @@ export interface Report {
   thin_removed_pct: number;
   overhang_pct: number;
   warnings: string[];
+  /** flat formats built from the picture: how close the print is to it */
+  fidelity?: { outline_iou?: number; colour_match?: number; score?: number };
+  /** what printing changed from the picture, each with a way back where there is one */
+  changes?: { id: string; text: string; action: { label: string; params: Record<string, unknown> } | null }[];
+  relief_source?: "picture" | "shape";
 }
 
 export interface PaletteColour { hex: string; name: string; original: string }

@@ -500,7 +500,9 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
             mask_full = np.asarray(Image.open(mask_path).convert("L")) > 24
             _, mm_px = relief_mod.fit(mask_full, height)
             with timing.stage("printify.colours"):
-                labels, region_cols = logo_mod.regions(img, mask_full, n_paint, mm_per_px=mm_px, palette=pal_cols)
+                cstats: dict[str, Any] = {}
+                labels, region_cols = logo_mod.regions(img, mask_full, n_paint, mm_per_px=mm_px, palette=pal_cols,
+                                                       stats=cstats)
             say(0.4, "Pressing the picture into a relief")
             look = {"soften_mm": min(float(geo.get("soften_mm", 0.9)), 1.2)}
             if finish == "blender":
@@ -518,6 +520,8 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
                                                               mask_full, relief_mod.fit(mask_full, height)[0])
             except Exception as e:  # a score is a nice-to-have; never fail a print over it
                 log.warning("fidelity check failed: %s", e)
+            if "colour_match" in cstats:
+                relief_info.setdefault("fidelity", {})["colour_match"] = cstats["colour_match"]
             if relief_info["outline_removed_pct"] >= 2:
                 w.append(f"{relief_info['outline_removed_pct']:.0f}% of the outline was thinner than "
                          f"{min_feat:g} mm and was trimmed so it won't snap.")
@@ -688,6 +692,11 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     base_tm = to_trimesh(base_m) if base_m is not None else None
     report = _report(body_t, base_tm, pitch, min_feat, thin_removed, warnings)
     report.update({k: v for k, v in relief_info.items() if not k.startswith("_")})
+    if picture:
+        report["changes"] = _changes(report, params, min_feat, len(region_parts or []) or 1)
+        fid = report.get("fidelity") or {}
+        if fid:
+            fid["score"] = round(100 * min(fid.get("outline_iou", 1.0), fid.get("colour_match", 1.0)), 1)
     if region_parts:
         bad = [i for i, (_, m) in enumerate(region_parts) if not m.is_watertight]
         if bad:
@@ -697,6 +706,31 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     report["format"] = params.get("format", "stand")
     say(1.0, "Ready to print")
     return PrintResult(body_t, base_tm, report, parts=region_parts)
+
+
+def _changes(report: dict[str, Any], params: dict[str, Any], min_feat: float, n_parts: int) -> list[dict[str, Any]]:
+    """What printing changed from the picture, in plain words, each with a way back where there is one."""
+    out: list[dict[str, Any]] = []
+    cut = float(report.get("outline_removed_pct") or 0)
+    if cut >= 0.3:
+        out.append({"id": "thin", "text": f"Trimmed {cut:.1f}% of the outline: points and strands thinner than "
+                    f"{min_feat:g} mm would snap or not print.",
+                    "action": {"label": "Keep finer details (0.8 mm)", "params": {"geometry": {"min_feature_mm": 0.8}}}
+                    if min_feat > 0.8 else None})
+    match = (report.get("fidelity") or {}).get("colour_match")
+    if match is not None and match < 0.999:
+        out.append({"id": "specks", "text": f"Merged tiny colour specks ({100 * (1 - match):.1f}% of the picture) into "
+                    "the colour around them: a nozzle can't lay a separate colour that small.", "action": None})
+    if n_parts > 1:
+        out.append({"id": "grooves", "text": f"{n_parts} colours, each its own part with a small groove where two "
+                    "meet, so they print and read cleanly.", "action": None})
+    mag = params.get("magnet") or {}
+    if mag.get("enabled"):
+        out.append({"id": "pocket", "text": f"A pocket for a {mag.get('diameter_mm')} × {mag.get('depth_mm')} mm "
+                    "magnet in the back.", "action": None})
+    if (params.get("ring") or {}).get("enabled"):
+        out.append({"id": "ring", "text": "A key-ring loop on top.", "action": None})
+    return out
 
 
 def _overhang_pct(m: trimesh.Trimesh, floor_z: float) -> float:

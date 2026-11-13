@@ -110,6 +110,9 @@ def test_picture_colours_magnet_end_to_end(penguin):
         assert all("Picture colour" in p["label"] for p in parts)
         rep = j["report"]
         assert rep["relief_source"] == "picture" and rep["fidelity"]["outline_iou"] >= 0.95
+        assert rep["fidelity"]["score"] >= 95  # the review's "like the picture" score
+        changes = {c["id"]: c for c in rep["changes"]}
+        assert {"pocket", "grooves"} <= set(changes)
 
         d = paths.jobs_dir() / jid / "05_print"
         meshes = [trimesh.load(d / f"part_{i}.stl") for i in range(1, 5)]

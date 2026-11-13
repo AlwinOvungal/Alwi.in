@@ -242,7 +242,7 @@ def _same_paint(a: np.ndarray, b: np.ndarray) -> bool:
 
 
 def regions(img: "Image.Image", mask: np.ndarray, n: int | None = None, mm_per_px: float | None = None,
-            min_mm: float = 1.2, palette: list[dict[str, str]] | None = None
+            min_mm: float = 1.2, palette: list[dict[str, str]] | None = None, stats: dict | None = None
             ) -> tuple[np.ndarray, list[dict[str, str]]]:
     """The picture's colour regions, chunky enough to print: (label image, colours biggest-first).
 
@@ -350,6 +350,8 @@ def regions(img: "Image.Image", mask: np.ndarray, n: int | None = None, mm_per_p
     if missing.any():
         _, (iy, ix) = ndimage.distance_transform_edt(solid < 0, return_indices=True)
         solid[missing] = solid[iy[missing], ix[missing]]
+    if stats is not None:  # how much of the picture kept its own colour (the rest were specks too small to print)
+        stats["colour_match"] = round(float((solid[m] == np.array([keep.index(i) if i in keep else -2 for i in range(len(paints))])[pid[m]]).mean()), 4)
     # back to full size; edge pixels the small grid didn't own take the nearest region
     big = np.asarray(Image.fromarray((solid + 1).astype(np.uint8)).resize((x1 - x0, y1 - y0), Image.NEAREST)).astype(np.int32) - 1
     full = np.full(mask.shape, -1, np.int32)

@@ -749,6 +749,64 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
 
 // ---------------------------------------------------------------- 4. print ----
 
+/** Before export: how close the print is to the approved picture, and everything printing changed. */
+function ReviewCard({ job, busy, onApply }: { job: Job; busy: boolean; onApply: (o: Record<string, unknown>) => void }) {
+  const rep = job.report!;
+  const f = rep.fidelity ?? {};
+  const score = f.score ?? (f.outline_iou != null ? Math.round(f.outline_iou * 1000) / 10 : null);
+  const good = score != null && score >= 95;
+  const pct = (x?: number) => (x == null ? "–" : `${(x * 100).toFixed(1)}%`);
+  const parts = job.parts ?? [];
+  return (
+    <div className="card panel stack review">
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <h3>Review before printing</h3>
+        {score != null && (
+          <span className={`chip ${good ? "" : "offline"}`} title="Target: 95% or more">
+            <span className="dot" />{score.toFixed(1)}% like the picture
+          </span>
+        )}
+      </div>
+      <div className="review-body">
+        {job.files.includes("03_confirmed.png") && (
+          <img className="review-pic" src={fileUrl(job, "03_confirmed.png")} alt="The approved picture" />
+        )}
+        <div className="stack" style={{ gap: 8 }}>
+          {f.outline_iou != null && (
+            <div className="stats">
+              <div><span className="label">Outline</span><b>{pct(f.outline_iou)}</b></div>
+              <div><span className="label">Colour placement</span><b>{pct(f.colour_match)}</b></div>
+            </div>
+          )}
+          {parts.length > 1 && (
+            <div className="row small" style={{ gap: 6, flexWrap: "wrap" }}>
+              {parts.map((pt) => (
+                <span key={pt.id} className="chip"><i className="swatch" style={{ background: pt.hex }} />AMS {pt.filament} · {pt.name}</span>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
+      {!!rep.changes?.length && (
+        <>
+          <span className="small muted">Changed for printing:</span>
+          <ul className="changes">
+            {rep.changes.map((c) => (
+              <li key={c.id}>
+                <span className="small">{c.text}</span>
+                {c.action && (
+                  <button className="btn sm" disabled={busy} onClick={() => onApply(c.action!.params)}>{c.action.label}</button>
+                )}
+              </li>
+            ))}
+          </ul>
+        </>
+      )}
+      <span className="small muted">Change sizes, the finish or any colour on the right; when it looks right, export.</span>
+    </div>
+  );
+}
+
 /** One filament colour: swatch + name; opens a palette of common filaments and a custom colour wheel. */
 function ColourPick({ label, colour, onPick, disabled }: { label: string; colour: Colour; onPick: (c: { hex: string; name?: string }) => void; disabled?: boolean }) {
   const [open, setOpen] = useState(false);
@@ -808,13 +866,13 @@ function ColoursCard({ job, busy, run }: { job: Job; busy: boolean; run: (p: Pro
       <div className="row" style={{ justifyContent: "space-between" }}>
         <h3>Colours</h3>
         {job.colours_custom ? <span className="small muted">Chosen for this object</span> : (
-          <span className="small muted">{job.logo_parts ? "From your artwork" : "From the style"}</span>
+          <span className="small muted">{job.logo_parts ? "From your artwork" : ids.some((x) => x.startsWith("colour_")) ? "From the picture" : "From the style"}</span>
         )}
       </div>
       <div className={`colours-row ${ids.length === 1 ? "one" : ""}`}>
         {parts.map((part, i) => (
           <div key={part.id} className="colour-slot">
-            <ColourPick label={`${c[part.id]?.label ?? part.label ?? part.id} · filament ${part.filament}`}
+            <ColourPick label={part.id.startsWith("colour_") ? `AMS slot ${part.filament}` : `AMS slot ${part.filament} · ${c[part.id]?.label ?? part.label ?? part.id}`}
               colour={c[part.id] ?? part} onPick={pick(part.id)} disabled={busy} />
             {i < parts.length - 1 && (
               <button type="button" className="swap-mid" disabled={busy} title="Swap these two colours"
@@ -919,7 +977,7 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
           {view === "print" && (
             <div className="legend">
               {parts.map((pt) => (
-                <span key={pt.id}><i className="swatch" style={{ background: pt.hex }} />{pt.name} · filament {pt.filament}</span>
+                <span key={pt.id}><i className="swatch" style={{ background: pt.hex }} />{pt.name} · AMS slot {pt.filament}</span>
               ))}
             </div>
           )}
@@ -940,6 +998,9 @@ function PrintStep({ job, busy, style, settings, run }: StepProps & { style: Sty
             </div>
             {rep.warnings.map((w) => <div key={w} className="note warn">{w}</div>)}
           </div>
+        )}
+        {rep && (rep.fidelity || rep.changes) && (
+          <ReviewCard job={job} busy={busy || applying} onApply={(o) => apply(o as Overrides)} />
         )}
       </div>
 
