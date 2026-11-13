@@ -46,6 +46,9 @@ local-ai = [
   "einops>=0.7",
   "imageio>=2.34",
   "xatlas>=0.0.9",
+  # TripoSG's own requirements (its code downloads with its model)
+  "jaxtyping>=0.2.25",
+  "typeguard>=4.1",
 ]
 hunyuan = ["hy3dgen @ git+https://github.com/Tencent/Hunyuan3D-2.git"]
 step = ["cadquery-ocp>=7.7"]

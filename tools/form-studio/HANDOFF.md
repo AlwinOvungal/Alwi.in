@@ -270,7 +270,12 @@ cd ~/Alwi.in && git pull && cd tools/form-studio && ./scripts/setup-mac.sh   # r
 | 3D | `triposr` | local | single image → mesh, <1 min; code cloned to `~/FormStudio/vendor/TripoSR`; `torchmcubes` shimmed |
 | 3D | `hunyuan-mini` | local | optional install (`--with-hunyuan`), 4 GB |
 | 3D | `meshy` | cloud | Meshy image-to-3D (needs Meshy Pro for API) |
-| 3D | `fal-trellis`, `fal-hunyuan` | cloud | fal.ai |
+| 3D | `triposg` | local | TripoSG (MIT); code cloned to `~/FormStudio/vendor/TripoSG` (pack `triposg-code`), weights `VAST-AI/TripoSG` (~8 GB, pack `triposg`); `diso` (CUDA marching cubes) shimmed with scikit-image (`local._DiffDMC`); fp16 on MPS, fp32 on CPU; our own cut-out on white, so RMBG never loads. **Not yet run on a real Mac** |
+| 3D | `fal-hunyuan3` | cloud | Hunyuan3D 3.1 Rapid (`fal.hunyuan3_quality` = pro → Pro endpoint); 3 views always use Pro; `generate_type: Geometry` |
+| 3D | `fal-tripo` | cloud | Tripo H3.1, `texture/pbr: false`, downloads `model_urls.base_model`; 3 views → `multiview-to-3d` (front, left, back); `fal.tripo_detail` |
+| 3D | `fal-trellis2` | cloud | TRELLIS 2, `fal.trellis2_resolution` 512/1024/1536 (no shape-only tier) |
+| 3D | `fal-meshy` | cloud | Meshy 6 on fal, `should_texture: false` (fal's Meshy multi-image endpoint is deprecated) |
+| 3D | `fal-trellis`, `fal-hunyuan` | cloud | older fal engines, `legacy = True`: hidden in the UI unless in use; `settings._migrate` moves a saved default to `fal-hunyuan3` |
 | 3D | `claude-sculpt` | cloud | Claude returns a `ShapeRecipe` (soft primitives) via structured output; saved to `04_recipe.json`; rebuild is free and deterministic |
 | 3D | `lathe`, `extrude` | offline | from the silhouette: cups/vases, or flat art |
 

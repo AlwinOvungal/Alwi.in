@@ -138,11 +138,12 @@ def default_engine(job: Job, step: str, settings: dict[str, Any]) -> str:
 
 AUTO_ORDER = {  # "Make it now": your default engine first, then the best one that's ready right now
     "stylize": ["local-sdxl", "openai-image", "fal-nano-banana", "fal-kontext"],
-    "reconstruct": ["triposr", "hunyuan-mini", "meshy", "fal-trellis", "fal-hunyuan", "extrude"],
+    "reconstruct": ["triposg", "triposr", "hunyuan-mini", "fal-hunyuan3", "fal-tripo", "fal-trellis2", "meshy", "fal-meshy",
+                    "fal-trellis", "fal-hunyuan", "extrude"],
 }
 
 
-LOCAL_PACKS = {"triposr": ["triposr-code", "triposr"], "hunyuan-mini": ["hunyuan"], "hunyuan-mv": ["hunyuan-mv"]}
+LOCAL_PACKS = {"triposr": ["triposr-code", "triposr"], "triposg": ["triposg-code", "triposg"], "hunyuan-mini": ["hunyuan"], "hunyuan-mv": ["hunyuan-mv"]}
 
 
 def pick_engine(job: Job, step: str, ctx: EngineContext, settings: dict[str, Any]) -> str | None:

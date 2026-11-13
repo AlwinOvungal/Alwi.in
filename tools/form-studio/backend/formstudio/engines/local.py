@@ -43,7 +43,7 @@ def pick_device(pref: str = "auto") -> str:
 _models: "OrderedDict[str, Any]" = OrderedDict()
 _models_lock = threading.RLock()
 # roughly what each family takes in memory (GB, fp16 on Apple Silicon)
-FAMILY_GB = {"sdxl": 9.0, "sdxl-turbo": 7.0, "triposr": 2.0, "hunyuan": 6.0, "hunyuan-mv": 7.0, "mvadapter": 12.0}
+FAMILY_GB = {"sdxl": 9.0, "sdxl-turbo": 7.0, "triposr": 2.0, "hunyuan": 6.0, "hunyuan-mv": 7.0, "triposg": 6.0, "mvadapter": 12.0}
 _policy = {"keep_loaded": "auto"}
 
 
@@ -577,6 +577,122 @@ class LocalTripoSR:
         return {"model": "stabilityai/TripoSR", "device": device}
 
 
+# ---- TripoSG -------------------------------------------------------------------------------
+
+class _DiffDMC:
+    """Stand-in for diso.DiffDMC (a CUDA build) using scikit-image's marching cubes on the CPU.
+
+    TripoSG calls `DiffDMC(dtype=...).to(device)` then `dmc(sdf, deform=None, return_quads=False,
+    normalize=False)` with sdf < 0 inside, and expects (vertices in grid units, faces) as tensors whose
+    winding it flips itself. Cells it never evaluated are NaN: they're outside."""
+
+    def __init__(self, dtype=None):
+        self.dtype = dtype
+
+    def to(self, *_a, **_k):
+        return self
+
+    def __call__(self, sdf, deform=None, return_quads=False, normalize=False):
+        import torch
+        from skimage import measure
+
+        vol = sdf.detach().float().cpu().numpy()
+        vol = np.where(np.isfinite(vol), vol, max(float(np.nanmax(vol)) if np.isfinite(vol).any() else 1.0, 1e-3))
+        if not (vol.min() < 0 < vol.max()):
+            raise ValueError("no surface in the shape field")
+        # inward-facing, like DiffDMC: TripoSG flips the winding itself
+        v, f, _, _ = measure.marching_cubes(vol, 0.0, gradient_direction="ascent")
+        if normalize:
+            v = v / (np.array(vol.shape) - 1)
+        return torch.from_numpy(v.astype(np.float32).copy()), torch.from_numpy(f.astype(np.int64).copy())
+
+
+def _install_diso_shim() -> None:
+    """TripoSG imports diso (CUDA-only marching cubes). Everything else in it is plain PyTorch."""
+    try:
+        import diso  # noqa: F401
+        return
+    except ImportError:
+        pass
+    sys.modules["diso"] = types.SimpleNamespace(DiffDMC=_DiffDMC, DiffMC=_DiffDMC)  # type: ignore
+
+
+def triposg_dir() -> Path:
+    return paths.home() / "vendor" / "TripoSG"
+
+
+class LocalTripoSG:
+    id = "triposg"
+    label = "TripoSG (local)"
+    kind = "local"
+    note = "Free, MIT licence. Much better shapes than TripoSR, a few minutes on Apple Silicon; ~8 GB download."
+
+    def available(self, ctx: EngineContext) -> tuple[bool, str]:
+        why = missing("torch", "diffusers", "einops", "jaxtyping", "typeguard", "omegaconf")
+        return (why is None, why or "")  # the code and model download on first use (Settings → Local AI models)
+
+    def _pipe(self, ctx: EngineContext):
+        if str(triposg_dir()) not in sys.path:
+            sys.path.insert(0, str(triposg_dir()))
+        _install_diso_shim()
+        from triposg.pipelines.pipeline_triposg import TripoSGPipeline  # type: ignore
+
+        device = ctx.device
+
+        def make():
+            import torch
+
+            # half precision halves the memory on the GPU; the CPU needs full precision
+            dtype = torch.float32 if device == "cpu" else torch.float16
+            return TripoSGPipeline.from_pretrained("VAST-AI/TripoSG").to(device, dtype)
+
+        return _cached(f"triposg:{device}", make)
+
+    def warm(self, ctx: EngineContext) -> None:
+        self._pipe(ctx)
+
+    def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        _ensure_models("triposg-code", progress, 0.0, 0.02)
+        _ensure_models("triposg", progress, 0.0, 0.25)
+        return _retry_on_oom(lambda: self._reconstruct(inp, ctx, progress))
+
+    def _reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        import torch
+        import trimesh
+
+        device = ctx.device
+        warm = is_loaded("triposg")
+        if not warm:
+            progress(None, "Loading TripoSG into memory (only the first time)")
+        pipe = self._pipe(ctx)
+        # the object on white, filling most of a square (what TripoSG was trained on); our own cut-out,
+        # so TripoSG's background remover is never needed
+        rgba = _rgba(inp)
+        box = rgba.getchannel("A").point(lambda a: 255 if a > 8 else 0).getbbox() or (0, 0, *rgba.size)
+        obj = rgba.crop(box)
+        side = int(max(obj.size) / 0.9)
+        canvas = Image.new("RGB", (side, side), (255, 255, 255))
+        canvas.paste(obj, ((side - obj.width) // 2, (side - obj.height) // 2), obj)
+        image = canvas.resize((512, 512), Image.LANCZOS)
+        progress(0.3, "Building the shape")
+        with timing.stage("reconstruct_infer", engine=self.id, device=device, warm=warm), torch.no_grad():
+            out = pipe(image=image, generator=torch.Generator("cpu").manual_seed(int(inp.seed)),
+                       num_inference_steps=50, guidance_scale=7.0)
+        verts, faces = out.samples[0]
+        if verts is None or len(verts) == 0:
+            raise EngineError("TripoSG couldn't find a shape in this picture.", "empty mesh",
+                              steps=["Try again with another seed, or use another engine."])
+        progress(0.85, "Cleaning up")
+        mesh = trimesh.Trimesh(np.asarray(verts, np.float32), np.ascontiguousarray(faces), process=True)
+        parts = mesh.split(only_watertight=False)
+        if len(parts) > 1:  # floaters: keep the main body
+            mesh = max(parts, key=lambda m: len(m.faces))
+        trimesh.repair.fix_normals(mesh)
+        mesh.export(inp.out)  # TripoSG already uses glTF y-up
+        progress(1.0, "Done")
+        return {"model": "VAST-AI/TripoSG", "device": device, "faces": int(len(mesh.faces))}
+
+
 # ---- Hunyuan3D with transformers 5 ----------------------------------------------------------
 
 # transformers 5 renamed DINOv2's weights (its own from_pretrained converts old checkpoints with these same
@@ -773,4 +889,9 @@ def warm(ctx: EngineContext, stylize_engine: str | None, reconstruct_engine: str
         if eng.available(ctx)[0] and ready(["triposr-code", "triposr"]) and (is_loaded("triposr") or would_fit("triposr")):
             eng.warm(ctx)
             done.append("triposr")
+    elif reconstruct_engine == "triposg":
+        eng = RECONSTRUCTORS["triposg"]
+        if eng.available(ctx)[0] and ready(["triposg-code", "triposg"]) and (is_loaded("triposg") or would_fit("triposg")):
+            eng.warm(ctx)
+            done.append("triposg")
     return done

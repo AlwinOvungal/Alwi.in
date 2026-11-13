@@ -47,7 +47,7 @@ def storage_locations() -> list[dict[str, str]]:
         ("styles", "Your styles", home() / "styles", "Styles you made, with their reference pictures."),
         ("hf", "Local AI models", hf, "SDXL, TripoSR and Hunyuan3D. Downloaded the first time a local engine runs."),
         ("rembg", "Background remover model", u2net, "Downloaded the first time a photo is added."),
-        ("vendor", "TripoSR code", home() / "vendor", "Installed by setup-mac.sh."),
+        ("vendor", "Local 3D code (TripoSR, TripoSG)", home() / "vendor", "Downloaded with their models."),
     ]
     leftovers = home() / "old-version-leftovers"
     if leftovers.exists():

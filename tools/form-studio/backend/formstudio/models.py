@@ -80,6 +80,17 @@ PACKS: dict[str, dict[str, Any]] = {
             "facebook/dino-vitb16": ["config.json", "preprocessor_config.json", "pytorch_model.bin"],
         },
     },
+    "triposg": {
+        "label": "3D · TripoSG",
+        "used_by": "TripoSG (local image → 3D, better shapes than TripoSR; optional)",
+        "repos": {
+            "VAST-AI/TripoSG": [
+                "model_index.json", "scheduler/*", "feature_extractor_dinov2/*", "*/config.json",
+                "image_encoder_dinov2/model.safetensors", "transformer/diffusion_pytorch_model.safetensors",
+                "vae/diffusion_pytorch_model.safetensors",
+            ],
+        },
+    },
     "hunyuan": {
         "label": "3D · Hunyuan3D-2 mini",
         "used_by": "Hunyuan3D-2 mini (local image → 3D, optional)",
@@ -119,8 +130,17 @@ ENGINE_PACKS: dict[str, dict[str, Any]] = {
         "used_by": "TripoSR (local image → 3D) program files",
         "bytes": 64 * 1024**2,
     },
+    "triposg-code": {
+        "label": "3D · TripoSG code",
+        "used_by": "TripoSG (local image → 3D) program files",
+        "bytes": 40 * 1024**2,
+    },
 }
 TRIPOSR_GIT = "https://github.com/VAST-AI-Research/TripoSR.git"
+VENDOR = {  # code pack → (folder under vendor/, git repository, a folder that's there once it's complete)
+    "triposr-code": ("TripoSR", TRIPOSR_GIT, "tsr"),
+    "triposg-code": ("TripoSG", "https://github.com/VAST-AI-Research/TripoSG.git", "triposg"),
+}
 
 
 def all_packs() -> list[str]:
@@ -133,12 +153,12 @@ def _u2net_dir() -> Path:
     return Path(os.environ.get("U2NET_HOME") or Path.home() / ".u2net").expanduser()
 
 
-def _vendor_dir() -> Path:
-    return paths.home() / "vendor" / "TripoSR"
+def _vendor_dir(pack: str = "triposr-code") -> Path:
+    return paths.home() / "vendor" / VENDOR[pack][0]
 
 
 def _engine_path(pack: str) -> Path:
-    return _u2net_dir() if pack == "matting" else _vendor_dir()
+    return _u2net_dir() if pack == "matting" else _vendor_dir(pack)
 
 
 def _engine_status(pack: str) -> dict[str, Any]:
@@ -149,7 +169,7 @@ def _engine_status(pack: str) -> dict[str, Any]:
         # rembg keeps its models in ~/.u2net or a subfolder of it, depending on the version
         ready = any(_safe_size(f) > 50 * 1024**2 for f in p.rglob("*.onnx")) if p.exists() else False
     else:
-        ready = (p / "tsr").is_dir()
+        ready = (p / VENDOR[pack][2]).is_dir()
     state = "ready" if ready else ("partial" if on_disk else "missing")
     return {"status": state, "total_bytes": total, "done_bytes": total if ready else on_disk, "on_disk_bytes": on_disk}
 
@@ -160,11 +180,11 @@ def _matting_download() -> None:  # seam for tests
     new_session("isnet-general-use")
 
 
-def _triposr_download(dest: Path) -> None:  # seam for tests
+def _triposr_download(dest: Path, repo: str = TRIPOSR_GIT) -> None:  # seam for tests
     import subprocess
 
     dest.parent.mkdir(parents=True, exist_ok=True)
-    r = subprocess.run(["git", "clone", "--quiet", "--depth", "1", TRIPOSR_GIT, str(dest)], capture_output=True, text=True)
+    r = subprocess.run(["git", "clone", "--quiet", "--depth", "1", repo, str(dest)], capture_output=True, text=True)
     if r.returncode != 0:
         raise RuntimeError(r.stderr.strip() or "git clone failed")
 
@@ -181,8 +201,11 @@ def _engine_download(pack: str, state: "DownloadState", progress: Progress | Non
             if pack == "matting":
                 _matting_download()
             else:
-                shutil.rmtree(_vendor_dir(), ignore_errors=True)
-                _triposr_download(_vendor_dir())
+                shutil.rmtree(_vendor_dir(pack), ignore_errors=True)
+                if pack == "triposr-code":
+                    _triposr_download(_vendor_dir(pack))
+                else:
+                    _triposr_download(_vendor_dir(pack), VENDOR[pack][1])
         except BaseException as e:  # reported below
             err.append(e)
         finally:
@@ -572,6 +595,8 @@ def packs_needed(settings: dict[str, Any]) -> list[str]:
         need += ["sdxl-turbo"] if q == "lightest" else ["sdxl"] + (["sdxl-lightning"] if q == "quick" else [])
     if engines.get("reconstruct") == "triposr":
         need += ["triposr-code", "triposr"]
+    elif engines.get("reconstruct") == "triposg":
+        need += ["triposg-code", "triposg"]
     elif engines.get("reconstruct") == "hunyuan-mini":
         need.append("hunyuan")
     elif engines.get("reconstruct") == "hunyuan-mv":

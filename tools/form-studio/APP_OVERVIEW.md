@@ -107,7 +107,7 @@ self-shadow speckle on prints — the "diamond" patch).
 | Log | `~/FormStudio/formstudio.log` |
 | Local AI models | `~/.cache/huggingface` (SDXL 12 GB, TripoSR 1.9 GB, SDXL-Turbo 6.5 GB, Hunyuan3D 4 GB) |
 | Background remover model | `~/.u2net` (~170 MB) |
-| TripoSR code | `~/FormStudio/vendor/TripoSR` (~64 MB) |
+| Local 3D code | `~/FormStudio/vendor/TripoSR` (~64 MB), `~/FormStudio/vendor/TripoSG` (~40 MB) |
 
 **Install / update:** `cd ~/Alwi.in && git pull`, then `cd tools/form-studio && ./scripts/setup-mac.sh`.
 - `--reinstall-ai` reinstalls the AI libraries from scratch.
@@ -303,10 +303,14 @@ loop added.
 | Restyle | FLUX Kontext (fal.ai) | cloud | ~$0.025/image | Words only |
 | Restyle | Palette preview | offline | free | Recolour only, no AI |
 | 3D | TripoSR | local | free | Under a minute; code + 1.9 GB model |
+| 3D | TripoSG | local | free | MIT; much better shapes than TripoSR; ~8 GB download, a few minutes on Apple Silicon |
 | 3D | Hunyuan3D-2 mini | local | free | Optional install; 4 GB |
+| 3D | **Hunyuan3D 3.1 (fal.ai)** | cloud | ~$0.23 Rapid / ~$0.38 Pro | Recommended cloud 3D; with 3 views uses Pro (+$0.15) |
+| 3D | Tripo H3.1 (fal.ai) | cloud | ~$0.20 (+$0.20 Detailed) | Clean, solid shapes; uses 3 views |
+| 3D | TRELLIS 2 (fal.ai) | cloud | ~$0.25–0.35 | By resolution 512 / 1024 / 1536 |
+| 3D | Meshy 6 (fal.ai) | cloud | ~$0.80 | Meshy with a fal.ai key: no Meshy plan |
 | 3D | Meshy | cloud | ~5–20 credits (~$0.10–0.40) | Needs Meshy **Pro** plan for API |
-| 3D | TRELLIS (fal.ai) | cloud | ~$0.02 | Cheapest cloud 3D |
-| 3D | Hunyuan3D-2 mini (fal.ai) | cloud | ~$0.10 | |
+| 3D | TRELLIS, Hunyuan3D-2 mini (fal.ai, older) | cloud | ~$0.02 / ~$0.10 | Hidden unless already in use; a saved default moves to Hunyuan3D 3.1 |
 | 3D | Claude Sculpt | cloud | ~$0.02–0.06 | Claude writes a recipe of soft primitives; rebuild is free and identical |
 | 3D | Lathe / Extrude | offline | free | From the silhouette: cups/vases, or flat art |
 | Other | Claude naming, style drafts | cloud | ~1¢ | Anthropic key |

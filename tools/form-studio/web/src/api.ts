@@ -229,6 +229,8 @@ export interface Engine {
   /** only for logos and text ("Logo or text" on the Photo step) */
   logo_only?: boolean;
   flat_only?: boolean;
+  /** an older engine kept so earlier objects still rebuild; hidden unless it's the one in use */
+  legacy?: boolean;
 }
 
 export interface Engines {
@@ -331,7 +333,14 @@ export interface Settings {
   memory: { ram_gb: number | null; budget_gb: number; loaded: string[] };
   candidates: number;
   export_formats: string[];
-  fal: { endpoints: Record<string, string>; has_key: boolean; key_hint: string };
+  fal: {
+    endpoints: Record<string, string>;
+    hunyuan3_quality: "rapid" | "pro";
+    tripo_detail: "standard" | "detailed";
+    trellis2_resolution: 512 | 1024 | 1536;
+    has_key: boolean;
+    key_hint: string;
+  };
   claude: { model: string; effort: string; auto_name: boolean; has_key: boolean; key_hint: string };
   openai: { model: string; quality: string; has_key: boolean; key_hint: string };
   meshy: { ai_model: string; has_key: boolean; key_hint: string };

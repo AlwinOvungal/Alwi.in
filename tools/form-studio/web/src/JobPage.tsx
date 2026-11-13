@@ -206,7 +206,7 @@ function useFailure(job: Job, kind: string) {
 
 /** Another engine that works now: free local first, then cloud, then offline. */
 function otherEngine(list: Engines["stylize"] | undefined, current: string): string | undefined {
-  const ok = (list ?? []).filter((e) => e.available && e.id !== current);
+  const ok = (list ?? []).filter((e) => e.available && e.id !== current && !e.legacy);
   return (ok.find((e) => e.kind === "local") ?? ok.find((e) => e.kind === "cloud") ?? ok[0])?.id;
 }
 
@@ -703,7 +703,7 @@ function ViewsCard({ job, busy, engines, settings, run }: StepProps & { engines:
       </div>
       <p className="small muted" style={{ margin: 0 }}>
         Draws your chosen look from the front, side and back, so the 3D model sees the whole object instead of guessing the back.
-        Meshy, TRELLIS and Hunyuan3D build from all three.
+        Hunyuan3D 3.1, Tripo and Meshy build from all three.
       </p>
       {has && (
         <div className="views">
@@ -775,15 +775,18 @@ function ViewsCard({ job, busy, engines, settings, run }: StepProps & { engines:
 
 function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines: Engines | null }) {
   const [engine, setEngine] = useState("");
+  // a flat object starts on "From the picture"; an engine is remembered only once it has built a shape
+  const built = reached(job, "reconstructed") ? job.reconstruct?.engine : undefined;
   // logos: only the exact engine fits (AI 3D loses thin letters); objects: everything but it
   const flat = !!job.print_params?.flat_back?.enabled;
   // logos: only the exact engine fits; magnets/keychains/ornaments: "from the picture" first, AI 3D optional
   const list = useMemo(
-    () => (engines?.reconstruct ?? []).filter((e) => (job.kind === "logo") === !!e.logo_only && (flat || !e.flat_only)),
-    [engines, job.kind, flat],
+    () =>
+      (engines?.reconstruct ?? []).filter(
+        (e) => (job.kind === "logo") === !!e.logo_only && (flat || !e.flat_only) && (!e.legacy || e.id === built || e.id === settings?.engines.reconstruct),
+      ),
+    [engines, job.kind, flat, built, settings],
   );
-  // a flat object starts on "From the picture"; an engine is remembered only once it has built a shape
-  const built = reached(job, "reconstructed") ? job.reconstruct?.engine : undefined;
   useEffect(
     () => setEngine((e) => (e && list.some((x) => x.id === e) ? e : pickAvailable(list, job.kind === "logo" ? "logo" : flat ? (built ?? "picture") : (built ?? settings?.engines.reconstruct)))),
     [settings, engines, built, list, job.kind, flat],
@@ -813,7 +816,7 @@ function ShapeStep({ job, busy, engines, settings, run }: StepProps & { engines:
               : job.views && engines?.reconstruct.find((e) => e.id === engine)?.multi_view
               ? "This engine builds from all 3 views. Form Studio then cleans the shape up for printing."
               : job.views
-                ? "This engine uses the front view only. Meshy, TRELLIS and Hunyuan3D use all 3 views."
+                ? "This engine uses the front view only. Hunyuan3D 3.1, Tripo and Meshy use all 3 views."
                 : "The 3D model guesses the back and sides from this one image. Make 3 views above for a better back. Form Studio then cleans it up for printing."}
           </p>
           {engines && <EnginePicker engines={list} value={engine} onChange={setEngine} />}

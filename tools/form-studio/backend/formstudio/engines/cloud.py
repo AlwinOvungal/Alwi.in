@@ -1,10 +1,14 @@
 """Cloud engines on fal.ai: fast, pay per use, need an API key (saved in Keychain).
 
-Approximate prices (check fal.ai):
+Approximate prices (check fal.ai). 3D engines ask for the shape only (no textures): colours come
+from the picture and the AMS mapping, and an untextured model is the cheapest tier.
   Nano Banana (Gemini Flash Image) edit  ≈ $0.04 per image
   FLUX Kontext dev                       ≈ $0.025 per image
-  TRELLIS                                ≈ $0.02 per shape
-  Hunyuan3D-2 mini                       ≈ $0.10 per shape
+  Hunyuan3D 3.1 Rapid / Pro              ≈ $0.23 / $0.38 per shape (+$0.15 with 3 views)
+  Tripo H3.1                             ≈ $0.20 per shape (+$0.20 detailed geometry)
+  TRELLIS 2                              ≈ $0.25 / $0.30 / $0.35 per shape (512 / 1024 / 1536)
+  Meshy 6                                ≈ $0.80 per shape (no Meshy plan needed)
+  TRELLIS, Hunyuan3D-2 mini (older)      ≈ $0.02, $0.10 per shape
 """
 from __future__ import annotations
 
@@ -32,7 +36,14 @@ ENDPOINTS = {
     # used instead when the object has front / side / back views
     "fal-trellis-multi": "fal-ai/trellis/multi",
     "fal-hunyuan-multi": "fal-ai/hunyuan3d/v2/multi-view",
+    "fal-hunyuan3": "fal-ai/hunyuan-3d/v3.1/rapid/image-to-3d",
+    "fal-hunyuan3-pro": "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d",
+    "fal-tripo": "tripo3d/h3.1/image-to-3d",
+    "fal-tripo-multi": "tripo3d/h3.1/multiview-to-3d",
+    "fal-trellis2": "fal-ai/trellis-2",
+    "fal-meshy": "fal-ai/meshy/v6/image-to-3d",
 }
+FACES = 200_000  # plenty for a print; printify simplifies further
 
 
 def _data_uri(path: Path) -> str:
@@ -151,6 +162,22 @@ def _transparent_upload(inp: ReconstructInput) -> Path:
     return tmp
 
 
+def _mesh_url(res: dict[str, Any]) -> str:
+    """The untextured model's URL in a fal 3D result (each model names it differently)."""
+    urls = res.get("model_urls") or {}
+    for v in (urls.get("base_model"), res.get("model_glb"), res.get("model_mesh"), urls.get("glb")):
+        url = v.get("url") if isinstance(v, dict) else v
+        if isinstance(url, str) and url:
+            return url
+    raise EngineError("fal.ai finished but sent no 3D model back. Try again, or use another engine.",
+                      str(sorted(res))[:300])
+
+
+def _fal_opt(ctx: EngineContext, name: str, default: Any) -> Any:
+    v = (ctx.settings.get("fal") or {}).get(name)
+    return default if v in (None, "") else v
+
+
 class _FalEngine:
     kind = "cloud"
     parallel = 4  # one picture per request: run options side by side
@@ -226,11 +253,103 @@ class FalKontext(_FalEngine):
 
 # ------------------------------------------------------------- image → 3D ----
 
+class _FalShape(_FalEngine):
+    """One picture (or the 3 views) in, one untextured model out."""
+
+    def _run(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress, endpoint: str,
+             args: dict[str, Any], views: int = 0) -> dict:
+        client = make_client(ctx)
+        res = client.run(endpoint, args, _scaled(progress, 0.05, 0.9))
+        client.download(_mesh_url(res), inp.out)
+        progress(1.0, "Done")
+        return {"endpoint": endpoint, **({"views": views} if views else {})}
+
+
+class FalHunyuan3(_FalShape):
+    id = "fal-hunyuan3"
+    label = "Hunyuan3D 3.1 (fal.ai cloud)"
+    multi_view = True
+    note = ("Paid, ~$0.23 per shape (Pro ~$0.38, set in Settings). Reliable, detailed shapes; the best value in "
+            "the cloud. With 3 views it uses Pro (+$0.15).")
+
+    def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        views = view_uris(inp)
+        pro = views is not None or _fal_opt(ctx, "hunyuan3_quality", "rapid") == "pro"
+        endpoint = _endpoint(ctx, "fal-hunyuan3-pro" if pro else self.id)
+        args: dict[str, Any] = {"generate_type": "Geometry", "face_count": FACES}
+        if views:
+            args.update(input_image_url=views["front"],
+                        **{f"{k}_image_url": views[k] for k in ("back", "left", "right") if k in views})
+            return self._run(inp, ctx, progress, endpoint, args, len(views))
+        tmp = _transparent_upload(inp)
+        try:
+            return self._run(inp, ctx, progress, endpoint, {"input_image_url": _data_uri(tmp), **args})
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+class FalTripo(_FalShape):
+    id = "fal-tripo"
+    label = "Tripo H3.1 (fal.ai cloud)"
+    multi_view = True
+    note = ("Paid, ~$0.20 per shape (+$0.20 for Detailed, set in Settings). Clean, solid shapes that print well. "
+            "Uses all 3 views when you make them.")
+
+    def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        views = view_uris(inp)
+        args: dict[str, Any] = {"texture": False, "pbr": False, "model_seed": int(inp.seed),
+                                "geometry_quality": "detailed" if _fal_opt(ctx, "tripo_detail", "standard") == "detailed"
+                                else "standard"}
+        if views and "front" in views:
+            order = [views[k] for k in ("front", "left", "back", "right") if k in views]
+            return self._run(inp, ctx, progress, _endpoint(ctx, "fal-tripo-multi"), {"image_urls": order, **args},
+                             len(order))
+        tmp = _transparent_upload(inp)
+        try:
+            return self._run(inp, ctx, progress, _endpoint(ctx, self.id),
+                             {"image_url": _data_uri(tmp), "face_limit": FACES, **args})
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+class FalTrellis2(_FalShape):
+    id = "fal-trellis2"
+    label = "TRELLIS 2 (fal.ai cloud)"
+    note = "Paid, ~$0.30 per shape (512: $0.25, 1536: $0.35, set in Settings). Sharp, detailed shapes from one picture."
+
+    def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        res = int(_fal_opt(ctx, "trellis2_resolution", 1024))
+        res = res if res in (512, 1024, 1536) else 1024
+        tmp = _transparent_upload(inp)
+        try:
+            return self._run(inp, ctx, progress, _endpoint(ctx, self.id), {
+                "image_url": _data_uri(tmp), "seed": int(inp.seed), "resolution": res,
+                "texture_size": 1024, "decimation_target": FACES // 2})  # vertices, not faces
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
+class FalMeshy(_FalShape):
+    id = "fal-meshy"
+    label = "Meshy 6 (fal.ai cloud)"
+    note = "Paid, ~$0.80 per shape, with your fal.ai key: no Meshy plan needed. Smooth, tidy shapes."
+
+    def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
+        tmp = _transparent_upload(inp)
+        try:
+            return self._run(inp, ctx, progress, _endpoint(ctx, self.id), {
+                "image_url": _data_uri(tmp), "should_texture": False, "should_remesh": True,
+                "topology": "triangle", "target_polycount": 100_000, "symmetry_mode": "auto"})
+        finally:
+            tmp.unlink(missing_ok=True)
+
+
 class FalTrellis(_FalEngine):
     id = "fal-trellis"
-    label = "TRELLIS (fal.ai cloud)"
+    label = "TRELLIS (fal.ai cloud, older)"
     multi_view = True
-    note = "Paid, ~$0.02 per shape. Good shapes in under a minute; the cheapest cloud 3D. Uses all 3 views when you make them."
+    legacy = True  # replaced by TRELLIS 2; kept so older objects still rebuild
+    note = "Paid, ~$0.02 per shape. The first TRELLIS: cheap but rougher. Uses all 3 views when you make them."
 
     def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:
         client = make_client(ctx)
@@ -256,8 +375,9 @@ class FalTrellis(_FalEngine):
 
 class FalHunyuan(_FalEngine):
     id = "fal-hunyuan"
-    label = "Hunyuan3D-2 mini (fal.ai cloud)"
+    label = "Hunyuan3D-2 mini (fal.ai cloud, older)"
     multi_view = True
+    legacy = True  # replaced by Hunyuan3D 3.1
     note = "Paid, ~$0.10 per shape. Detailed shapes in about 30 seconds. Uses all 3 views when you make them."
 
     def reconstruct(self, inp: ReconstructInput, ctx: EngineContext, progress: Progress) -> dict:

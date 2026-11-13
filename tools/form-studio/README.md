@@ -99,17 +99,22 @@ Pick default engines in **Settings**, and switch them for each object as you go.
 | Restyle | FLUX Kontext (fal.ai) | about $0.025 per image | Strong at keeping the shape; uses only the style's words. Needs a fal.ai key. |
 | Restyle | Palette preview (offline) | free | Instant recolour. No AI. |
 | 3D | TripoSR (local) | free | MIT licence. Under a minute. |
+| 3D | TripoSG (local) | free | MIT licence. Much better shapes than TripoSR; a few minutes; ~8 GB download. |
 | 3D | Hunyuan3D-2 mini (local) | free | Better shapes and slower. Install with `--with-hunyuan`. |
+| 3D | **Hunyuan3D 3.1** (fal.ai) | about $0.23 per shape (Pro about $0.38) | Recommended cloud 3D: reliable, detailed shapes. Uses all 3 views (with Pro, +$0.15). |
+| 3D | Tripo H3.1 (fal.ai) | about $0.20 per shape (Detailed about $0.40) | Clean, solid shapes that print well. Uses all 3 views. |
+| 3D | TRELLIS 2 (fal.ai) | about $0.25–0.35 per shape | Sharp detail from one picture; price by resolution. |
+| 3D | Meshy 6 (fal.ai) | about $0.80 per shape | Meshy with your fal.ai key: no Meshy plan needed. |
 | 3D | **Meshy** (meshy.ai) | ~5–20 credits per object (≈ $0.10–0.40 on the Pro plan) | Strong, print-ready shapes in 1–3 minutes. API access needs a Meshy **Pro plan** (about $20/month); failed jobs are refunded. |
-| 3D | TRELLIS (fal.ai) | about $0.02 per shape | The cheapest cloud 3D, under a minute. Needs a fal.ai key. |
-| 3D | Hunyuan3D-2 mini (fal.ai) | about $0.10 per shape | Detailed shapes in about 30 s. Needs a fal.ai key. |
+| 3D | TRELLIS, Hunyuan3D-2 mini (fal.ai, older) | about $0.02 / $0.10 per shape | Replaced by TRELLIS 2 and Hunyuan3D 3.1; shown only while still in use. |
 | 3D | **Claude Sculpt** (Anthropic) | about $0.02–0.06 per object | Claude rebuilds the object from soft building blocks. Very consistent and toy-like, and the recipe is saved so a rebuild is identical and free. Needs an Anthropic key. |
 | 3D | Lathe / Extrude (offline) | free | Instant. Builds the shape from the silhouette: Lathe suits cups and vases, Extrude suits flat art. |
 
 **Keys** go in **Settings** and are stored in your macOS Keychain, never in a file:
 - **OpenAI key** (from [platform.openai.com](https://platform.openai.com) → API keys; billing must be set up) for ChatGPT images.
 - **Meshy key** (from [meshy.ai](https://www.meshy.ai) → Settings → API; Pro plan or higher) for Meshy 3D.
-- **fal.ai key** (from [fal.ai](https://fal.ai) → Dashboard → Keys) for Nano Banana, FLUX Kontext, TRELLIS and cloud Hunyuan3D.
+- **fal.ai key** (from [fal.ai](https://fal.ai) → Dashboard → Keys) for Nano Banana, FLUX Kontext and the cloud 3D engines (Hunyuan3D 3.1, Tripo, TRELLIS 2, Meshy 6).
+  Every cloud 3D engine asks for the shape only (no textures), the cheapest tier: colours come from your picture.
 - **Anthropic key** (from [console.anthropic.com](https://console.anthropic.com) → API Keys) for Claude Sculpt,
   automatic object naming and "Draft with Claude" on the Styles page.
 

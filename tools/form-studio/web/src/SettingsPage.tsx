@@ -18,8 +18,14 @@ type SectionId = (typeof SECTIONS)[number][0];
 const FAL_ENGINES: [string, string, string][] = [
   ["fal-nano-banana", "Nano Banana (restyle)", "fal-ai/nano-banana/edit"],
   ["fal-kontext", "FLUX Kontext (restyle)", "fal-ai/flux-kontext/dev"],
-  ["fal-trellis", "TRELLIS (3D)", "fal-ai/trellis"],
-  ["fal-hunyuan", "Hunyuan3D mini (3D)", "fal-ai/hunyuan3d/v2/mini"],
+  ["fal-hunyuan3", "Hunyuan3D 3.1 Rapid (3D)", "fal-ai/hunyuan-3d/v3.1/rapid/image-to-3d"],
+  ["fal-hunyuan3-pro", "Hunyuan3D 3.1 Pro (3D, and with 3 views)", "fal-ai/hunyuan-3d/v3.1/pro/image-to-3d"],
+  ["fal-tripo", "Tripo H3.1 (3D)", "tripo3d/h3.1/image-to-3d"],
+  ["fal-tripo-multi", "Tripo H3.1 with 3 views (3D)", "tripo3d/h3.1/multiview-to-3d"],
+  ["fal-trellis2", "TRELLIS 2 (3D)", "fal-ai/trellis-2"],
+  ["fal-meshy", "Meshy 6 (3D)", "fal-ai/meshy/v6/image-to-3d"],
+  ["fal-trellis", "TRELLIS, older (3D)", "fal-ai/trellis"],
+  ["fal-hunyuan", "Hunyuan3D-2 mini, older (3D)", "fal-ai/hunyuan3d/v2/mini"],
 ];
 
 /** Which account or section unlocks an engine that isn't available yet. */
@@ -76,7 +82,8 @@ function Row({ title, desc, children, wide }: { title: ReactNode; desc?: ReactNo
 
 // ---------- engines ----------
 
-function EngineList({ engines, value, onChange, onUnlock }: { engines: Engine[]; value: string; onChange: (id: string) => void; onUnlock: (e: Engine) => void }) {
+function EngineList({ engines: all, value, onChange, onUnlock }: { engines: Engine[]; value: string; onChange: (id: string) => void; onUnlock: (e: Engine) => void }) {
+  const engines = all.filter((e) => !e.legacy || e.id === value); // older engines only while still in use
   const ready = engines.filter((e) => e.available);
   const locked = engines.filter((e) => !e.available);
   const [showLocked, setShowLocked] = useState(false);
@@ -865,7 +872,7 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
             <Group title="3D shape · picture → model" note="Turns the chosen picture into a printable shape">
               <EngineList engines={engines.reconstruct} value={s.engines.reconstruct} onChange={(id) => save({ engines: { ...s.engines, reconstruct: id } }, "Default 3D engine saved")} onUnlock={unlock} />
             </Group>
-            <Group title="3 views · picture → front, side, back" note="Optional, in the Shape step: lets Meshy, TRELLIS and Hunyuan3D see the whole object">
+            <Group title="3 views · picture → front, side, back" note="Optional, in the Shape step: lets Hunyuan3D, Tripo and Meshy see the whole object">
               <EngineList engines={engines.views} value={s.engines.views ?? ""} onChange={(id) => save({ engines: { ...s.engines, views: id } }, "Default view maker saved")} onUnlock={unlock} />
               <Row title="Make 3 views automatically" desc="Picking an option (Use this) also draws its front, side and back, ready for the 3D shape.">
                 <Switch label="" checked={!!s.views_auto} onChange={(v) => save({ views_auto: v })} />
@@ -960,12 +967,38 @@ export default function SettingsPage({ onSaved }: { onSaved: (s: Settings) => vo
               <Account
                 {...acct("fal")}
                 name="fal.ai"
-                powers="Nano Banana & FLUX Kontext restyle · TRELLIS & Hunyuan3D 3D"
-                where="Create a key at fal.ai → Dashboard → Keys."
+                powers="Nano Banana & FLUX Kontext restyle · Hunyuan3D 3.1, Tripo, TRELLIS 2 & Meshy 3D"
+                where="Create a key at fal.ai → Dashboard → Keys. You pay per use, from your fal.ai balance."
                 placeholder="Paste your fal.ai key"
                 hasKey={s.fal.has_key}
                 hint={s.fal.key_hint}
               >
+                <p className="small muted" style={{ margin: 0 }}>
+                  3D engines make the shape only: colours come from your picture, so you never pay for textures.
+                </p>
+                <label className="field">
+                  <span>Hunyuan3D 3.1 quality</span>
+                  <select className="select" value={s.fal.hunyuan3_quality} onChange={(e) => save({ fal: { hunyuan3_quality: e.target.value as Settings["fal"]["hunyuan3_quality"] } }, "Saved")}>
+                    <option value="rapid">Rapid: about $0.23 a shape (recommended)</option>
+                    <option value="pro">Pro: about $0.38 a shape, finer detail</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>Tripo detail</span>
+                  <select className="select" value={s.fal.tripo_detail} onChange={(e) => save({ fal: { tripo_detail: e.target.value as Settings["fal"]["tripo_detail"] } }, "Saved")}>
+                    <option value="standard">Standard: about $0.20 a shape</option>
+                    <option value="detailed">Detailed: about $0.40 a shape</option>
+                  </select>
+                </label>
+                <label className="field">
+                  <span>TRELLIS 2 resolution</span>
+                  <select className="select" value={s.fal.trellis2_resolution} onChange={(e) => save({ fal: { trellis2_resolution: Number(e.target.value) as Settings["fal"]["trellis2_resolution"] } }, "Saved")}>
+                    <option value={512}>512: about $0.25 a shape</option>
+                    <option value={1024}>1024: about $0.30 a shape (recommended)</option>
+                    <option value={1536}>1536: about $0.35 a shape</option>
+                  </select>
+                </label>
+                <p className="small muted" style={{ margin: 0 }}>With 3 views, Hunyuan3D uses Pro (+$0.15). Prices are fal.ai's and can change.</p>
                 <details>
                   <summary className="small muted" style={{ cursor: "pointer" }}>Advanced: model endpoints</summary>
                   <div className="stack" style={{ marginTop: 10 }}>

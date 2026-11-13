@@ -24,7 +24,12 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "views_auto": False,  # picking an option also makes its front / side / back views
     "candidates": 4,
     "export_formats": ["3mf"],
-    "fal": {"endpoints": {}},  # engine id → custom endpoint (Settings → Advanced)
+    "fal": {
+        "endpoints": {},  # engine id → custom endpoint (Settings → Advanced)
+        "hunyuan3_quality": "rapid",  # rapid ~$0.23 | pro ~$0.38
+        "tripo_detail": "standard",  # standard ~$0.20 | detailed ~$0.40
+        "trellis2_resolution": 1024,  # 512 | 1024 | 1536
+    },
     "claude": {"model": "claude-opus-5-5", "effort": "medium", "auto_name": True},
     "openai": {"model": "gpt-image-2.5-sunburst", "quality": "medium"},
     "meshy": {"ai_model": "latest"},
@@ -50,10 +55,14 @@ def _merge(base: dict, over: dict) -> dict:
 
 
 def _migrate(raw: dict[str, Any]) -> dict[str, Any]:
-    """Older settings files: "fast_mode" became the "lightest" restyle quality."""
+    """Older settings files: "fast_mode" became the "lightest" restyle quality; old fal 3D defaults moved on."""
     if "sdxl_quality" not in raw and raw.get("fast_mode"):
         raw["sdxl_quality"] = "lightest"
     raw.pop("fast_mode", None)
+    # the older fal 3D engines were replaced: a saved default moves to their successor
+    eng = raw.get("engines") or {}
+    if eng.get("reconstruct") in ("fal-trellis", "fal-hunyuan"):
+        eng["reconstruct"] = "fal-hunyuan3"
     return raw
 
 
