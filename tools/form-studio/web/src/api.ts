@@ -150,6 +150,9 @@ export interface Report {
   warnings: string[];
 }
 
+export interface PaletteColour { hex: string; name: string; original: string }
+export interface Palette { enabled: boolean; max: number; colours: PaletteColour[] }
+
 export interface Job {
   id: string;
   name: string;
@@ -177,6 +180,8 @@ export interface Job {
   colours_custom?: boolean;
   /** "logo": built exactly from the artwork; "object": AI restyle and 3D */
   kind?: "logo" | "object";
+  /** Photo step, "Reduce colours": off by default */
+  palette?: Palette;
   /** the shape is one part per logo colour plus a plaque */
   logo_parts?: boolean;
   /** the print's parts in filament order */
@@ -484,6 +489,8 @@ export const api = {
   resetColours: (id: string) => req<Job>("DELETE", `/api/jobs/${id}/colours`),
   suggestJobColours: (id: string) => req<Record<string, Colour>>("POST", `/api/jobs/${id}/colours/suggest`),
   setKind: (id: string, kind: "logo" | "object") => req<Job>("POST", `/api/jobs/${id}/kind`, { kind }),
+  setPalette: (id: string, body: { enabled: boolean; max_colours?: number; colours?: (string | null)[]; restore?: boolean }) =>
+    req<Job>("POST", `/api/jobs/${id}/palette`, body),
   /** One click: restyle, pick, build and prepare the print with the best engines that are ready. */
   autoMake: (id: string, format?: string) => req<Job>("POST", `/api/jobs/${id}/auto`, { format }),
   cancel: (id: string) => req<Job>("POST", `/api/jobs/${id}/cancel`),

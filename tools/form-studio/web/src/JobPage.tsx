@@ -277,10 +277,17 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
   return (
     <>
       <div className="pair">
-        <figure className="frame" style={{ margin: 0 }}>
-          {job.input && <img src={fileUrl(job, job.input)} alt="Original photo" />}
-          <figcaption className="chip">Original</figcaption>
-        </figure>
+        {job.palette?.enabled && job.files.includes("02_reduced.png") ? (
+          <figure className="frame" style={{ margin: 0 }}>
+            <img src={fileUrl(job, "02_reduced.png")} alt={`Reduced to ${job.palette.colours.length} colours`} />
+            <figcaption className="chip">{job.palette.colours.length} colours</figcaption>
+          </figure>
+        ) : (
+          <figure className="frame" style={{ margin: 0 }}>
+            {job.input && <img src={fileUrl(job, job.input)} alt="Original photo" />}
+            <figcaption className="chip">Original</figcaption>
+          </figure>
+        )}
         <figure className="frame" style={{ margin: 0 }}>
           {job.files.includes("01_cutout.png") ? (
             <img src={fileUrl(job, "01_cutout.png")} alt="Background removed" />
@@ -292,6 +299,7 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
           <figcaption className="chip">Cut out</figcaption>
         </figure>
       </div>
+      {job.kind !== "logo" && <PaletteCard job={job} busy={busy} run={run} />}
       <div className="split">
         <div className="card panel stack">
           <h2>Restyle it</h2>
@@ -351,6 +359,61 @@ function PhotoStep({ job, busy, engines, settings, run, styles }: StepProps & { 
         </div>
       </div>
     </>
+  );
+}
+
+/** Photo step: the picture's colours, and the optional colour reduction (off by default). */
+function PaletteCard({ job, busy, run }: { job: Job; busy: boolean; run: (p: Promise<Job>) => void }) {
+  const pal = job.palette ?? { enabled: false, max: 4, colours: [] };
+  const set = (body: { enabled?: boolean; max_colours?: number; colours?: (string | null)[]; restore?: boolean }) =>
+    run(api.setPalette(job.id, { enabled: pal.enabled, ...body }));
+  const recolour = (i: number, hex: string | null) => set({ colours: pal.colours.map((_, k) => (k === i ? hex : null)) });
+  const edited = pal.colours.some((c) => c.hex.toUpperCase() !== c.original.toUpperCase());
+  return (
+    <div className="card panel stack" style={{ marginTop: 16 }}>
+      <div className="row" style={{ justifyContent: "space-between" }}>
+        <h2 style={{ margin: 0 }}>Colours</h2>
+        {pal.enabled && edited && (
+          <button className="btn sm" disabled={busy} onClick={() => set({ restore: true })}>Restore all</button>
+        )}
+      </div>
+      <p className="small muted" style={{ margin: 0 }}>
+        Each colour of the picture prints on its own filament (one AMS slot each). Reduce them to print with fewer filaments: cheaper, with fewer colour changes.
+      </p>
+      <Switch label="Reduce colours" checked={pal.enabled} onChange={(v) => set({ enabled: v, max_colours: pal.max })} disabled={busy} />
+      {pal.enabled ? (
+        <>
+          <div className="field">
+            <span>Keep at most</span>
+            <div className="seg wide" role="radiogroup" aria-label="Most colours to keep">
+              {[2, 3, 4, 5, 6, 7, 8].map((n) => (
+                <button key={n} type="button" role="radio" aria-checked={pal.max === n} className={pal.max === n ? "on" : ""}
+                  disabled={busy} onClick={() => set({ max_colours: n })}>
+                  {n}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="palette-grid">
+            {pal.colours.map((c, i) => (
+              <div key={i} className="palette-item">
+                <ColourPick label={`Colour ${i + 1}`} colour={{ hex: c.hex, name: c.name }} onPick={(x) => recolour(i, x.hex)} disabled={busy} />
+                {c.hex.toUpperCase() !== c.original.toUpperCase() && (
+                  <button className="btn sm ghost" disabled={busy} onClick={() => recolour(i, c.original)} title="Back to the picture's own colour">
+                    Restore
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          <span className="small muted">
+            Restyles start from this preview and keep to these colours; the print uses them too. Turn it off to keep every colour.
+          </span>
+        </>
+      ) : (
+        <span className="small muted">Off: every colour in the picture is kept.</span>
+      )}
+    </div>
   );
 }
 

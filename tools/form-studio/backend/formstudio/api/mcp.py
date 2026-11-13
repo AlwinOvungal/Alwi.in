@@ -175,6 +175,20 @@ def build() -> "MCPServer":
             pipeline.set_colours(Job.load(object_id), {part: {"hex": colour_hex}})
         return _snapshot(object_id)
 
+    @srv.tool(description="Reduce the picture to fewer colours (cheaper, fewer filament changes), before restyling. "
+                          "enabled=false keeps every colour (the default). max_colours 2–8. colours: optional new hex "
+                          "per colour, in order (null keeps one); restore=true puts back the picture's own. Returns "
+                          "the palette; the reduced preview is the object's picture until a look is chosen.")
+    def set_palette(object_id: str, enabled: bool, max_colours: int | None = None,
+                    colours: list[str | None] | None = None, restore: bool = False) -> dict[str, Any]:
+        api = _api()
+        from .. import pipeline
+        from ..core.job import Job
+
+        with api._job_locks[object_id]:
+            pal = pipeline.set_palette(Job.load(object_id), enabled, max_colours, colours, restore)
+        return {**_snapshot(object_id), "palette": pal}
+
     @srv.tool(description="Write the print files (3mf for multi-colour printing, stl, step) and say where they "
                           "are on this Mac, ready for the slicer.")
     def export_print_files(object_id: str, formats: list[str] | None = None) -> dict[str, Any]:

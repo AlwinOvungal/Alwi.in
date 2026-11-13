@@ -986,6 +986,24 @@ def set_job_kind(job_id: str, body: KindBody) -> dict[str, Any]:
     return _view(job)
 
 
+class PaletteBody(BaseModel):
+    enabled: bool
+    max_colours: int | None = None  # 1–8
+    colours: list[str | None] | None = None  # a new hex per colour (None keeps it)
+    restore: bool = False  # back to the picture's own colours
+
+
+@app.post("/api/jobs/{job_id}/palette")
+def set_job_palette(job_id: str, body: PaletteBody) -> dict[str, Any]:
+    """Photo step, "Reduce colours" (off by default): keep at most N of the picture's colours, with a
+    preview; restyles start from it and the print uses the same colours."""
+    if body.colours and any(c and not re.fullmatch(r"#[0-9A-Fa-f]{6}", c) for c in body.colours):
+        raise HTTPException(400, "Colours are hex, like #6B9E2E.")
+    with _locked(job_id) as job:
+        pipeline.set_palette(job, body.enabled, body.max_colours, body.colours, body.restore)
+    return _view(job)
+
+
 @app.post("/api/jobs/{job_id}/style")
 def set_job_style(job_id: str, body: StyleBody) -> dict[str, Any]:
     with _locked(job_id) as job:

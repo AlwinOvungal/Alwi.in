@@ -242,7 +242,8 @@ def _same_paint(a: np.ndarray, b: np.ndarray) -> bool:
 
 
 def regions(img: "Image.Image", mask: np.ndarray, n: int | None = None, mm_per_px: float | None = None,
-            min_mm: float = 1.2) -> tuple[np.ndarray, list[dict[str, str]]]:
+            min_mm: float = 1.2, palette: list[dict[str, str]] | None = None
+            ) -> tuple[np.ndarray, list[dict[str, str]]]:
     """The picture's colour regions, chunky enough to print: (label image, colours biggest-first).
 
     Regions are *paints*, not light: the picture is smoothed (clay texture, speckle), clustered with
@@ -250,6 +251,9 @@ def regions(img: "Image.Image", mask: np.ndarray, n: int | None = None, mm_per_p
     shaded one-colour object stays one region. `n=None` keeps every real colour (no reduction, at most
     MAX_PAINTS); `n=k` reduces to at most k by merging the closest paints. Regions narrower than
     `min_mm` (given `mm_per_px`) can't print as their own colour and join their neighbour.
+
+    With an approved `palette` ([{hex, name}], from the Photo step's "Reduce colours") every pixel
+    simply takes the nearest approved colour, and the colours returned are those.
 
     Labels: -1 outside the mask, else 0..k-1 into the returned colour list. Every masked pixel is
     assigned, so the regions partition the silhouette exactly.
@@ -274,10 +278,21 @@ def regions(img: "Image.Image", mask: np.ndarray, n: int | None = None, mm_per_p
     w = np.array([0.5, 1.0, 1.0])
     px = lab[m]
     want = MAX_PAINTS if n is None else max(1, int(n))
-    centres, _ = _kmeans(px[:: max(1, len(px) // 40000)] * w, min(want + 3, 12), seed=3)
-    centres = centres / w
+    if palette:
+        centres = _lab(np.array([[int(c["hex"][k:k + 2], 16) for k in (1, 3, 5)] for c in palette], np.uint8))
+        want = len(palette)
+    else:
+        centres, _ = _kmeans(px[:: max(1, len(px) // 40000)] * w, min(want + 3, 12), seed=3)
+        centres = centres / w
     lab_id = np.argmin(np.linalg.norm(((lab[..., None, :] - centres[None, None]) * w), axis=-1), axis=-1)
     counts = np.bincount(lab_id[m], minlength=len(centres)).astype(float)
+    # how sharp the lightness changes are: paint meets paint at an edge, light fades over a ramp
+    grad = np.hypot(ndimage.sobel(lab[..., 0], 0), ndimage.sobel(lab[..., 0], 1)) / 8
+
+    def soft_boundary(i: int, j: int) -> bool:
+        a, b = (lab_id == i) & m, (lab_id == j) & m
+        edge = (ndimage.binary_dilation(a) & b) | (ndimage.binary_dilation(b) & a)
+        return not edge.any() or float(np.median(grad[edge])) < 2.5
     # merge clusters that are one paint in different light (union-find over the cluster pairs)
     parent = list(range(len(centres)))
 
@@ -289,7 +304,10 @@ def regions(img: "Image.Image", mask: np.ndarray, n: int | None = None, mm_per_p
     live = [i for i in range(len(centres)) if counts[i] > 0]
     for i in live:
         for j in live:
-            if i < j and find(i) != find(j) and _same_paint(centres[i], centres[j]):
+            if palette or i >= j or find(i) == find(j) or not _same_paint(centres[i], centres[j]):
+                continue
+            # close in lightness: shading for sure; further apart: only if they fade into each other
+            if abs(float(centres[i][0] - centres[j][0])) < 22 or soft_boundary(i, j):
                 parent[find(j)] = find(i)
     groups: dict[int, list[int]] = {}
     for i in live:
@@ -350,6 +368,11 @@ def regions(img: "Image.Image", mask: np.ndarray, n: int | None = None, mm_per_p
         if not sel.any():
             continue
         out[sel] = len(cols)
+        if palette:
+            src = [g for g in paints[keep[old]][0]][0]
+            cols.append({"hex": palette[src]["hex"].upper(), "name": palette[src]["name"]})
+            out[sel] = len(cols) - 1
+            continue
         px = rgb_full[sel]
         lum = px.mean(axis=1)
         lo_, hi_ = np.percentile(lum, [50, 92])

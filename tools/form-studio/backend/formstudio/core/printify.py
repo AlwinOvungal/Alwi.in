@@ -474,6 +474,8 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
     regions_p = params.get("regions") or {}
     n_paint = regions_p.get("max_colours")
     n_paint = int(n_paint) if n_paint else None
+    pal_cols = regions_p.get("palette") or None  # the Photo step's approved colours, if any
+    pal_sig = tuple(c["hex"] for c in pal_cols) if pal_cols else None
     have_picture = mask_sig is not None and image_path is not None and Path(image_path).exists()
     picture = flat_on and have_picture and flat.get("depth_from", "picture") == "picture"
     labels = region_cols = mask_full = extent = None
@@ -484,7 +486,7 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
 
         ist = Path(image_path).stat()
         kp = (("picture", f"{image_path}:{ist.st_mtime_ns}:{ist.st_size}", mask_sig, round(height, 3), round(flat_t, 3),
-               round(min_feat, 3), finish, n_paint, *(geo.get(k) for k in ("soften_mm", "voxel_size_mm", "facets",
+               round(min_feat, 3), finish, n_paint, pal_sig, *(geo.get(k) for k in ("soften_mm", "voxel_size_mm", "facets",
                "clay_texture_mm", "clay_grain_mm"))) if CACHE["enabled"] else None)
         hit = _get(kp)
         if hit:
@@ -498,7 +500,7 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
             mask_full = np.asarray(Image.open(mask_path).convert("L")) > 24
             _, mm_px = relief_mod.fit(mask_full, height)
             with timing.stage("printify.colours"):
-                labels, region_cols = logo_mod.regions(img, mask_full, n_paint, mm_per_px=mm_px)
+                labels, region_cols = logo_mod.regions(img, mask_full, n_paint, mm_per_px=mm_px, palette=pal_cols)
             say(0.4, "Pressing the picture into a relief")
             look = {"soften_mm": min(float(geo.get("soften_mm", 0.9)), 1.2)}
             if finish == "blender":
@@ -669,7 +671,7 @@ def printify(raw: trimesh.Trimesh, params: dict[str, Any], progress: Progress | 
 
             img = Image.open(image_path)
             mask_full = np.asarray(Image.open(mask_path).convert("L")) > 24
-            labels, region_cols = logo_mod.regions(img, mask_full, n_paint)
+            labels, region_cols = logo_mod.regions(img, mask_full, n_paint, palette=pal_cols)
         if labels is None:
             warnings.append("Picture colours need the chosen picture; this object has none saved.")
         elif len(region_cols) >= 2:

@@ -12,6 +12,9 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Callable
 
+import numpy as np
+from PIL import Image
+
 from . import paths
 from .core import export as export_mod
 from .core import timing
@@ -296,6 +299,94 @@ def _note_time(job: Job, step: str, seconds: float, **facts: Any) -> None:
     job.manifest.setdefault("timings", {})[step] = {"seconds": round(seconds, 1), **facts}
 
 
+REDUCED = "02_reduced.png"  # the cut-out in its reduced palette (Photo step, "Reduce colours")
+
+
+def palette_state(job: Job) -> dict[str, Any]:
+    """The Photo step's colour reduction: off by default. {enabled, max, colours:[{hex, name, original}]}."""
+    return {"enabled": False, "max": 4, "colours": [], **(job.manifest.get("palette") or {})}
+
+
+def palette_active(job: Job) -> bool:
+    return bool(palette_state(job)["enabled"]) and job.path(REDUCED).exists()
+
+
+def set_palette(job: Job, enabled: bool, max_colours: int | None = None,
+                colours: list[str | None] | None = None, restore: bool = False) -> dict[str, Any]:
+    """Turn colour reduction on or off, choose how many colours to keep, recolour or restore them.
+
+    On: the cut-out is reduced to at most `max` of its own paints (shading kept as one paint), saved as
+    a preview; restyles start from it and the print uses the same colours. Off: nothing is reduced.
+    `colours[i]` is a new hex for colour i (None leaves it); `restore` puts back the picture's own."""
+    from .core import colours as colours_mod
+
+    ensure_cutout(job)
+    pal = palette_state(job)
+    old_max = pal["max"]
+    if max_colours is not None:
+        pal["max"] = max(1, min(8, int(max_colours)))
+    pal["enabled"] = bool(enabled)
+    if not pal["enabled"]:
+        job.path(REDUCED).unlink(missing_ok=True)
+    else:
+        cut = job.path(CUTOUT)
+        img = Image.open(cut).convert("RGB")
+        mask = np.asarray(Image.open(cut.with_name(cut.stem + "_mask.png")).convert("L")) > 24
+        labels, found = logo_mod.regions(img, mask, pal["max"])
+        if restore or pal["max"] != old_max or len(pal["colours"]) != len(found) or not job.path(REDUCED).exists():
+            pal["colours"] = [{**c, "original": c["hex"]} for c in found]
+        for i, h in enumerate(colours or []):
+            if h and i < len(pal["colours"]):
+                hexv = h.upper()
+                rgb = tuple(int(hexv[k:k + 2], 16) for k in (1, 3, 5))
+                pal["colours"][i] = {**pal["colours"][i], "hex": hexv, "name": colours_mod.name_for(rgb)}
+        lut = np.array([[int(c["hex"][k:k + 2], 16) for k in (1, 3, 5)] for c in pal["colours"]], np.uint8)
+        out = np.asarray(img).copy()
+        out[mask] = lut[np.clip(labels[mask], 0, len(lut) - 1)]
+        out[~mask] = 255  # the cut-out's white background
+        Image.fromarray(out).save(job.path(REDUCED))
+    job.manifest["palette"] = pal
+    params = job.manifest.get("print_params")
+    if params is not None:  # the print's colour parts follow: at most this many, or every real colour
+        reg = params.setdefault("regions", {})
+        reg["max_colours"] = pal["max"] if pal["enabled"] else None
+        reg.pop("palette", None)
+        if pal["enabled"]:
+            reg["palette"] = [{"hex": c["hex"], "name": c["name"]} for c in pal["colours"]]
+    job.save()
+    return pal
+
+
+def _palette_hexes(job: Job) -> list[dict[str, str]]:
+    return list(palette_state(job)["colours"]) if palette_active(job) else []
+
+
+def _palette_style(style, colours: list[dict[str, str]]):
+    """Restyles keep to the approved palette."""
+    import dataclasses
+
+    names = ", ".join(f"{c['name'].lower()} ({c['hex']})" for c in colours)
+    rule = f" Use only these colours, in the same places as the reference picture: {names}."
+    return dataclasses.replace(style, prompt=style.prompt + f", only these colours: {names}",
+                               edit_prompt=style.edit_prompt + rule)
+
+
+def _snap_to_palette(job: Job, report: dict[str, Any]) -> None:
+    """With an approved palette, each printed colour part takes the nearest approved colour."""
+    pal = _palette_hexes(job)
+    if not pal or not report.get("regions"):
+        return
+    from skimage import color
+
+    def lab(h: str) -> np.ndarray:
+        return color.rgb2lab(np.array([[[int(h[k:k + 2], 16) / 255 for k in (1, 3, 5)]]]))[0, 0]
+
+    targets = [lab(c["hex"]) for c in pal]
+    for r in report["regions"]:
+        i = int(np.argmin([np.linalg.norm(lab(r["hex"]) - t) for t in targets]))
+        r["hex"], r["name"] = pal[i]["hex"], pal[i]["name"]
+
+
 def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], progress: Progress,
             on_candidate: Callable[[], None] | None = None) -> None:
     """Make more options. They're added to the ones already there, and each appears as soon as it's ready.
@@ -313,17 +404,20 @@ def stylize(job: Job, ctx: EngineContext, engine_id: str, seeds: list[int], prog
         raise RuntimeError("This is for logos and text. Turn on \"Logo or text\" in the Photo step first.")
     ensure_cutout(job)
     look = _logo_style(style) if is_logo(job) and not getattr(engine, "logo_only", False) else style
+    if (pal := _palette_hexes(job)) and not is_logo(job):
+        look = _palette_style(look, pal)
     log.info("%s: restyling with %s (%s), seeds %s", job.id, engine_id, style.id, seeds)
     out_dir = job.path(CANDIDATES)
     out_dir.mkdir(parents=True, exist_ok=True)
-    cut = job.path(CUTOUT)
+    cut = job.path(REDUCED) if _palette_hexes(job) and not is_logo(job) else job.path(CUTOUT)
+    mask_of_cut = job.path(CUTOUT).with_name(Path(CUTOUT).stem + "_mask.png")
     n = len(seeds)
     t0 = time.perf_counter()
     made = [0]
     first: list[float] = []
 
     def inp(seed_list: list[int], tmp: Path) -> StylizeInput:
-        return StylizeInput(cut, cut.with_name(cut.stem + "_mask.png"), look, job.manifest["subject"], seed_list, tmp,
+        return StylizeInput(cut, mask_of_cut, look, job.manifest["subject"], seed_list, tmp,
                             source=job.input_path())
 
     def fresh(tmp: Path) -> Path:
@@ -477,7 +571,7 @@ def use_photo_as_is(job: Job) -> None:
     """Skip restyling: send the cutout itself to the 3D step (for things already in style, or 2D art)."""
     ensure_cutout(job)
     _reset_keeping_options(job)
-    shutil.copyfile(job.path(CUTOUT), job.path(CONFIRMED))
+    shutil.copyfile(job.path(REDUCED) if palette_active(job) else job.path(CUTOUT), job.path(CONFIRMED))
     cut = job.path(CUTOUT)
     shutil.copyfile(cut.with_name(cut.stem + "_mask.png"), job.path("03_confirmed_mask.png"))
     extra = {} if is_logo(job) else _handle_sheet(job, cut)
@@ -691,6 +785,12 @@ def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | No
             current["logo"]["backer"] = backer  # …and the plaque shape
     params = _deep_merge(style.print_params(current["format"]), current)  # fills keys older objects lack
     params = _deep_merge(params, overrides)
+    if palette_active(job) and "max_colours" not in (overrides.get("regions") or {}):
+        pal = palette_state(job)  # the approved palette: its size and its colours
+        params.setdefault("regions", {}).update(
+            max_colours=pal["max"], palette=[{"hex": c["hex"], "name": c["name"]} for c in pal["colours"]])
+    elif not palette_active(job):
+        params.setdefault("regions", {}).pop("palette", None)
     log.info("%s: preparing print (%s)", job.id, params["format"])
     t0 = time.perf_counter()
     with timing.stage("printify", format=params["format"], finish=params["geometry"].get("finish")):
@@ -700,6 +800,7 @@ def printify(job: Job, overrides: dict[str, Any] | None, progress: Progress | No
             report = printify_mod.run(job.path(RAW_MESH), job.path(PRINT_DIR), params, progress,
                                       mask_path=job.path("03_confirmed_mask.png"), image_path=job.path(CONFIRMED))
     _note_time(job, "printify", time.perf_counter() - t0)
+    _snap_to_palette(job, report)
     job.manifest["print_params"] = params
     job.manifest["report"] = report
     job.manifest["exports"] = []
