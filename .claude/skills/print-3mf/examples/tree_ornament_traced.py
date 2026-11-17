@@ -36,6 +36,10 @@ print(f'scale {S:.4f} mm/px, body {(BOTTOM - rows.min()) * S:.1f} mm, width {(co
 # signed distance of the traced outline in mm (px grid), smoothed to remove pixel steps
 sd_px = (distance_transform_edt(~sil_px) - distance_transform_edt(sil_px)) * S
 sd_px = gaussian_filter(sd_px, 1.2)
+TIP_R = 0.9                                         # round sharp tier tips (opening)
+er = sd_px <= -TIP_R
+sd_px = (distance_transform_edt(~er) - distance_transform_edt(er)) * S - TIP_R
+sd_px = gaussian_filter(sd_px, 1.0)
 
 g = Grid((-14, 14), (-1, 41), (-1, 13), res=0.08)
 X, Y, Z = g.X2, g.Y2, g.Z
@@ -58,9 +62,9 @@ def scallop_rim(yc_img, width_px, amp_px=14, bumps=3):
 
 
 # (rim row, row of crease above, rim depth, depth at the crease above, rim width px)
-tiers = [(522, 433, 11.2, 7.2, 263),
-         (434, 350, 10.4, 6.4, 245),
-         (350, 242, 9.0, 4.2, 190)]
+tiers = [(522, 433, 11.2, 8.2, 263),      # side view: 11.2 at rim -> ~9 at crease
+         (434, 350, 10.4, 7.0, 245),      #            10.3 -> 7.7
+         (350, 242, 9.0, 4.6, 190)]       #             8.6 -> 6.0 (kept lower so the star stands proud)
 H = np.zeros_like(X)
 
 # trunk: round column, x-only profile so it doesn't look pyramidal
@@ -74,16 +78,20 @@ for rim_row, top_row, d_rim, d_top, wpx in tiers:
     top = mm_y(top_row) + 1.5                     # continue a little under the tier above
     mask = inside & (Y >= rim) & (Y <= top)
     f = np.clip((Y - mm_y(rim_row)) / (mm_y(top_row) - mm_y(rim_row)), 0, 1)
-    depth = d_rim + (d_top - d_rim) * f ** 0.9
+    depth = d_top + (d_rim - d_top) * (1 - f) ** 0.65   # near-linear taper (side view) with a slight bulge
     # pillow on the tier's own outline (silhouette sides + rim edge)
-    H = np.maximum(H, pillow_height(mask, g.res, depth, radius=3.0, edge_wall=EDGE_WALL, smooth=0.8))
+    p = pillow_height(mask, g.res, depth, radius=3.0, edge_wall=EDGE_WALL, smooth=0.8)
+    hw = np.max(np.where(mask, np.abs(X), 0), axis=0, keepdims=True) + 0.6     # half-width per row
+    crown = np.sqrt(np.clip(1 - (X / hw) ** 2, 0, 1))
+    p = np.where(mask, EDGE_WALL + (p - EDGE_WALL) * (0.70 + 0.30 * crown), 0)
+    H = np.maximum(H, p)
 
 STAR_W = 124 * S                                  # measured star width
 STAR_R = STAR_W / 2 / 0.951
 star_top_y = mm_y(rows.min() + y0)
 star_d = star5(X, Y, 0, star_top_y - STAR_R, STAR_R - 1.2, 0.56) - 1.2
 star = star_d <= 0
-H = np.maximum(H, pillow_height(star, g.res, 7.2, radius=1.5, edge_wall=3.0, smooth=0.25))
+H = np.maximum(H, pillow_height(star, g.res, 8.0, radius=2.0, edge_wall=3.6, smooth=0.3))
 inside = inside | star
 
 # ---- 3. hanging loop, true mm --------------------------------------------------------------
@@ -91,7 +99,7 @@ star_top = mm_y(rows.min() + y0)
 LOOP_C = star_top - LOOP_OVERLAP + ring_r
 ring = ring2(X, Y, 0, LOOP_C, HOLE_D / 2, LOOP_WALL)
 loop_mask = ring <= 0
-H = np.maximum(H, pillow_height(loop_mask, g.res, LOOP_T, radius=1.2, edge_wall=EDGE_WALL, smooth=0.0))
+H = np.maximum(H, pillow_height(loop_mask, g.res, LOOP_T, radius=LOOP_WALL / 2, edge_wall=1.2, smooth=0.0))
 sil = np.where(Y > mm_y(262), star_d, sil)          # star region: analytic outline
 sil = np.minimum(sil, star_d)
 outline = np.minimum(sil, ring)

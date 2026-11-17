@@ -124,6 +124,13 @@ in true mm. Scale so the stated total height is met *including* the rebuilt feat
   (≈3 mm) and small radius, and make the layer under it thinner there.
 - **Upper layers should overhang lower ones**: make each tier thickest at its rim and thinner
   (~60 %) at its top, with a small pillow radius (≈3 mm) so the rim curls over the tier below.
+- **Copy the side view's thickness profile, don't invent one**: a strongly convex tier profile
+  made the top tier thicker than the star and swallowed it. Measure side-view row widths per
+  tier (usually a near-linear taper, `(1 - f) ** 0.65`) and keep the layer under a raised feature
+  ~2–3 mm thinner than that feature.
+- **Soft cartoon look**: round convex tips of a traced outline with an opening (erode/dilate by
+  ~0.9 mm via EDT), add a gentle crown across each layer's width (`0.7 + 0.3 * sqrt(1 - (x/hw)²)`),
+  and give loops `radius = wall / 2` so they read as a rounded ring, not a washer.
 - **Labels on AI-made design sheets are often wrong** (20 mm wide / 30 mm deep on a visibly
   23 × 11 mm drawing; 18–22 g for a 4 g part). Trust the stated height + the drawing; say so.
 - **Big files**: 0.08–0.1 mm grids give 0.5–1 M triangles (5–30 MB 3MF). Fine for slicers; use
