@@ -4,7 +4,8 @@ them with the green-mask row-width printout described in SKILL.md for a new pict
 
 Outline traced from the reference's flat back view; per-layer puffy pillows (trunk, 3 tiers, star)
 with depths measured from the side view; analytic hanging loop with an exact 4 mm hole.
-Flat back on the bed (z=0), no supports. Usage: python3 tree3.py REFERENCE.webp OUT.3mf
+Flat back on the bed (z=0), no supports. Usage: python3 tree_ornament_traced.py REFERENCE.webp OUT.3mf [--smooth]
+(clay texture is on by default; --smooth gives the plain finish)
 """
 import sys
 sys.path.insert(0, '/home/user/Alwi.in/.claude/skills/print-3mf/scripts')
@@ -13,6 +14,7 @@ from PIL import Image
 from scipy.ndimage import binary_fill_holes, label, map_coordinates, distance_transform_edt, gaussian_filter
 
 REF, OUT = sys.argv[1], sys.argv[2]
+CLAY = '--smooth' not in sys.argv
 HEIGHT, HOLE_D, LOOP_WALL, LOOP_T, LOOP_OVERLAP = 40.0, 4.0, 1.7, 3.5, 1.6
 EDGE_WALL = 0.7
 
@@ -114,6 +116,9 @@ outline = np.maximum(outline, -(np.hypot(X, Y - LOOP_C) - HOLE_D / 2))      # ke
 body = relief_body(H, outline, Z, antialias=0.16, res=g.res, edge_wall=EDGE_WALL)
 CHAMFER = 0.3
 body = np.maximum(body, (outline[..., None] + CHAMFER - Z) / np.sqrt(2))
+if CLAY:   # hand-modelled clay surface; hole and bottom layers stay smooth
+    body = clay_texture(body, g, keep_bottom=0.6, weight2d=np.clip((hole_d - 0.4) / 1.2, 0, 1), seed=7)
+    body = np.maximum(body, -(hole_d[..., None]))          # hole exactly round & clear
 m = mesh_from_field(body, g)
 report('Tree', m)
 m.export(OUT.replace('.3mf', '.stl'))

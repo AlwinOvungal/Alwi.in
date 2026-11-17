@@ -91,6 +91,13 @@ in true mm. Scale so the stated total height is met *including* the rebuilt feat
    - a **0.3 mm 45° bed chamfer** on every bottom edge, holes included
      (`body = max(body, (outline + 0.3 - Z) / sqrt(2))`) against elephant's foot;
    - extra distance smoothing on any small feature showing pinch lines.
+   - **Surface texture on request** — `clay_texture(body, g, keep_bottom=0.6,
+     weight2d=np.clip((hole_dist - 0.4) / 1.2, 0, 1))` gives a soft hand-modelled clay look
+     (lumps ~0.10 mm, dents ~0.08 mm, faint grain). Keep amplitudes ≈ one layer height so it
+     survives FDM; fade it out around holes with `weight2d` (a hard `keep_out` edge leaves a
+     visible step); re-cut holes afterwards so they stay round. Too much fine grain reads as
+     crumpled paper rather than clay. Slicer "fuzzy skin" only roughens side walls — modelled
+     texture also covers the top surfaces.
    Verify with z-sections (footprint inset ≈ 0.3 mm at z≈0, hole back to nominal above 0.3 mm).
 8. **Hand over:** size, parts/colours, orientation, supports, colour-change heights or AMS need,
    hole sizes as built, an honest weight (volume × 1.24 g/cm³ × infill factor; reference

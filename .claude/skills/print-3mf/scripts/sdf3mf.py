@@ -286,3 +286,38 @@ def verify_3mf(path):
         print(f'  3MF part {k!r}: watertight={m.is_watertight} volume={m.volume:.0f} mm3')
     print('  overall size', (s.bounds[1] - s.bounds[0]).round(2).tolist(), 'OK' if ok else 'PROBLEM')
     return ok
+
+
+# ----------------------------------------------------------------------------- surface textures
+
+
+def band_noise(shape, sigma_vox, seed=0):
+    """Smooth random field with unit standard deviation and feature size ~2*sigma voxels."""
+    rng = np.random.default_rng(seed)
+    n = gaussian_filter(rng.standard_normal(shape).astype(np.float32), sigma_vox)
+    return n / (n.std() + 1e-9)
+
+
+def clay_texture(field, grid, amp_lumps=0.10, size_lumps=1.8, amp_grain=0.03, size_grain=0.6,
+                 amp_dents=0.08, size_dents=2.6, keep_bottom=0.6, keep_out=None, weight2d=None, seed=7):
+    """Hand-modelled clay look: soft lumps + fine grain + shallow thumb dents, as a displacement of
+    the SDF (positive values push the surface inward). Sizes are feature sizes in mm, amplitudes in mm.
+
+    For FDM, amplitudes ~0.1–0.25 mm (≈ one layer) and features ≥ ~0.8 mm read best; finer grain
+    mostly shows on sloped surfaces. `keep_bottom` mm above the bed stay untextured (flat first
+    layers, chamfer intact). `keep_out`: 2D bool mask (e.g. inside/near a hanging hole) left smooth.
+    """
+    shape = field.shape
+    r = grid.res
+    lumps = band_noise(shape, size_lumps / 2 / r, seed)
+    grain = band_noise(shape, size_grain / 2 / r, seed + 1)
+    d = band_noise(shape, size_dents / 2 / r, seed + 2)
+    dents = np.clip(d - 1.0, 0, None)               # only the strongest lows -> sparse shallow dents
+    dents /= (dents.max() + 1e-9)
+    disp = amp_lumps * lumps + amp_grain * grain + amp_dents * 2.5 * dents
+    w = np.clip((grid.zs[None, None, :] - keep_bottom) / 0.4, 0, 1)
+    if keep_out is not None:
+        w = w * (~keep_out)[..., None]
+    if weight2d is not None:
+        w = w * weight2d[..., None]
+    return field + disp * w
