@@ -18,7 +18,8 @@ Everything lives in this skill folder:
 | `examples/star_magnet_lib_demo.py` | Shortest complete example using the library (2-colour magnet + pocket) |
 | `examples/logo_inlay_magnet.py` | Flat logo magnet: backing plate + 5 colour inlays, exact outer size, filleted outline |
 | `examples/traffic_cone_magnet.py` | Upright 3D figure from 3D primitives (round cone, round box), raised stripes as a 2nd colour |
-| `examples/tree_ornament_relief.py` | Puffy sculpted relief (stacked pillow height-fields, crisp creases), hanging loop, flat back |
+| `examples/tree_ornament_traced.py` | **Best relief example**: outline traced from the reference picture, per-layer pillows with depths measured from the side view, scalloped tier rims, analytic star + loop |
+| `examples/tree_ornament_relief.py` | Older all-analytic version of the same tree (shapes built from polygons/circles) |
 
 ## Setup (once per container)
 
@@ -35,6 +36,21 @@ from sdf3mf import *
 ```
 
 ## Workflow
+
+**When the user gives a picture, trace it instead of guessing shapes.** Measure the reference
+in pixels first (this gets proportions right on the first try):
+
+```python
+im = np.asarray(Image.open(REF).convert('RGB')).astype(int)
+mask = (im[..., 1] > im[..., 0] + 25) & (im[..., 1] > im[..., 2] + 25)   # adapt to the object colour
+for y in range(y0, y1, 12):                      # row widths -> creases are local minima
+    xs = np.where(mask[y, x0:x1])[0]; print(y, xs.min(), xs.max(), xs.max() - xs.min())
+```
+
+Use a flat/back-view silhouette as the outline (signed EDT of the mask, `gaussian_filter` ~1 px,
+`map_coordinates` onto the grid — see `tree_ornament_traced.py`), the side view's row widths as
+the per-layer depths, and rebuild small functional features (holes, loops, stars) analytically
+in true mm. Scale so the stated total height is met *including* the rebuilt features.
 
 1. **Read the reference.** Pull dimensions from the user's labels; when labels contradict the
    drawing (e.g. "30 mm deep" on a visibly thin side view), measure the drawing in pixels,
@@ -96,6 +112,20 @@ from sdf3mf import *
   core polygon wide enough to reach the lobes, then blend with `smin` k≈1–3 mm.
 - **Spiky vs chunky stars**: `star5(..., r - k, rf) - k` with k≈1.2 and rf≈0.55 gives rounded
   but distinct points.
+- **3MF reload shows a few broken faces** even though the mesh was watertight: the centring shift
+  must stay on the 1e-4 mm vertex lattice (fixed in `write_3mf`); always run `verify_3mf`.
+- **Sharp cusps in a height-field crease** (e.g. notches between rim scallops meeting another layer)
+  give a handful of non-manifold faces → round the notch (`sqrt(cos² + 0.03)`) and use
+  `antialias≈0.16` in `relief_body`.
+- **Scallop direction**: lobes must hang *down* (rim lowest at lobe centres, small notches between);
+  the inverted profile reads as straight creases.
+- **A small raised feature disappears into the layer below** (star arms swallowed by the top tier):
+  pillow heights fall to `edge_wall` at narrow arms. Give that feature a high `edge_wall`
+  (≈3 mm) and small radius, and make the layer under it thinner there.
+- **Upper layers should overhang lower ones**: make each tier thickest at its rim and thinner
+  (~60 %) at its top, with a small pillow radius (≈3 mm) so the rim curls over the tier below.
+- **Labels on AI-made design sheets are often wrong** (20 mm wide / 30 mm deep on a visibly
+  23 × 11 mm drawing; 18–22 g for a 4 g part). Trust the stated height + the drawing; say so.
 - **Big files**: 0.08–0.1 mm grids give 0.5–1 M triangles (5–30 MB 3MF). Fine for slicers; use
   0.12–0.15 mm for large parts.
 - **Trademarks**: logo replicas are fine for the user's personal use; mention they shouldn't be

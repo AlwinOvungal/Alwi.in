@@ -240,11 +240,14 @@ def write_3mf(path, parts, title='Model', center=True, plate_xy=(128, 128)):
     allb = np.vstack([m.bounds for _, m, _ in parts])
     lo, hi = allb.min(0), allb.max(0)
     shift = np.array([-(lo[0] + hi[0]) / 2, -(lo[1] + hi[1]) / 2, -lo[2]]) if center else np.zeros(3)
+    # Keep the shift on the same 1e-4 mm lattice as the (rounded) vertices: an arbitrary shift can
+    # round two neighbouring vertices to the same printed value -> degenerate faces on reload.
+    shift = np.round(shift, 4)
     mats = ''.join(f'<base name="{n}" displaycolor="#{c}FF"/>' for n, _, c in parts)
     objs, comps = [], []
     for i, (n, m, c) in enumerate(parts):
         oid = i + 2
-        vs = '\n'.join(f'<vertex x="{a:.4f}" y="{b:.4f}" z="{d:.4f}"/>' for a, b, d in m.vertices + shift)
+        vs = '\n'.join(f'<vertex x="{a:.4f}" y="{b:.4f}" z="{d:.4f}"/>' for a, b, d in np.round(m.vertices + shift, 4))
         ts = '\n'.join(f'<triangle v1="{a}" v2="{b}" v3="{d}"/>' for a, b, d in m.faces)
         objs.append(f'<object id="{oid}" name="{n}" type="model" pid="1" pindex="{i}"><mesh><vertices>\n'
                     f'{vs}\n</vertices><triangles>\n{ts}\n</triangles></mesh></object>')
