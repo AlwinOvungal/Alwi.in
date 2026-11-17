@@ -16,6 +16,8 @@ Everything lives in this skill folder:
 | `scripts/sdf3mf.py` | Library: `Grid`, 2D/3D primitives, booleans, `offset_outline`, `pillow_height`/`relief_body`, `mesh_from_field`, `write_3mf`, `verify_3mf`, `report` |
 | `scripts/render_preview.py` | Smooth-shaded PNG preview (front, side, back, 3/4) of STL/3MF parts — always look at it |
 | `scripts/render_closeups.py` | High-res close-ups of chosen regions (joints, edges) for the finishing pass |
+| `scripts/blender_finish.py` | Blender pass: pinned volume-preserving smoothing + decimation (cleaner surface, ~1/3 file size) |
+| `scripts/blender_render.py`, `scripts/blender_sheet.py` | Blender Cycles studio renders (front/side/back/3/4) + labelled 4-view sheet |
 | `examples/star_magnet_lib_demo.py` | Shortest complete example using the library (2-colour magnet + pocket) |
 | `examples/logo_inlay_magnet.py` | Flat logo magnet: backing plate + 5 colour inlays, exact outer size, filleted outline |
 | `examples/traffic_cone_magnet.py` | Upright 3D figure from 3D primitives (round cone, round box), raised stripes as a 2nd colour |
@@ -102,6 +104,25 @@ in true mm. Scale so the stated total height is met *including* the rebuilt feat
 8. **Hand over:** size, parts/colours, orientation, supports, colour-change heights or AMS need,
    hole sizes as built, an honest weight (volume × 1.24 g/cm³ × infill factor; reference
    sheets often overstate it), and that it has not been sliced/printed yet.
+
+## Blender finish and studio renders (optional, on request)
+
+Blender runs headless here as a Python module: `pip install -q bpy==5.2.4` (wheel for Python 3.13,
+~400 MB). Then, from the scratchpad:
+
+```bash
+python3 .../scripts/blender_finish.py MODEL.stl FINISHED.stl HOLE_X HOLE_Y     # ~5 min for 750k tris
+python3 .../scripts/blender_render.py FINISHED.stl renders/ 3DA34A            # ~2 min, 4 views
+python3 -I .../scripts/blender_sheet.py renders/ sheet.png
+```
+
+- `blender_finish.py` pins the bed layers (z < 0.45 mm) and the hole wall (r < 2.25 mm around
+  HOLE_X/HOLE_Y, in model mm) so the flat back, chamfer and hole size don't move; re-check with
+  z-sections and write the 3MF with `write_3mf` + `verify_3mf` afterwards.
+- Renders: matte PLA Principled BSDF, large soft key light, AgX Medium High Contrast,
+  shadow-catcher floor. `blender_sheet.py` drops the denoiser's faint "ghost" alpha (<5 %) on the
+  shadow catcher and softens shadows — without that, phantom shapes appear in the background.
+- Use `shade_smooth_by_angle` (35°), not plain shade smooth, or flat faces show streaks.
 
 ## Standard features
 
