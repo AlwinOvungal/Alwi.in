@@ -91,13 +91,19 @@ STAR_R = STAR_W / 2 / 0.951
 star_top_y = mm_y(rows.min() + y0)
 star_d = star5(X, Y, 0, star_top_y - STAR_R, STAR_R - 1.2, 0.56) - 1.2
 star = star_d <= 0
-H = np.maximum(H, pillow_height(star, g.res, 8.0, radius=2.0, edge_wall=3.6, smooth=0.3))
+H = np.maximum(H, pillow_height(star, g.res, 8.0, radius=2.0, edge_wall=3.6, smooth=0.55))
 inside = inside | star
 
 # ---- 3. hanging loop, true mm --------------------------------------------------------------
 star_top = mm_y(rows.min() + y0)
 LOOP_C = star_top - LOOP_OVERLAP + ring_r
 ring = ring2(X, Y, 0, LOOP_C, HOLE_D / 2, LOOP_WALL)
+neck_bot = star_top - 2.6                     # reaches down into the star's top arm
+neck_top = LOOP_C - HOLE_D / 2 - LOOP_WALL / 2
+neck = polygon(X, Y, [(-2.3, neck_bot), (2.3, neck_bot), (1.9, neck_top), (-1.9, neck_top)])
+hole_d = np.hypot(X, Y - LOOP_C) - HOLE_D / 2
+ring = smin(ring, neck, 1.0)                  # fillet where the loop meets the star
+ring = np.maximum(ring, -hole_d)              # never let the fillet close the hole
 loop_mask = ring <= 0
 H = np.maximum(H, pillow_height(loop_mask, g.res, LOOP_T, radius=LOOP_WALL / 2, edge_wall=1.2, smooth=0.0))
 sil = np.where(Y > mm_y(262), star_d, sil)          # star region: analytic outline
@@ -106,6 +112,8 @@ outline = np.minimum(sil, ring)
 outline = np.maximum(outline, -(np.hypot(X, Y - LOOP_C) - HOLE_D / 2))      # keep the hole open
 
 body = relief_body(H, outline, Z, antialias=0.16, res=g.res, edge_wall=EDGE_WALL)
+CHAMFER = 0.3
+body = np.maximum(body, (outline[..., None] + CHAMFER - Z) / np.sqrt(2))
 m = mesh_from_field(body, g)
 report('Tree', m)
 m.export(OUT.replace('.3mf', '.stl'))

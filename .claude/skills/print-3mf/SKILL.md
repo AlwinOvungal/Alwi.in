@@ -15,6 +15,7 @@ Everything lives in this skill folder:
 |---|---|
 | `scripts/sdf3mf.py` | Library: `Grid`, 2D/3D primitives, booleans, `offset_outline`, `pillow_height`/`relief_body`, `mesh_from_field`, `write_3mf`, `verify_3mf`, `report` |
 | `scripts/render_preview.py` | Smooth-shaded PNG preview (front, side, back, 3/4) of STL/3MF parts — always look at it |
+| `scripts/render_closeups.py` | High-res close-ups of chosen regions (joints, edges) for the finishing pass |
 | `examples/star_magnet_lib_demo.py` | Shortest complete example using the library (2-colour magnet + pocket) |
 | `examples/logo_inlay_magnet.py` | Flat logo magnet: backing plate + 5 colour inlays, exact outer size, filleted outline |
 | `examples/traffic_cone_magnet.py` | Upright 3D figure from 3D primitives (round cone, round box), raised stripes as a 2nd colour |
@@ -83,7 +84,15 @@ in true mm. Scale so the stated total height is met *including* the rebuilt feat
 6. **Look at it:** `python3 scripts/render_preview.py preview.png model.3mf` (`--upright` for
    standing models) and Read the PNG. Compare against the reference view by view; iterate on
    proportions before delivering. Send the 3MF + preview with SendUserFile.
-7. **Hand over:** size, parts/colours, orientation, supports, colour-change heights or AMS need,
+7. **Finishing pass** (when asked for polish, or before calling a model final): render close-ups
+   of joints and edges, then add:
+   - a filleted **neck** where a hanging loop meets the body (`smin(ring, neck_polygon, 1.0)`, then
+     re-cut the hole) — it removes the hard crease and strengthens the weakest point;
+   - a **0.3 mm 45° bed chamfer** on every bottom edge, holes included
+     (`body = max(body, (outline + 0.3 - Z) / sqrt(2))`) against elephant's foot;
+   - extra distance smoothing on any small feature showing pinch lines.
+   Verify with z-sections (footprint inset ≈ 0.3 mm at z≈0, hole back to nominal above 0.3 mm).
+8. **Hand over:** size, parts/colours, orientation, supports, colour-change heights or AMS need,
    hole sizes as built, an honest weight (volume × 1.24 g/cm³ × infill factor; reference
    sheets often overstate it), and that it has not been sliced/printed yet.
 
