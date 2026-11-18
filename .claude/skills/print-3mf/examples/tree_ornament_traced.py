@@ -8,7 +8,7 @@ Flat back on the bed (z=0), no supports. Usage: python3 tree_ornament_traced.py 
 (clay texture is on by default; --smooth gives the plain finish)
 """
 import sys
-sys.path.insert(0, '/home/user/Alwi.in/.claude/skills/print-3mf/scripts')
+import os; sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', 'scripts'))
 from sdf3mf import *
 from PIL import Image
 from scipy.ndimage import binary_fill_holes, label, map_coordinates, distance_transform_edt, gaussian_filter

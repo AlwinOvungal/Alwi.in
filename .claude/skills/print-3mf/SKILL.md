@@ -30,13 +30,18 @@ Everything lives in this skill folder:
 pip install -q numpy scipy scikit-image trimesh pillow
 ```
 
-Write model scripts and outputs to the session scratchpad (or wherever the user asks), not
-into the repository. Start each model script with:
+`SKILL_DIR` below means the folder this SKILL.md is in (the skill's base directory, as shown
+when the skill loads — e.g. `.claude/skills/print-3mf` in a project, or wherever an uploaded
+skill is installed). Write model scripts and outputs to a scratch/output folder, not into the
+skill folder or the user's repository. Start each model script with:
 
 ```python
-import sys; sys.path.insert(0, '/home/user/Alwi.in/.claude/skills/print-3mf/scripts')
+import sys; sys.path.insert(0, 'SKILL_DIR/scripts')   # use the real absolute path
 from sdf3mf import *
 ```
+
+If `pip install` is blocked (no network), check what is already installed — numpy, scipy,
+scikit-image, trimesh and pillow are all required; Blender (`bpy`) is optional.
 
 ## Workflow
 
@@ -105,15 +110,46 @@ in true mm. Scale so the stated total height is met *including* the rebuilt feat
    hole sizes as built, an honest weight (volume × 1.24 g/cm³ × infill factor; reference
    sheets often overstate it), and that it has not been sliced/printed yet.
 
+## What makes a model look right — lessons from a full design iteration
+
+A Christmas-tree ornament went from "doesn't look good" (guessed shapes, flat preview) to "looks
+great" through these steps. Repeat them for every model made from a picture:
+
+1. **Trace, don't guess.** Measure the reference in pixels (colour-mask row widths) and use the
+   flat/back-view silhouette as the outline at true scale. Guessed polygons and circles gave the
+   wrong proportions: tiers that looked like balls, pointed ends, a thin waist.
+2. **Thickness from the side view.** Each layer's depth comes from side-view row widths. Each
+   layer is thickest at its bottom rim and tapers almost linearly toward its top, so it tucks
+   under the layer above.
+3. **One pillow per layer, combined with a hard max.** That gives crisp creases where one layer
+   overlaps the next. Smooth-blending everything gives one lumpy blob.
+4. **Details read as the real object.** Scalloped rims with lobes hanging *down*; convex tips
+   rounded (EDT opening ~0.9 mm); a gentle crown across each layer's width; round columns
+   (x-only profile); chunky analytic stars (`star5(r-k, 0.56) - k`) with a high edge wall so
+   arms don't sink into the layer below.
+5. **Functional parts in true mm.** Holes, loops and magnet pockets at exact sizes, built
+   separately. Then fit the rest so the stated total size is exact.
+6. **Finishing pass.** Loop neck fillet, 0.3 mm bed chamfer, extra smoothing on pinch lines.
+   Check close-ups.
+7. **Blender finish** (when available). Pinned smoothing + decimation; verify watertight, hole
+   size and bed contact afterwards.
+8. **Present it well.** Blender Cycles studio renders, or at least the smooth-shaded preview. A
+   flat preview makes good geometry look worse than it is.
+9. **Loop every iteration.** Render, put it side by side with the reference, name the biggest
+   difference, fix it, repeat. Always `verify_3mf` before sending.
+
+Defaults: flat back on the bed, no supports, PLA, 0.16–0.2 mm layers, 3 walls, 15 % infill.
+State honest size and weight, and flag design-sheet labels that contradict the drawing.
+
 ## Blender finish and studio renders (optional, on request)
 
 Blender runs headless here as a Python module: `pip install -q bpy==5.2.4` (wheel for Python 3.13,
 ~400 MB). Then, from the scratchpad:
 
 ```bash
-python3 .../scripts/blender_finish.py MODEL.stl FINISHED.stl HOLE_X HOLE_Y     # ~5 min for 750k tris
-python3 .../scripts/blender_render.py FINISHED.stl renders/ 3DA34A            # ~2 min, 4 views
-python3 -I .../scripts/blender_sheet.py renders/ sheet.png
+python3 SKILL_DIR/scripts/blender_finish.py MODEL.stl FINISHED.stl HOLE_X HOLE_Y     # ~5 min for 750k tris
+python3 SKILL_DIR/scripts/blender_render.py FINISHED.stl renders/ 3DA34A            # ~2 min, 4 views
+python3 -I SKILL_DIR/scripts/blender_sheet.py renders/ sheet.png
 ```
 
 - `blender_finish.py` pins the bed layers (z < 0.45 mm) and the hole wall (r < 2.25 mm around
